@@ -1,0 +1,44 @@
+{
+  "name": "metergraph-cli",
+  "version": "0.1.0",
+  "description": "Preview Metergraph command line tool with a read-only connection probe",
+  "type": "module",
+  "bin": {
+    "metergraph": "bin/metergraph.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/metergraph.js",
+    "src/*.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:package": "node --test test/package/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "author": "Metergraph",
+  "homepage": "https://www.metergraph.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metergraph/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/metergraph/cli/issues"
+  },
+  "keywords": [
+    "metergraph",
+    "cli",
+    "llm",
+    "cost-tracking"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
