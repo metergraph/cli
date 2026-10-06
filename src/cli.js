@@ -1,6 +1,9 @@
 import { parseArgs } from "./args.js";
+import { runLogin, runLogout } from "./auth-login.js";
 import { runDoctor } from "./doctor.js";
 import {
+  authMessage,
+  authText,
   doctorMessage,
   doctorText,
   envelope,
@@ -58,6 +61,24 @@ async function run(argv, { stdout, stderr }) {
   if (parsed.command === "version") {
     const result = envelope({ command: "version", outcome: "ok", data: versionData() });
     stdout.write(parsed.json ? toJsonLine(result) : `${VERSION}\n`);
+    return result;
+  }
+
+  if (parsed.command === "login" || parsed.command === "logout") {
+    // Human progress goes to stderr, never with --json, so stdout carries
+    // only the final result.
+    const progress = parsed.json ? () => {} : (text) => stderr.write(`${text}\n`);
+    const { outcome, reason, data } =
+      parsed.command === "login" ? await runLogin(parsed, progress) : await runLogout(parsed);
+    const message = authMessage(outcome, reason);
+    const result = envelope({
+      command: parsed.command,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : authText(result, message));
     return result;
   }
 

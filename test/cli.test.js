@@ -39,13 +39,40 @@ test("help works offline in text and JSON form", async () => {
     redirect_rejected: 7,
     conflict: 8,
     filesystem_error: 9,
+    authorization_failed: 10,
+    verification_failed: 11,
+    login_required: 12,
+    revocation_unconfirmed: 13,
   });
   assert.deepEqual(
     result.data.commands.map((command) => command.name),
-    ["doctor", "skill install", "skill update"],
+    ["doctor", "skill install", "skill update", "login", "logout"],
   );
   assert.deepEqual(result.data.skill_clients, ["codex", "claude", "cursor"]);
   assert.deepEqual(result.data.skill_runtimes, ["local", "cloud"]);
+  assert.deepEqual(result.data.login_runtimes, ["local"]);
+  for (const entry of result.data.exit_codes) assert.equal(typeof entry.meaning, "string");
+});
+
+test("login and logout help works offline and states what is not done", async () => {
+  for (const args of [["help", "login"], ["login", "--help"]]) {
+    const run = await runCli(args, { offline: true });
+    assert.equal(run.code, 0);
+    assert.equal(run.stderr, "");
+    assert.match(run.stdout, /metergraph login --runtime local/);
+    assert.match(run.stdout, /agent:metadata/);
+    assert.match(run.stdout, /does not create an application ingest key/);
+    assert.match(run.stdout, /no manual API key is required/);
+    assert.doesNotMatch(run.stdout, /creates no API/);
+    assert.match(run.stdout, /--no-browser/);
+    assert.match(run.stdout, /--reconnect/);
+  }
+  const logout = await runCli(["help", "logout"], { offline: true });
+  assert.equal(logout.code, 0);
+  assert.match(logout.stdout, /metergraph logout/);
+  assert.match(logout.stdout, /code 13/);
+  const json = await runCli(["help", "login", "--json"], { offline: true });
+  assert.equal(parseJsonLine(json.stdout).data.topic, "login");
 });
 
 test("skill help works offline and states what is not done", async () => {

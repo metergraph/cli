@@ -3,6 +3,11 @@ import {
   DEFAULT_TIMEOUT_MS,
   HANDOFF_SKILL_CLIENTS,
   HANDOFF_SKILL_RUNTIMES,
+  HANDOFF_LOGIN_RUNTIMES,
+  LOGIN_DEFAULT_TIMEOUT_MS,
+  LOGIN_MAX_TIMEOUT_MS,
+  LOGIN_MIN_TIMEOUT_MS,
+  LOGIN_RUNTIMES,
   MAX_TIMEOUT_MS,
   MIN_TIMEOUT_MS,
   SKILL_CLIENTS,
@@ -10,19 +15,29 @@ import {
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
 
-const COMMANDS = new Set(["doctor", "help", "skill"]);
-const HELP_TOPICS = new Set(["doctor", "skill"]);
+const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout"]);
+const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
+  login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
+  logout: new Set(["--project", "--config-dir"]),
 };
+// Options that take no value.
+const FLAGS = {
+  login: new Set(["--signup", "--no-browser", "--reconnect"]),
+};
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Parses argv into one of:
 //   { ok: true, command: "help", topic, json }
 //   { ok: true, command: "version", json }
 //   { ok: true, command: "doctor", origin, timeoutMs, json }
 //   { ok: true, command: "skill", action, client, runtime, project, json }
+//   { ok: true, command: "login", runtime, origin, workspace, project,
+//     configDir, timeoutMs, signup, noBrowser, reconnect, json }
+//   { ok: true, command: "logout", project, configDir, json }
 //   { ok: false, command, json, code, message }
 // Error messages are fixed strings. They never contain an argument value,
 // because a mistyped argument can be a credential.
@@ -39,6 +54,7 @@ export function parseArgs(argv) {
   let topic = null;
   let version = false;
   const values = {};
+  const flags = new Set();
 
   const fail = (code, message) => ({
     ok: false,
@@ -71,9 +87,15 @@ export function parseArgs(argv) {
       continue;
     }
 
-    if (command === "doctor" || command === "skill") {
+    if (Object.hasOwn(OPTIONS, command ?? "")) {
       const equals = arg.indexOf("=");
       const name = equals === -1 ? arg : arg.slice(0, equals);
+      if (FLAGS[command]?.has(name)) {
+        if (equals !== -1) return fail("unexpected_value", `${name} does not take a value.`);
+        if (flags.has(name)) return fail("duplicate_option", `${name} may be given only once.`);
+        flags.add(name);
+        continue;
+      }
       if (OPTIONS[command].has(name)) {
         let value;
         if (equals === -1) {
@@ -116,17 +138,15 @@ export function parseArgs(argv) {
     return { ok: true, command: "help", topic, json };
   }
   if (command === "skill") return parseSkill(action, values, json, fail);
-
-  const rawUrl = values["--url"];
-  const origin = rawUrl === undefined ? DEFAULT_ORIGIN : parseOrigin(rawUrl);
-  if (origin === null) {
-    return fail(
-      "invalid_url",
-      "--url must be a bare https origin such as https://metergraph.example.com, " +
-        "or an http origin on localhost, 127.0.0.1 or [::1]. " +
-        "Credentials, paths, queries and fragments are not accepted.",
-    );
+  if (command === "login") return parseLogin(values, flags, json, fail);
+  if (command === "logout") {
+    const paths = parsePaths(values, fail);
+    if (!paths.ok) return paths;
+    return { ok: true, command: "logout", project: paths.project, configDir: paths.configDir, json };
   }
+
+  const origin = parseUrlOption(values);
+  if (origin === null) return fail("invalid_url", INVALID_URL);
 
   const rawTimeout = values["--timeout-ms"];
   const timeoutMs =
@@ -172,9 +192,74 @@ function parseSkill(action, values, json, fail) {
   return { ok: true, command: "skill", action, client, runtime, project: project ?? null, json };
 }
 
-function parseTimeout(raw) {
+const INVALID_URL =
+  "--url must be a bare https origin such as https://metergraph.example.com, " +
+  "or an http origin on localhost, 127.0.0.1 or [::1]. " +
+  "Credentials, paths, queries and fragments are not accepted.";
+
+function parseUrlOption(values) {
+  const raw = values["--url"];
+  return raw === undefined ? DEFAULT_ORIGIN : parseOrigin(raw);
+}
+
+// The runtime is required so a script states where the browser is. Cloud
+// runtimes are accepted here and handed off later, before any request.
+function parseLogin(values, flags, json, fail) {
+  const runtime = values["--runtime"];
+  if (runtime === undefined) return fail("missing_runtime", "--runtime is required. Use local.");
+  if (!LOGIN_RUNTIMES.includes(runtime) && !HANDOFF_LOGIN_RUNTIMES.includes(runtime)) {
+    return fail("invalid_runtime", "--runtime must be local, cloud or cloud-no-shell.");
+  }
+  const origin = parseUrlOption(values);
+  if (origin === null) return fail("invalid_url", INVALID_URL);
+  const rawWorkspace = values["--workspace"];
+  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
+    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs =
+    rawTimeout === undefined
+      ? LOGIN_DEFAULT_TIMEOUT_MS
+      : parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) {
+    return fail(
+      "invalid_timeout",
+      `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`,
+    );
+  }
+  return {
+    ok: true,
+    command: "login",
+    runtime,
+    origin,
+    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    project: paths.project,
+    configDir: paths.configDir,
+    timeoutMs,
+    signup: flags.has("--signup"),
+    noBrowser: flags.has("--no-browser"),
+    reconnect: flags.has("--reconnect"),
+    json,
+  };
+}
+
+function parsePaths(values, fail) {
+  const project = values["--project"];
+  if (project !== undefined && (project === "" || project.includes("\0"))) {
+    return fail("invalid_project", "--project must name an existing directory.");
+  }
+  const configDir = values["--config-dir"];
+  if (configDir !== undefined && (configDir === "" || configDir.includes("\0"))) {
+    return fail("invalid_config_dir", "--config-dir must name a directory path.");
+  }
+  return { ok: true, project: project ?? null, configDir: configDir ?? null };
+}
+
+function parseTimeout(raw, min = MIN_TIMEOUT_MS, max = MAX_TIMEOUT_MS) {
   if (!/^[0-9]{1,6}$/.test(raw)) return null;
   const value = Number(raw);
-  if (value < MIN_TIMEOUT_MS || value > MAX_TIMEOUT_MS) return null;
+  if (value < min || value > max) return null;
   return value;
 }

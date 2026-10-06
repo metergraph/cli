@@ -23,6 +23,13 @@ const EXPECTED_FILES = [
   "bin/metergraph.js",
   "package.json",
   "src/args.js",
+  "src/auth-binding.js",
+  "src/auth-browser.js",
+  "src/auth-callback.js",
+  "src/auth-login.js",
+  "src/auth-oauth.js",
+  "src/auth-session.js",
+  "src/auth-store.js",
   "src/cli.js",
   "src/constants.js",
   "src/doctor.js",
@@ -31,6 +38,7 @@ const EXPECTED_FILES = [
   "src/output.js",
   "src/skill-bundle.js",
   "src/skill.js",
+  "src/transport.js",
 ];
 const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
@@ -200,6 +208,38 @@ test("the installed CLI installs the skill offline into a project with spaces", 
 
   const rerun = check(await run(process.execPath, args, { cwd: workDir }), "packed skill rerun");
   assert.equal(parseJsonLine(rerun.stdout).data.status, "reused");
+});
+
+test("the installed CLI hands a cloud sign in off offline and writes nothing", async () => {
+  const target = path.join(workDir, "login project");
+  const config = path.join(workDir, "login config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const args = [
+    "--import",
+    pathToFileURL(NO_NETWORK).href,
+    bin,
+    "login",
+    "--runtime",
+    "cloud",
+    "--url",
+    "http://127.0.0.1:9",
+    "--project",
+    target,
+    "--config-dir",
+    config,
+    "--json",
+  ];
+  const result = await run(process.execPath, args, { cwd: workDir });
+  assert.equal(result.code, 6);
+  assert.equal(result.stderr, "");
+  const parsed = parseJsonLine(result.stdout);
+  assert.equal(parsed.command, "login");
+  assert.equal(parsed.error.reason, "runtime_not_supported");
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.next_action.kind, "connection_guide");
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });
 
 test("the installed CLI probes a loopback service", async () => {

@@ -1,8 +1,9 @@
 # metergraph-cli
 
-The Metergraph command line tool. This is a **development preview** (version 0.1.0).
+The Metergraph command line tool. This checkout is a **development preview**, version
+`0.2.0-preview.0`, which has not been published.
 
-Install the preview channel with npm or run it directly:
+Install the released preview channel with npm or run it directly:
 
 ```sh
 npx --yes metergraph-cli@next --help
@@ -10,18 +11,31 @@ npx --yes metergraph-cli@next doctor --json
 npm install -g metergraph-cli@next
 ```
 
-The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` when you need
-this exact preview. Authentication and hosted setup are not included yet.
+The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact preview.
 
-This preview does two things:
+**Availability:**
+
+- The published package, `metergraph-cli@0.1.0`, contains only `doctor` and
+  `skill install` / `skill update`. It has no sign in commands.
+- `login` and `logout`, described below, exist only in this checkout. They are an
+  upcoming preview: run them from a checkout or a locally packed tarball (see
+  [Development](#development)). Do not expect them from `npx metergraph-cli` until a
+  release that includes them is announced.
+- They also need a Metergraph service that offers Metadata-only CLI sign in and grant
+  revocation. A service without them is reported as unsupported, and the CLI never
+  falls back to broader access.
+
+This preview does three things:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
   CLI into one coding agent's project skill directory.
+- `login` and `logout` (checkout only) sign a project in to one workspace through your
+  browser with a delegated, Metadata-only grant, and sign it out again.
 
-It does not sign in or connect a workspace, and it does not query workspace
-telemetry or send application data. Sign in, workspace binding and hosted setup commands are planned as separate
-follow-up releases and are not part of this package yet.
+It does not query workspace telemetry, read retained content, call model providers,
+create an application ingest key, or send application data. Hosted setup commands are planned
+as a separate follow-up release.
 
 ## Requirements
 
@@ -41,10 +55,13 @@ metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]
 metergraph help skill [--json]
 metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
 metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph help login [--json]
+metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
+metergraph logout [--project DIR] [--config-dir DIR] [--json]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests.
+requests. `login` and `logout` are not in the published `0.1.0` package.
 
 ### doctor
 
@@ -148,9 +165,101 @@ does not match. It never downloads the skill or runs a remote script. A new skil
 revision ships only in a new CLI release; `skill update` then upgrades projects that
 hold an unchanged earlier revision.
 
+### login and logout (checkout only, unreleased)
+
+`login` binds a project directory to one Metergraph workspace. Your browser does the
+sign in, sign up, invitation and workspace consent on the service's own pages and
+keeps its own session. The CLI receives only a delegated OAuth grant limited to the
+Metadata scope, `agent:metadata`, checks it with the service and saves it privately.
+
+```sh
+metergraph login --runtime local --url https://metergraph.example.com
+metergraph logout
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `--runtime RUNTIME` | required | `local`: the browser runs on this machine. `cloud` and `cloud-no-shell` get a handoff to the [connection guide](https://www.metergraph.dev/docs/guides/agent-access/) with exit code 6. |
+| `--url ORIGIN` | `https://app.metergraph.dev` | Bare origin only, see [Safe origins](#safe-origins). |
+| `--workspace UUID` | none | The workspace you expect. Sign in fails unless the browser grants exactly this one. Without it, the workspace you choose in the browser is used after the service confirms it. |
+| `--project DIR` | current directory | Existing project directory to bind. |
+| `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
+| `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
+| `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. Not with `--json`. |
+| `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
+| `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
+
+What `login` does, in order:
+
+1. Refuses cloud runtimes, SSH sessions, cloud development environments and CI (by the
+   presence of variables such as `SSH_CONNECTION`, `CODESPACES` or `CI`; values are
+   never read into output) before any request, listener or file write.
+2. Reads the project binding. A project bound to another origin or workspace is refused
+   with exit code 8 unless you pass `--reconnect`. A project that is already signed in
+   and still verified is left as it is, with no browser and no new client.
+3. Runs the same checks as `doctor`, then reads the service's OAuth metadata from the
+   same origin. Every endpoint must be a fixed path on that origin, and the service must
+   offer `agent:metadata`, PKCE with `S256`, public clients and revocation.
+4. Registers a public client named `Metergraph CLI` for one loopback redirect,
+   `http://127.0.0.1:PORT/callback` on an ephemeral port, creates a random state and
+   PKCE verifier, and arms the callback listener and its timeout before the browser
+   opens.
+5. Opens the authorization URL with the operating system's launcher (no shell). The
+   listener accepts one `GET` with the exact host, path and state. Other requests get a
+   fixed page and do not end the wait.
+6. Exchanges the code and accepts only a Bearer grant for exactly `agent:metadata` whose
+   claims name this issuer, resource, client and one workspace. The claims are a sanity
+   check; the CLI does not verify token signatures.
+7. Asks the service, with the new token, for `/v1/agent/workspace` and
+   `/v1/agent/capabilities`. The workspace ID, its provenance and the token must agree,
+   the deployment profile must match step 3, the access scopes must be exactly
+   `agent:metadata`, and content, evidence and replay capabilities must be unavailable.
+   Nothing else is read.
+8. Saves the grant in the config directory and writes `.metergraph/project.json`.
+
+Once the token response has been validated and holds a usable refresh token, a grant
+the CLI decides not to keep (a workspace other than the one expected or bound, failed
+verification, cancellation) is sent to the revocation endpoint before the command
+exits. If the grant cannot be saved or the binding cannot be written, the saved grant
+is removed, revocation is requested the same way, and the command exits 9. This is best
+effort: the service may not answer or may not confirm, and the CLI does not retry. A
+token response that fails validation is dropped without a revocation request, because
+the CLI cannot safely use anything in it; a server-side grant may remain active until it
+expires or is revoked from the service.
+
+The config directory is `--config-dir`, else `METERGRAPH_CONFIG_DIR` (an absolute
+path), else `~/.config/metergraph` on Linux and macOS or `AppData\Roaming\Metergraph` in
+your Windows profile. It holds `credentials/SLOT.json`:
+
+- On Linux and macOS the directories must be `0700` and the file `0600`, all owned by
+  you. Existing paths with other permissions, other owners or symbolic links are
+  refused and never changed.
+- On Windows the grant is encrypted with DPAPI for the current user before it is
+  written. File permissions alone are not relied on there.
+
+`.metergraph/project.json` holds the origin, workspace ID, deployment profile and the
+name of the credential slot. It holds no token, user name or absolute path, so it is
+safe to commit. Other files in `.metergraph`, such as the skill receipt, are kept.
+
+Access tokens near expiry are refreshed once, under a lock, and the new refresh token
+is saved before it is used. If a refresh request may have reached the service but its
+result was not saved (a timeout after sending, a dropped connection, a server error or
+an unusable answer), the old refresh token is never sent again: the next use asks you
+to run `login` again. A revoked grant or lost workspace access fails closed with exit
+code 12.
+
+`logout` asks the service to revoke the project's grant through its revocation
+endpoint, then removes the saved grant and `.metergraph/project.json`. Other credential
+slots and project files are kept. A `200` from the service means it accepted the
+revocation request. If it does not answer `200`, local sign out still happens and the
+command exits 13 with `revocation: "unconfirmed"`. A project that is not signed in
+exits 0 without any request.
+
 ## Exit codes
 
-Exit codes are stable. Changing one is a breaking change.
+Exit codes are stable. Changing one is a breaking change. Codes 10 to 13 exist only in
+this checkout.
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
@@ -160,10 +269,14 @@ Exit codes are stable. Changing one is a breaking change.
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |
 | 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. |
 | 5 | `unhealthy` | The service answered but reported that it is not healthy, or answered with a server error. |
-| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files. Nothing was written. |
+| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment. Nothing was written. |
 | 7 | `redirect_rejected` | The service answered with a redirect. Redirects are never followed. |
-| 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update. Nothing was changed. |
-| 9 | `filesystem_error` | Project files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
+| 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update, or the project is bound to a different origin or workspace. Nothing was changed. |
+| 9 | `filesystem_error` | Project or credential files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
+| 10 | `authorization_failed` | Browser authorization did not finish: it was denied, cancelled, timed out or returned an invalid callback. Nothing was saved. |
+| 11 | `verification_failed` | The service issued a grant that does not match the requested origin, workspace, client, resource or Metadata scope. Nothing was saved. |
+| 12 | `login_required` | No usable sign in for this project: none was saved, it expired, was revoked, lost access or could not be refreshed safely. Run login again. |
+| 13 | `revocation_unconfirmed` | Local credentials were removed, but the service did not confirm that the grant was revoked. |
 
 ## JSON output
 
@@ -247,7 +360,54 @@ A successful `skill install`:
   `receipt_invalid`, `locked`, `invalid_project`, `client_not_supported`,
   `write_failed` or `bundled_skill_invalid`.
 
+A successful `login` (checkout only):
+
+```json
+{
+  "schema_version": 1,
+  "command": "login",
+  "ok": true,
+  "outcome": "ok",
+  "exit_code": 0,
+  "data": {
+    "origin": "https://metergraph.example.com",
+    "runtime": "local",
+    "deployment_profile": "managed",
+    "workspace": { "id": "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01" },
+    "scopes": ["agent:metadata"],
+    "authenticated": true,
+    "configured": true,
+    "status": "signed_in",
+    "binding": ".metergraph/project.json",
+    "credential_protection": "owner_only_file",
+    "previous_grant_revocation": null,
+    "next_action": {
+      "kind": "connected",
+      "message": "This project is signed in with Metadata access. Run \"metergraph logout\" to sign out."
+    }
+  },
+  "error": null
+}
+```
+
+- `status` is `signed_in`, `reused` (already signed in and verified, nothing changed)
+  or `reconnected` (a new grant replaced the previous one; `previous_grant_revocation`
+  is then `accepted`, `unconfirmed` or `not_attempted`).
+- `credential_protection` is `owner_only_file` or `dpapi`.
+- On failure `authenticated` and `configured` are `false`, `scopes` is empty, and
+  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect`,
+  `run_in_terminal` or `no_browser`.
+- The schema version `1` is the version of this CLI's own JSON output. It is unrelated
+  to the service's agent access contract version, `metergraph.agent-access/v1`.
+- Tokens, the authorization code, the PKCE verifier, user names, email addresses,
+  workspace names, absolute paths and server text are never printed.
+
+`logout` prints `local_credentials` (`removed` or `none`), `binding` (`removed`,
+`kept` or `none`) and `revocation` (`accepted`, `unconfirmed` or `not_attempted`).
+
 Without `--json`, results are printed as text on stdout and usage errors go to stderr.
+`login` prints progress lines, and with `--no-browser` the authorization URL, on
+stderr.
 
 ## Safe origins
 
@@ -259,7 +419,7 @@ Without `--json`, results are printed as text on stdout and usage errors go to s
 Usernames, passwords, paths, queries and fragments are rejected before any request is
 made. Invalid values and unknown arguments are not printed back, because a mistyped
 argument can contain a credential. An accepted origin is printed in the output and sent
-to the network, so do not put secrets in a hostname. See [SECURITY.md](SECURITY.md).
+to the network, so do not put secrets in a hostname. See [Security](#security).
 
 ## Deployment profiles
 
@@ -287,6 +447,20 @@ CLI never assumes such a server is hosted.
 - It does not claim a client has loaded the skill. `discovery` stays `pending`.
 - It never prints file contents, absolute paths or raw error text.
 
+## What login does not do
+
+- It never asks for Debug (`agent:read`) or Replay (`agent:replay`) access, and never
+  falls back to them when the service does not offer `agent:metadata`.
+- It never copies browser cookies or the browser's sign in.
+- It does not create an application ingest key, and no manual API key is required. The
+  service records the grant as an OAuth connection on its own side; that connection
+  can only use `agent:metadata`, is separate from any API or ingest key you manage, and
+  is what `logout` asks the service to revoke.
+- It reads no telemetry, retained content or traces, and makes no model provider calls.
+- It sends the grant only to the origin it came from, follows no redirects and reads
+  bounded responses within fixed time limits.
+- It accepts no credential on the command line, in the environment or on stdin.
+
 ## Development
 
 ```sh
@@ -295,13 +469,19 @@ npm run test:package      # npm pack into a temporary directory, clean install, 
 node bin/metergraph.js --help
 node bin/metergraph.js doctor --url http://127.0.0.1:8080 --json
 node bin/metergraph.js skill install --client claude --runtime local --project /path/to/project --json
+node bin/metergraph.js login --runtime local --url http://127.0.0.1:8080 --project /path/to/project
 ```
+
+The sign in tests run against a synthetic loopback service and a test-only browser
+stand-in loaded with `--import`. They prove the protocol and file handling, not the
+real service, a real browser or real workspace consent. The Windows DPAPI round trip
+runs only on the Windows CI runner.
 
 To try a packed artifact without publishing:
 
 ```sh
 npm pack --pack-destination "$(mktemp -d)"
-npx --yes --package=/path/to/metergraph-cli-0.1.0.tgz -- metergraph --version
+npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.0.tgz -- metergraph --version
 ```
 
 Do not commit tarballs or other generated files.
@@ -310,8 +490,10 @@ Do not commit tarballs or other generated files.
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-The first preview uses the `next` npm tag. Subsequent releases must pass the
-checks below before publication.
+The first preview uses the `next` npm tag. `0.1.0` is the only published version.
+This checkout's `0.2.0-preview.0` is not published and must not be published until
+the service side of sign in is released. Subsequent releases must pass the checks
+below before publication.
 
 Releases are manual. The `Release CLI` workflow (`.github/workflows/release.yml`) runs
 only when a maintainer starts it from `main`. It does not run on tags, pushes or a
@@ -404,7 +586,13 @@ Releases from the workflow should show a provenance attestation that names
 
 ## Security
 
-See [SECURITY.md](SECURITY.md).
+Report security issues privately through
+[GitHub private vulnerability reporting](https://github.com/metergraph/cli/security/advisories/new)
+for `metergraph/cli`. Do not open a public issue, and do not include real credentials,
+tokens or customer data in a report. The security policy and the CLI's security
+properties are in `SECURITY.md` in the
+[source repository](https://github.com/metergraph/cli); it is not shipped in the npm
+package.
 
 ## License
 

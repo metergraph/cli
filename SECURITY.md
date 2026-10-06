@@ -2,8 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately through this repository's GitHub
-**Security** tab ("Report a vulnerability"). Do not open a public issue, and do not
+Please report security issues privately through
+[GitHub private vulnerability reporting](https://github.com/metergraph/cli/security/advisories/new)
+(the repository's **Security** tab, "Report a vulnerability"). Do not open a public issue, and do not
 include real credentials, tokens or customer data in a report.
 
 ## Supported versions
@@ -12,12 +13,16 @@ include real credentials, tokens or customer data in a report.
 
 ## Security properties of the CLI
 
-The current preview holds no credentials of its own and is designed to limit what it
-reads, writes, sends and prints. These are the boundaries it is designed to keep:
+The published `0.1.0` package holds no credentials of its own. This checkout
+(`0.2.0-preview.0`, unpublished) adds `login` and `logout`, which hold one delegated,
+Metadata-only grant per signed in project; see [Sign in](#sign-in-checkout-only). The
+CLI is designed to limit what it reads, writes, sends and prints. These are the
+boundaries it is designed to keep:
 
-- **No credential stores.** It reads no credentials from environment variables,
-  configuration files, keychains, cookies or arguments, and sends no `Authorization` or
-  `Cookie` header.
+- **No credentials for doctor and skill.** They read no credentials from environment
+  variables, configuration files, keychains, cookies or arguments, and send no
+  `Authorization` or `Cookie` header. No command ever sends a `Cookie` header or reads
+  a credential from arguments, the environment or stdin.
 - **Fixed requests.** `doctor` makes only unauthenticated `GET` requests to `/healthz`,
   `/v1/deployment` and `/v1/agent/capabilities` on the origin you choose.
 - **Origin validation.** `--url` must be a bare `https` origin, or an `http` origin on
@@ -60,6 +65,68 @@ They are designed to keep these boundaries:
 A person or process that can already write to the project can still change files
 between the installer's checks and its writes. The installer re-checks every target
 right before replacing it, which narrows but does not remove that window.
+
+### Sign in (checkout only)
+
+`login` and `logout` are not in any published package yet. They are designed to keep
+these boundaries:
+
+- **Delegated, Metadata-only grant.** The browser keeps the person's own sign in. The
+  CLI requests exactly `agent:metadata` and refuses a grant with any other scope. It
+  never requests Debug or Replay access and never falls back to them. It copies no
+  browser cookies and does not create an application ingest key; no manual API key is
+  required. The service records the grant as an OAuth connection on its own side,
+  limited to `agent:metadata` and separate from any API or ingest key you manage.
+- **One origin, fixed paths.** Every request goes to the origin you chose, on fixed
+  paths. OAuth metadata that names any other origin or path is refused, redirects are
+  not followed, and every response is size and time bounded.
+- **Public client with PKCE.** Each sign in registers a public client (no client
+  secret) for one loopback redirect on `127.0.0.1` and an ephemeral port, and uses a
+  random 256 bit state and an `S256` PKCE challenge.
+- **Hardened callback.** The listener is armed before the browser opens. It accepts one
+  `GET` on the exact host, path and state, refuses duplicates and oversized requests,
+  answers with static pages that reflect nothing, and logs nothing. It closes on
+  success, failure, timeout and Ctrl+C.
+- **Server-verified context.** Before anything is saved, the new token is used to read
+  the workspace and capability documents. Workspace, token and expected workspace
+  must agree, the deployment profile must match the preflight, and content, evidence
+  and replay access must be unavailable. Token claims are checked as a sanity check
+  only; the CLI does not verify signatures, and the service's answers are
+  authoritative.
+- **Best-effort revocation of unkept grants.** Once a token response is validated and
+  holds a usable refresh token, a grant the CLI decides not to keep is sent to the
+  revocation endpoint. The service may not answer or confirm, and the CLI does not
+  retry, so this is not a guarantee. A token response that fails validation is
+  dropped without a revocation request; a server-side grant may remain active until it expires
+  or is revoked from the service.
+- **Private storage.** The grant is saved in a per-user config directory. On Linux and
+  macOS, directories must be `0700` and files `0600`, owned by the current user;
+  unsafe permissions, other owners, symbolic links and non-regular files are refused
+  and never changed. On Windows, the grant is encrypted with DPAPI for the current user
+  by a fixed PowerShell script that receives data on stdin and returns it on stdout;
+  nothing secret is on a command line. Files are written to an exclusive temporary file
+  and renamed into place.
+- **Secret-free binding.** `.metergraph/project.json` holds the origin, workspace ID,
+  deployment profile and an opaque slot name. A project bound to one origin or
+  workspace is never switched without `--reconnect`.
+- **Safe refresh.** A refresh runs once under an exclusive lock and is marked pending
+  on disk before the refresh token is sent. If the outcome is not known and saved, the
+  old refresh token is never sent again and the user must sign in again. Revoked
+  grants and lost workspace access fail closed.
+- **Honest sign out.** `logout` asks the service to revoke the grant, then removes the
+  local grant and binding. It reports separately whether the service accepted the
+  revocation request; a `200` is not proof that every remote session ended.
+- **Remote and cloud sessions.** SSH sessions, cloud development environments, CI and
+  cloud runtimes get a handoff before any listener, request or file write. Only the
+  presence of the detecting variables is checked; their values are never printed.
+- **Redacted output.** Tokens, the authorization code, the PKCE verifier, workspace
+  names, user names, email addresses, absolute paths and server text are never
+  printed. `--json` prints one line on stdout and nothing on stderr.
+
+Limits: anyone who can run code as your user can read or use the saved grant, as with
+any per-user credential file. The `0700`/`0600` fallback on Linux and macOS is not an
+operating system keychain. A lock or binding file left by a killed process stays until
+you delete it, rather than being taken over.
 
 ### What remains visible
 

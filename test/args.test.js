@@ -87,9 +87,89 @@ test("rejects bad skill input with fixed messages that never contain the input",
   }
 });
 
+test("parses login and logout with explicit runtime, paths and flags", () => {
+  const workspace = "0B5C7C1E-1A2B-4C3D-8E4F-5A6B7C8D9E01";
+  const parsed = parseArgs([
+    "login",
+    "--runtime",
+    "local",
+    "--url=http://127.0.0.1:4000/",
+    "--workspace",
+    workspace,
+    "--project",
+    "my app",
+    "--config-dir",
+    "my config",
+    "--timeout-ms",
+    "60000",
+    "--no-browser",
+    "--reconnect",
+  ]);
+  assert.deepEqual(parsed, {
+    ok: true,
+    command: "login",
+    runtime: "local",
+    origin: "http://127.0.0.1:4000",
+    workspace: workspace.toLowerCase(),
+    project: "my app",
+    configDir: "my config",
+    timeoutMs: 60000,
+    signup: false,
+    noBrowser: true,
+    reconnect: true,
+    json: false,
+  });
+  const defaults = parseArgs(["--json", "login", "--runtime", "cloud", "--signup"]);
+  assert.equal(defaults.ok, true);
+  assert.equal(defaults.origin, "https://app.metergraph.dev");
+  assert.equal(defaults.workspace, null);
+  assert.equal(defaults.timeoutMs, 300000);
+  assert.equal(defaults.signup, true);
+  assert.equal(defaults.json, true);
+  assert.deepEqual(parseArgs(["logout", "--config-dir=dir", "--json"]), {
+    ok: true,
+    command: "logout",
+    project: null,
+    configDir: "dir",
+    json: true,
+  });
+  assert.equal(parseArgs(["help", "login"]).topic, "login");
+  assert.equal(parseArgs(["logout", "--help"]).topic, "logout");
+});
+
+test("rejects bad login and logout input without echoing it", () => {
+  const cases = [
+    [["login"], "missing_runtime"],
+    [["login", "--runtime", "sk-fake-2222222222222222"], "invalid_runtime"],
+    [["login", "--runtime", "local", "--url", "https://user:hunter2@example.com"], "invalid_url"],
+    [["login", "--runtime", "local", "--workspace", "hunter2-not-a-uuid"], "invalid_workspace"],
+    [["login", "--runtime", "local", "--timeout-ms", "500"], "invalid_timeout"],
+    [["login", "--runtime", "local", "--timeout-ms", "900001"], "invalid_timeout"],
+    [["login", "--runtime", "local", "--config-dir="], "invalid_config_dir"],
+    [["login", "--runtime", "local", "--project="], "invalid_project"],
+    [["login", "--runtime", "local", "--no-browser=yes"], "unexpected_value"],
+    [["login", "--runtime", "local", "--reconnect", "--reconnect"], "duplicate_option"],
+    [["login", "--runtime", "local", "--token", "hunter2"], "unknown_argument"],
+    [["login", "--runtime", "local", "--client", "codex"], "unknown_argument"],
+    [["logout", "--url", "https://example.com"], "unknown_argument"],
+    [["logout", "--reconnect"], "unknown_argument"],
+    [["logout", "--config-dir"], "missing_value"],
+  ];
+  const fixedWords = new Set(["login", "logout", "--runtime", "local", "--url", "--workspace", "--timeout-ms"]);
+  for (const [argv, code] of cases) {
+    const parsed = parseArgs(argv);
+    assert.equal(parsed.ok, false, code);
+    assert.equal(parsed.code, code);
+    for (const arg of argv) {
+      if (fixedWords.has(arg) || arg.startsWith("--") || arg.length < 4) continue;
+      assert.ok(!parsed.message.includes(arg), "error message echoes an argument value");
+    }
+  }
+});
+
 test("rejects bad input with fixed messages that never contain the input", () => {
   const cases = [
-    [["login"], "unknown_command"],
+    [["status"], "unknown_command"],
     [["sk-fake-2222222222222222"], "unknown_command"],
     [["doctor", "--token", "hunter2"], "unknown_argument"],
     [["doctor", "--url=https://user:hunter2@example.com"], "invalid_url"],
