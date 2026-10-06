@@ -1,0 +1,235 @@
+# Manual release of the metergraph-cli npm package.
+#
+# There is deliberately no tag, push or schedule trigger. A maintainer starts
+# this workflow by hand from main. commit_sha must equal the commit main
+# pointed to when the run started (GITHUB_SHA), because npm provenance records
+# that event commit as the source revision. Both jobs check out exactly that
+# commit. The validate job always runs and produces a checksummed tarball. The
+# publish job runs only when "publish" is true, waits for approval on the
+# protected "npm-release" environment, and refuses to run until a maintainer
+# sets the repository variable METERGRAPH_CLI_PUBLISH_ENABLED to "true" after
+# npm trusted publishing is configured. See "Releasing" in README.md.
+
+name: Release CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact version to release. Must equal package.json version."
+        required: true
+        type: string
+      commit_sha:
+        description: "Full 40 character SHA of the current head of main. Must equal the commit this run starts from."
+        required: true
+        type: string
+      dist_tag:
+        description: "npm dist-tag for the release."
+        required: true
+        type: choice
+        default: next
+        options: [next, latest]
+      publish:
+        description: "Publish to npm after validation. Leave false for a dry run."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Start this workflow from main."
+            exit 1
+          fi
+          if ! printf '%s' "$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::commit_sha must be a full lowercase 40 character SHA."
+            exit 1
+          fi
+          # npm provenance names GITHUB_SHA as the source revision, so only
+          # that exact commit may be released by this run.
+          if [ "$COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::commit_sha must equal the main commit this run started from ($GITHUB_SHA). Start a new run if main has moved."
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version must be a semantic version such as 0.1.0."
+            exit 1
+          fi
+
+      - name: Check out the exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Check commit, version and registry state
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$COMMIT_SHA" ]; then
+            echo "::error::Checked out commit does not match commit_sha."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+            echo "::error::commit_sha is not on main."
+            exit 1
+          fi
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$PACKAGE_NAME" != "metergraph-cli" ]; then
+            echo "::error::Unexpected package name."
+            exit 1
+          fi
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "::error::package.json version does not match the requested version."
+            exit 1
+          fi
+          # Fail closed: only a 404 from the registry means the version is
+          # free. Any other status, or a network failure (000), stops the run.
+          # The response body and curl error text are discarded.
+          STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --proto '=https' --max-time 30 \
+            "https://registry.npmjs.org/metergraph-cli/$VERSION" || true)"
+          case "$STATUS" in
+            404) echo "metergraph-cli@$VERSION is not on npm." ;;
+            200) echo "::error::This version already exists on npm."; exit 1 ;;
+            *) echo "::error::Could not confirm that this version is unpublished (registry status $STATUS)."; exit 1 ;;
+          esac
+
+      - name: Unit and subprocess tests
+        run: npm test
+
+      - name: Packed install smoke test
+        run: npm run test:package
+
+      - name: Pack release artifact
+        id: pack
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/release"
+          TARBALL="metergraph-cli-$VERSION.tgz"
+          test -f "$RUNNER_TEMP/release/$TARBALL"
+          SHA256="$(sha256sum "$RUNNER_TEMP/release/$TARBALL" | cut -d' ' -f1)"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Packed $TARBALL sha256 $SHA256 from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metergraph-cli-release
+          path: ${{ runner.temp }}/release/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish to npm
+    needs: validate
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require explicit publish enablement
+        env:
+          PUBLISH_ENABLED: ${{ vars.METERGRAPH_CLI_PUBLISH_ENABLED }}
+        run: |
+          if [ "$PUBLISH_ENABLED" != "true" ]; then
+            echo "::error::Publishing is not enabled for this repository. See Releasing in README.md."
+            exit 1
+          fi
+
+      - name: Check out the exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Check commit and version
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$COMMIT_SHA" != "$GITHUB_SHA" ] || [ "$HEAD_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::Checked out commit, commit_sha and the workflow commit must be identical."
+            exit 1
+          fi
+          if [ "$(node -p "require('./package.json').version")" != "$VERSION" ]; then
+            echo "::error::package.json version does not match the requested version."
+            exit 1
+          fi
+
+      - name: Require npm with trusted publishing support
+        run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error("npm 11.5.1 or newer is required for trusted publishing."); process.exit(1); }
+          ' "$(npm --version)"
+
+      - name: Download release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: metergraph-cli-release
+          path: ${{ runner.temp }}/release
+
+      - name: Verify artifact checksum
+        env:
+          TARBALL: ${{ needs.validate.outputs.tarball }}
+          EXPECTED_SHA256: ${{ needs.validate.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          ACTUAL="$(sha256sum "$RUNNER_TEMP/release/$TARBALL" | cut -d' ' -f1)"
+          if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Artifact checksum does not match the validated tarball."
+            exit 1
+          fi
+
+      - name: Publish with provenance
+        env:
+          TARBALL: ${{ needs.validate.outputs.tarball }}
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: npm publish "$RUNNER_TEMP/release/$TARBALL" --access public --provenance --ignore-scripts --tag "$DIST_TAG"
