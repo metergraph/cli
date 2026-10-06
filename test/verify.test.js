@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout as wait } from "node:timers/promises";
 import { runVerify } from "../src/verify.js";
 import { openTrace } from "../src/trace-open.js";
 import { traceReceipt } from "../src/trace-contract.js";
@@ -69,7 +70,16 @@ test("one total deadline bounds a hanging response and releases signal listeners
 test("deadline covers session and credential lock waits before any read", async () => {
   let read = false;
   const result = await runVerify(options({ timeoutMs: 100 }), {
-    session: ({ cancel }) => new Promise((resolve) => cancel.addEventListener("abort", () => resolve({ ok: false, outcome: "authorization_failed", reason: "cancelled" }), { once: true })),
+    session: async ({ cancel }) => {
+      // Simulate the real lock's referenced timer. AbortSignal.timeout alone
+      // does not keep Node's event loop alive while a fake session waits.
+      try { await wait(10000, null, { signal: cancel }); }
+      catch (error) {
+        assert.equal(error.name, "AbortError");
+        return { ok: false, outcome: "authorization_failed", reason: "cancelled" };
+      }
+      assert.fail("the command deadline must interrupt the lock wait");
+    },
     send: async () => { read = true; },
   });
   assert.equal(result.reason, "verification_timeout"); assert.equal(read, false);
