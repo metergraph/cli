@@ -1,0 +1,37 @@
+name: CLI bug report
+description: Report a reproducible CLI problem using synthetic data
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Remove tokens, local paths, customer details, and private URLs from output. Report security issues privately through the Security tab."
+  - type: input
+    id: version
+    attributes:
+      label: CLI and Node versions
+      placeholder: "metergraph version, Node version"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the command with synthetic arguments and redacted output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
