@@ -92,7 +92,7 @@ export function get(url, { signal, readBody }) {
   });
 }
 
-function classifyError(error, signal) {
+export function classifyError(error, signal) {
   if (signal?.aborted) return "timeout";
   const code = typeof error?.code === "string" ? error.code : "";
   if (DNS_ERRORS.has(code)) return "dns_lookup_failed";

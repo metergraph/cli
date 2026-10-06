@@ -2,11 +2,12 @@
 // project and runs the installed CLI. Nothing is written inside the checkout.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { healthyRoutes, parseJsonLine, startServer } from "../helpers.js";
 
@@ -17,16 +18,33 @@ const isWindows = process.platform === "win32";
 const EXPECTED_FILES = [
   "LICENSE",
   "README.md",
+  "assets/skill/SKILL.md",
+  "assets/skill/manifest.json",
   "bin/metergraph.js",
   "package.json",
   "src/args.js",
+  "src/auth-binding.js",
+  "src/auth-browser.js",
+  "src/auth-callback.js",
+  "src/auth-login.js",
+  "src/auth-oauth.js",
+  "src/auth-session.js",
+  "src/auth-store.js",
   "src/cli.js",
   "src/constants.js",
   "src/doctor.js",
   "src/http.js",
   "src/origin.js",
   "src/output.js",
+  "src/read-contract.js",
+  "src/read-output.js",
+  "src/read.js",
+  "src/skill-bundle.js",
+  "src/skill.js",
+  "src/transport.js",
 ];
+const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
+const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;
 let tarball;
@@ -151,6 +169,110 @@ test("npm exec runs the packed artifact from an empty directory", async () => {
   const parsed = parseJsonLine(result.stdout);
   assert.equal(parsed.command, "help");
   assert.equal(parsed.ok, true);
+});
+
+test("the packed skill asset is byte-identical to the pinned source", () => {
+  const assetDir = path.join(projectDir, "node_modules", "metergraph-cli", "assets", "skill");
+  const skill = readFileSync(path.join(assetDir, "SKILL.md"));
+  const manifest = JSON.parse(readFileSync(path.join(assetDir, "manifest.json"), "utf8"));
+  assert.equal(createHash("sha256").update(skill).digest("hex"), SKILL_SHA256);
+  assert.equal(manifest.sha256, SKILL_SHA256);
+  assert.equal(manifest.size, skill.length);
+  assert.deepEqual(skill, readFileSync(path.join(PACKAGE_ROOT, "assets", "skill", "SKILL.md")));
+});
+
+test("the installed CLI installs the skill offline into a project with spaces", async () => {
+  const target = path.join(workDir, "skill project");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const args = [
+    "--import",
+    pathToFileURL(NO_NETWORK).href,
+    bin,
+    "skill",
+    "install",
+    "--client",
+    "claude",
+    "--runtime",
+    "local",
+    "--project",
+    target,
+    "--json",
+  ];
+  const result = check(await run(process.execPath, args, { cwd: workDir }), "packed skill install");
+  const parsed = parseJsonLine(result.stdout);
+  assert.equal(parsed.data.status, "installed");
+  assert.equal(parsed.data.discovery, "pending");
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.source.sha256, SKILL_SHA256);
+  const installed = readFileSync(path.join(target, ".claude", "skills", "metergraph", "SKILL.md"));
+  assert.equal(createHash("sha256").update(installed).digest("hex"), SKILL_SHA256);
+  assert.ok(existsSync(path.join(target, ".metergraph", "skill-installations.json")));
+
+  const rerun = check(await run(process.execPath, args, { cwd: workDir }), "packed skill rerun");
+  assert.equal(parseJsonLine(rerun.stdout).data.status, "reused");
+});
+
+test("the installed CLI hands a cloud sign in off offline and writes nothing", async () => {
+  const target = path.join(workDir, "login project");
+  const config = path.join(workDir, "login config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const args = [
+    "--import",
+    pathToFileURL(NO_NETWORK).href,
+    bin,
+    "login",
+    "--runtime",
+    "cloud",
+    "--url",
+    "http://127.0.0.1:9",
+    "--project",
+    target,
+    "--config-dir",
+    config,
+    "--json",
+  ];
+  const result = await run(process.execPath, args, { cwd: workDir });
+  assert.equal(result.code, 6);
+  assert.equal(result.stderr, "");
+  const parsed = parseJsonLine(result.stdout);
+  assert.equal(parsed.command, "login");
+  assert.equal(parsed.error.reason, "runtime_not_supported");
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.next_action.kind, "connection_guide");
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the installed CLI reports read commands honestly offline without a sign in", async () => {
+  const target = path.join(workDir, "read project");
+  const config = path.join(workDir, "read config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const offline = ["--import", pathToFileURL(NO_NETWORK).href, bin];
+
+  const status = await run(
+    process.execPath,
+    [...offline, "status", "--project", target, "--config-dir", config, "--json"],
+    { cwd: workDir },
+  );
+  assert.equal(status.code, 12);
+  assert.equal(status.stderr, "");
+  const parsed = parseJsonLine(status.stdout);
+  assert.equal(parsed.command, "status");
+  assert.equal(parsed.error.reason, "not_signed_in");
+  assert.equal(parsed.data.configured, false);
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.application_traffic_verified, false);
+
+  const environment = await run(process.execPath, [...offline, "usage", "--environment", "production", "--json"], {
+    cwd: workDir,
+  });
+  assert.equal(environment.code, 6);
+  assert.equal(parseJsonLine(environment.stdout).error.reason, "environment_selector_unsupported");
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });
 
 test("the installed CLI probes a loopback service", async () => {
