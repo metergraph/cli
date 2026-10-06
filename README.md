@@ -2,9 +2,16 @@
 
 The Metergraph command line tool. This is a **development preview** (version 0.1.0).
 
-**Availability:** this package has not been published to npm yet. `npx metergraph-cli`
-will not work until a release is announced. Until then, run it from a checkout or from
-a locally packed tarball (see [Development](#development)).
+Install the preview channel with npm or run it directly:
+
+```sh
+npx --yes metergraph-cli@next --help
+npx --yes metergraph-cli@next doctor --json
+npm install -g metergraph-cli@next
+```
+
+The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` when you need
+this exact preview. Authentication and hosted setup are not included yet.
 
 This preview does two things:
 
@@ -303,8 +310,8 @@ Do not commit tarballs or other generated files.
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-No version has been published to npm yet, and no release has been validated from the
-registry.
+The first preview uses the `next` npm tag. Subsequent releases must pass the
+checks below before publication.
 
 Releases are manual. The `Release CLI` workflow (`.github/workflows/release.yml`) runs
 only when a maintainer starts it from `main`. It does not run on tags, pushes or a
@@ -384,7 +391,6 @@ Until all of these are done, leave `publish` false.
 
 ### After a release
 
-No release has happened yet, so the published-artifact check below has never run.
 After each release, confirm from a clean machine, replacing `VERSION`:
 
 ```sh
