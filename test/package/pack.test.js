@@ -41,7 +41,10 @@ const EXPECTED_FILES = [
   "src/read.js",
   "src/skill-bundle.js",
   "src/skill.js",
+  "src/trace-contract.js",
+  "src/trace-open.js",
   "src/transport.js",
+  "src/verify.js",
 ];
 const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
