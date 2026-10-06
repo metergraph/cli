@@ -32,6 +32,8 @@ const EXPECTED_FILES = [
   "src/auth-store.js",
   "src/cli.js",
   "src/constants.js",
+  "src/deployment-credential.js",
+  "src/deployment-route.js",
   "src/doctor.js",
   "src/http.js",
   "src/origin.js",

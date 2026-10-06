@@ -1,0 +1,23 @@
+{
+  "fixture": "Synthetic GET /v1/agent/capabilities body for a Metadata-only grant. Tests set both deployment profile fields.",
+  "body": {
+    "schema_version": "metergraph.agent-access/v1",
+    "provenance": {
+      "workspace_id": "00000000-0000-4000-8000-00000000000a",
+      "deployment_profile": "local",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "source": "agent_access"
+    },
+    "deployment_profile": "local",
+    "deployment_capabilities": ["agent_api", "telemetry"],
+    "agent": {
+      "workspace_context": { "available": true, "content": false, "mutates": false, "external_calls": false, "privacy_class": "metadata", "required_scope": "agent:metadata", "schema": "agent-access/workspace-context" },
+      "capability_discovery": { "available": true, "content": false, "mutates": false, "external_calls": false, "privacy_class": "metadata", "required_scope": "agent:metadata", "schema": "agent-access/capabilities" },
+      "usage": { "available": true, "content": false, "mutates": false, "external_calls": false, "privacy_class": "metadata", "required_scope": "agent:metadata", "schema": "agent-access/usage" },
+      "trace_content": { "available": false, "content": true, "mutates": false, "external_calls": false, "privacy_class": "content", "required_scope": "agent:read", "schema": "trace-debug/trace" },
+      "trace_replay": { "available": false, "content": false, "mutates": false, "external_calls": true, "privacy_class": "replay", "required_scope": "agent:replay", "schema": "trace-debug/replay" }
+    },
+    "contracts": { "agent_access": "metergraph.agent-access/v1" },
+    "bounds": { "max_days": 90, "max_rows": 200, "max_response_bytes": 5242880, "content_included_by_default": false }
+  }
+}
