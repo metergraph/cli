@@ -4,10 +4,13 @@ import {
   DEFAULT_TIMEOUT_MS,
   EXIT_CODE_MEANINGS,
   EXIT_CODES,
+  HANDOFF_SKILL_CLIENTS,
   MAX_TIMEOUT_MS,
   MIN_TIMEOUT_MS,
   PACKAGE_NAME,
   SCHEMA_VERSION,
+  SKILL_CLIENTS,
+  SKILL_RUNTIMES,
   SUPPORTED_PROFILES,
   VERSION,
 } from "./constants.js";
@@ -48,6 +51,26 @@ const DOCTOR_OPTIONS = [
   { name: "--json", value: null, summary: "Print one JSON line on stdout." },
 ];
 
+const SKILL_OPTIONS = [
+  {
+    name: "--client",
+    value: "CLIENT",
+    summary: "Required. codex (.agents/skills), claude (.claude/skills) or cursor (.cursor/skills).",
+  },
+  {
+    name: "--runtime",
+    value: "RUNTIME",
+    summary: "Required. local or cloud: where the client runs. Recorded, not detected.",
+  },
+  { name: "--project", value: "DIR", summary: "Existing project directory. Default: the current directory." },
+  { name: "--json", value: null, summary: "Print one JSON line on stdout." },
+];
+
+const SKILL_USAGE = [
+  "metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+  "metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+];
+
 export function helpData(topic) {
   return {
     topic,
@@ -55,6 +78,7 @@ export function helpData(topic) {
       "metergraph --help [--json]",
       "metergraph --version [--json]",
       "metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
+      ...SKILL_USAGE,
     ],
     commands: [
       {
@@ -63,7 +87,22 @@ export function helpData(topic) {
           "Check that a Metergraph service is reachable, healthy and supported. Read only, sends no credentials.",
         options: DOCTOR_OPTIONS,
       },
+      {
+        name: "skill install",
+        summary:
+          "Copy the Metergraph skill bundled with this CLI into one client's project skill directory. " +
+          "Never replaces a skill it did not install. No network requests, no sign in.",
+        options: SKILL_OPTIONS,
+      },
+      {
+        name: "skill update",
+        summary:
+          "Replace a skill this CLI installed, and that is unchanged since, with the bundled revision.",
+        options: SKILL_OPTIONS,
+      },
     ],
+    skill_clients: Object.keys(SKILL_CLIENTS),
+    skill_runtimes: [...SKILL_RUNTIMES],
     supported_profiles: [...SUPPORTED_PROFILES],
     exit_codes: Object.entries(EXIT_CODES).map(([outcome, code]) => ({
       code,
@@ -96,6 +135,33 @@ export function helpText(topic) {
       "A healthy, supported service that requires sign in exits with code 3.",
       "This preview cannot sign in, so it never reports a connected workspace.",
     );
+  } else if (topic === "skill") {
+    lines.push(
+      "Usage:",
+      ...SKILL_USAGE.map((usage) => `  ${usage}`),
+      "",
+      "Copies the Metergraph skill bundled with this CLI into one client's project skill",
+      "directory and records ownership in .metergraph/skill-installations.json. Writes",
+      "nothing else. Makes no network requests, does not sign in and does not configure",
+      "MCP, client settings, AGENTS.md or CLAUDE.md.",
+      "",
+      "Options:",
+    );
+    for (const option of SKILL_OPTIONS) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
+    }
+    lines.push(
+      "",
+      "install never replaces an existing skill. update replaces only a skill this CLI",
+      "installed and that is unchanged since. There is no force option.",
+      "",
+      "Claude Desktop (--client claude-desktop), ChatGPT (--client chatgpt) and cloud",
+      "runtimes without a shell (--runtime cloud-no-shell) cannot load project skill files.",
+      "They exit with code 6, point to the connection guide and write nothing.",
+      "",
+      "Discovery stays pending until the client itself loads the skill.",
+    );
   } else {
     lines.push(
       `metergraph ${VERSION} (preview)`,
@@ -104,13 +170,39 @@ export function helpText(topic) {
       "  metergraph --help [--json]       Show this help",
       "  metergraph --version [--json]    Show the CLI version",
       "  metergraph doctor [options]      Check a Metergraph service, read only",
+      "  metergraph skill install|update  Install or update the agent skill in a project",
       "",
       'Run "metergraph help doctor" for doctor options.',
+      'Run "metergraph help skill" for skill options.',
     );
   }
   lines.push("", "Exit codes:");
   for (const [outcome, code] of Object.entries(EXIT_CODES)) {
     lines.push(`  ${String(code).padEnd(3)}${outcome.padEnd(25)}${EXIT_CODE_MEANINGS[outcome]}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function skillText(result, message) {
+  const report = result.data;
+  const label = SKILL_CLIENTS[report.client]?.label ?? HANDOFF_SKILL_CLIENTS[report.client];
+  const lines = [`Metergraph ${result.command}: ${label}, ${report.runtime} runtime`];
+  if (report.path !== null) lines.push(`Path: ${report.path}`);
+  if (result.ok) {
+    lines.push(
+      `Status: ${report.status}`,
+      `Source revision: ${report.source.revision} (sha256 ${report.source.sha256})`,
+      `Discovery: pending until ${label} loads the skill`,
+      "Authenticated: no",
+      "",
+      message,
+      `Next: ${report.next_action.message}`,
+    );
+  } else {
+    lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
+    if (report.next_action?.kind === "connection_guide") {
+      lines.push(`Connection guide: ${report.next_action.url}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }

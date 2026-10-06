@@ -13,7 +13,7 @@ include real credentials, tokens or customer data in a report.
 ## Security properties of the CLI
 
 The current preview holds no credentials of its own and is designed to limit what it
-reads, sends and prints. These are the boundaries it is designed to keep:
+reads, writes, sends and prints. These are the boundaries it is designed to keep:
 
 - **No credential stores.** It reads no credentials from environment variables,
   configuration files, keychains, cookies or arguments, and sends no `Authorization` or
@@ -32,6 +32,34 @@ reads, sends and prints. These are the boundaries it is designed to keep:
 - **Bounded probe.** Redirects are not followed. At most 32 KiB of each response body
   is read, and the whole probe is bounded by `--timeout-ms`.
 - **No runtime dependencies.**
+
+### Skill installer
+
+`skill install` and `skill update` write files inside a project directory you name.
+They are designed to keep these boundaries:
+
+- **No network and no remote code.** The skill is copied from this package. It is
+  checked against a SHA-256 pinned in the code and in `assets/skill/manifest.json`
+  before anything is written, and a mismatch stops the command.
+- **Two files only.** The client's `SKILL.md` and `.metergraph/skill-installations.json`.
+  Client settings, MCP configuration, `AGENTS.md`, `CLAUDE.md` and unrelated files are
+  never written.
+- **Secret-free receipt.** The receipt holds relative paths, the skill name, revision,
+  hash and requested runtimes. It holds no credentials, user names or absolute paths.
+- **Ownership before overwrite.** A skill the CLI did not install, or one changed since
+  it installed it, is never replaced. There is no force option.
+- **No link following.** The `--project` path is resolved once. Below it, a symbolic
+  link or non-regular entry on the skill or receipt path stops the command. Files are
+  opened without following links where the platform supports it.
+- **Atomic writes.** Each file is written to an exclusive temporary file and renamed
+  into place under a lock file. A failed receipt write restores the previous skill
+  file, so ownership is never recorded for a skill that was not written.
+- **Redacted output.** Invalid option values, file contents, absolute paths and raw error text
+  are never printed. Recognized client and runtime names appear in receipts.
+
+A person or process that can already write to the project can still change files
+between the installer's checks and its writes. The installer re-checks every target
+right before replacing it, which narrows but does not remove that window.
 
 ### What remains visible
 

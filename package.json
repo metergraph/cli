@@ -1,7 +1,7 @@
 {
   "name": "metergraph-cli",
   "version": "0.1.0",
-  "description": "Preview Metergraph command line tool with a read-only connection probe",
+  "description": "Preview Metergraph command line tool with a read-only connection probe and a project skill installer",
   "type": "module",
   "bin": {
     "metergraph": "bin/metergraph.js"
@@ -12,6 +12,8 @@
   "files": [
     "bin/metergraph.js",
     "src/*.js",
+    "assets/skill/SKILL.md",
+    "assets/skill/manifest.json",
     "LICENSE",
     "README.md"
   ],
