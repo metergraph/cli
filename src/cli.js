@@ -6,9 +6,11 @@ import {
   envelope,
   helpData,
   helpText,
+  skillText,
   toJsonLine,
   versionData,
 } from "./output.js";
+import { runSkill } from "./skill.js";
 import { VERSION } from "./constants.js";
 
 // Runs one command and resolves with the exit code. With --json, stdout gets
@@ -56,6 +58,19 @@ async function run(argv, { stdout, stderr }) {
   if (parsed.command === "version") {
     const result = envelope({ command: "version", outcome: "ok", data: versionData() });
     stdout.write(parsed.json ? toJsonLine(result) : `${VERSION}\n`);
+    return result;
+  }
+
+  if (parsed.command === "skill") {
+    const { outcome, reason, message, data } = runSkill(parsed);
+    const result = envelope({
+      command: `skill ${parsed.action}`,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : skillText(result, message));
     return result;
   }
 
