@@ -28,8 +28,26 @@ export const SUPPORTED_PROFILES = Object.freeze([
   "byoc-core",
 ]);
 
+// Clients that load project skills from a native directory, from each
+// client's own documentation. Every client has its own directory, so
+// installing for one never touches another client's files.
+export const SKILL_CLIENTS = Object.freeze({
+  codex: Object.freeze({ label: "Codex", dir: ".agents" }),
+  claude: Object.freeze({ label: "Claude Code", dir: ".claude" }),
+  cursor: Object.freeze({ label: "Cursor", dir: ".cursor" }),
+});
+export const SKILL_RUNTIMES = Object.freeze(["local", "cloud"]);
+
+// Recognized values that cannot load project skill files. They get a pointer
+// to the connection guide instead of a usage error, and nothing is written.
+export const HANDOFF_SKILL_CLIENTS = Object.freeze({
+  "claude-desktop": "Claude Desktop",
+  chatgpt: "ChatGPT",
+});
+export const HANDOFF_SKILL_RUNTIMES = Object.freeze(["cloud-no-shell"]);
+
 // One exit code per outcome. Documented in README.md; changing a value is a
-// breaking change for scripts.
+// breaking change for scripts. New outcomes are appended.
 export const EXIT_CODES = Object.freeze({
   ok: 0,
   internal_error: 1,
@@ -39,6 +57,8 @@ export const EXIT_CODES = Object.freeze({
   unhealthy: 5,
   unsupported: 6,
   redirect_rejected: 7,
+  conflict: 8,
+  filesystem_error: 9,
 });
 
 export const EXIT_CODE_MEANINGS = Object.freeze({
@@ -51,6 +71,11 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
   unhealthy:
     "The service answered but reported that it is not healthy, or answered with a server error.",
   unsupported:
-    "The service answered with a response, deployment profile or status this CLI does not support.",
+    "The service answered with a response, deployment profile or status this CLI does not support, " +
+    "or the skill client or runtime cannot use project skill files. Nothing was written.",
   redirect_rejected: "The service answered with a redirect. Redirects are never followed.",
+  conflict:
+    "The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update. Nothing was changed.",
+  filesystem_error:
+    "Project files could not be read or written. Partial changes were rolled back unless the message says otherwise.",
 });

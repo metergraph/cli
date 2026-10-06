@@ -6,10 +6,15 @@ The Metergraph command line tool. This is a **development preview** (version 0.1
 will not work until a release is announced. Until then, run it from a checkout or from
 a locally packed tarball (see [Development](#development)).
 
-This preview does one thing: it checks whether a Metergraph service is reachable,
-healthy and supported. It does not sign in, does not connect a workspace and does not
-read, write or send any of your data. Setup, sign in and agent skill commands are
-planned as separate follow-up releases and are not part of this package yet.
+This preview does two things:
+
+- `doctor` checks whether a Metergraph service is reachable, healthy and supported.
+- `skill install` and `skill update` copy the Metergraph agent skill bundled with the
+  CLI into one coding agent's project skill directory.
+
+It does not sign in or connect a workspace, and it does not query workspace
+telemetry or send application data. Sign in, workspace binding and hosted setup commands are planned as separate
+follow-up releases and are not part of this package yet.
 
 ## Requirements
 
@@ -26,9 +31,13 @@ metergraph --help [--json]
 metergraph help doctor [--json]
 metergraph --version [--json]
 metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]
+metergraph help skill [--json]
+metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
 ```
 
-`--help` and `--version` work offline and make no network requests.
+`--help`, `--version` and the `skill` commands work offline and make no network
+requests.
 
 ### doctor
 
@@ -56,20 +65,98 @@ follow the [connection guide](https://www.metergraph.dev/docs/guides/agent-acces
 `doctor` never opens a browser, never prompts and never reads stdin, so it is safe in
 scripts and CI.
 
+### skill install and skill update
+
+`skill install` copies the Metergraph skill bundled with this CLI into one client's
+native project skill directory. Both `--client` and `--runtime` are required, so the
+command never guesses where the skill will be used.
+
+| `--client` | Client | Skill file written | Client documentation |
+| --- | --- | --- | --- |
+| `codex` | Codex | `.agents/skills/metergraph/SKILL.md` | [Build skills](https://learn.chatgpt.com/docs/build-skills) |
+| `claude` | Claude Code | `.claude/skills/metergraph/SKILL.md` | [Skills](https://code.claude.com/docs/en/skills) |
+| `cursor` | Cursor | `.cursor/skills/metergraph/SKILL.md` | [Skills](https://cursor.com/docs/skills) |
+
+Each client has its own directory, so installing for several clients never makes one
+overwrite another.
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `--client CLIENT` | required | `codex`, `claude` or `cursor`. |
+| `--runtime RUNTIME` | required | `local` when the client runs on this machine, `cloud` when it runs in a cloud environment with a shell and a checkout of the project. Recorded, not detected. |
+| `--project DIR` | current directory | Must be an existing directory. Symbolic links in this path are resolved once; nothing below it is followed. |
+| `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
+
+What it writes, and nothing else:
+
+1. The skill file in the table above, plus any of its missing parent directories.
+2. `.metergraph/skill-installations.json`, a small ownership receipt. For each client it
+   records the relative skill path, the skill name, the source revision and SHA-256,
+   and the runtimes requested. It contains no credentials, user names or absolute
+   paths, so it is safe to commit.
+
+Ownership rules:
+
+- `install` never replaces a skill it did not install, even one with identical bytes.
+- Running `install` again on an unchanged skill it installed changes nothing.
+- A skill it installed that was edited since is never overwritten, by `install` or by
+  `update`. Restore or remove the file first.
+- `update` is the only way to replace an older revision this CLI installed. There is no
+  force option.
+- A skill file this CLI installed that has gone missing is written again.
+- Symbolic links and other non-regular entries on the skill or receipt path are
+  refused.
+- Files are written to an exclusive temporary file and renamed into place, under a lock
+  file, `.metergraph/skill-installations.lock`. The receipt is written only after the
+  skill file, and a failed receipt write puts the skill file back as it was. If the
+  process is killed between the two writes, the skill is left without a receipt entry,
+  so later runs refuse to touch it, and the lock stays until you delete it.
+- It never changes client settings, MCP configuration, `AGENTS.md`, `CLAUDE.md` or any
+  other file, and keeps the permissions of a file it replaces.
+
+`--runtime cloud` writes the same project file. A cloud client sees it only through
+its own checkout of the project, so commit the file if you installed it elsewhere.
+Writing a skill file in a cloud checkout does not connect MCP, sign in or copy anything
+from your own machine. Local skills do not sync to desktop or cloud apps on their own.
+
+Clients and runtimes that cannot load project skill files get a pointer to the
+[connection guide](https://www.metergraph.dev/docs/guides/agent-access/) with exit code
+6, and nothing is written: `--client claude-desktop`, `--client chatgpt` and
+`--runtime cloud-no-shell` (a cloud runtime without a shell or project checkout).
+
+A successful run exits `0` with `discovery: "pending"` and `authenticated: false`.
+Writing the file does not prove that a client has loaded it. Start or reload the client
+in the project and check that it lists the `metergraph` skill. The skill itself is
+instructions for the agent; it holds no credentials and does not connect a workspace.
+
+#### Bundled skill source
+
+`assets/skill/SKILL.md` is a byte-for-byte copy of the public skill at
+<https://www.metergraph.dev/SKILL.md>. The source has no version number of its own, so
+`assets/skill/manifest.json` records its source URL, size and SHA-256, and a revision
+derived from that hash (`sha256-` followed by the first 12 hex digits). The package
+version is not the skill version. At runtime the CLI checks the bundled file against a
+hash pinned in its code and in the manifest, and refuses to write anything if either
+does not match. It never downloads the skill or runs a remote script. A new skill
+revision ships only in a new CLI release; `skill update` then upgrades projects that
+hold an unchanged earlier revision.
+
 ## Exit codes
 
 Exit codes are stable. Changing one is a breaking change.
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
-| 0 | `ok` | Command succeeded. `doctor` does not return this in this preview. |
+| 0 | `ok` | Command succeeded. `doctor` does not return this in this preview. For `skill`, the file is in place; discovery is still pending. |
 | 1 | `internal_error` | Unexpected failure inside the CLI. |
 | 2 | `invalid_input` | Unknown command or argument, or an invalid option value. No request was made. |
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |
 | 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. |
 | 5 | `unhealthy` | The service answered but reported that it is not healthy, or answered with a server error. |
-| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support. |
+| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files. Nothing was written. |
 | 7 | `redirect_rejected` | The service answered with a redirect. Redirects are never followed. |
+| 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update. Nothing was changed. |
+| 9 | `filesystem_error` | Project files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
 
 ## JSON output
 
@@ -116,6 +203,43 @@ With `--json`, every command prints one line with the same top-level keys:
 - Checks that did not run have `result: "skipped"`.
 - `--help --json` includes the command list and the exit code table.
 
+A successful `skill install`:
+
+```json
+{
+  "schema_version": 1,
+  "command": "skill install",
+  "ok": true,
+  "outcome": "ok",
+  "exit_code": 0,
+  "data": {
+    "client": "claude",
+    "runtime": "local",
+    "path": ".claude/skills/metergraph/SKILL.md",
+    "status": "installed",
+    "source": {
+      "name": "metergraph",
+      "revision": "sha256-90f7d8d78a5b",
+      "sha256": "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f"
+    },
+    "discovery": "pending",
+    "authenticated": false,
+    "next_action": {
+      "kind": "reload_client",
+      "message": "Start or restart Claude Code in this project, then confirm that it lists the metergraph skill."
+    }
+  },
+  "error": null
+}
+```
+
+- `status` is `installed`, `updated` or `reused` (already in place, nothing rewritten).
+- `path` is always relative to the project. Absolute paths are never printed.
+- On failure `status` and `discovery` are `null`, and `error.reason` is a fixed token
+  such as `not_owned`, `modified`, `update_required`, `not_installed`, `unsafe_path`,
+  `receipt_invalid`, `locked`, `invalid_project`, `client_not_supported`,
+  `write_failed` or `bundled_skill_invalid`.
+
 Without `--json`, results are printed as text on stdout and usage errors go to stderr.
 
 ## Safe origins
@@ -148,6 +272,14 @@ CLI never assumes such a server is hosted.
   server-supplied URLs or error text from the network stack.
 - It makes no model provider calls, sends no usage data and reads no stored traces.
 
+## What skill install does not do
+
+- It makes no network requests and no model provider calls. The skill comes from this
+  package, not from a download.
+- It does not sign in, store credentials, configure MCP or edit client settings.
+- It does not claim a client has loaded the skill. `discovery` stays `pending`.
+- It never prints file contents, absolute paths or raw error text.
+
 ## Development
 
 ```sh
@@ -155,6 +287,7 @@ npm test                  # unit tests and CLI subprocess tests against loopback
 npm run test:package      # npm pack into a temporary directory, clean install, run the installed bin
 node bin/metergraph.js --help
 node bin/metergraph.js doctor --url http://127.0.0.1:8080 --json
+node bin/metergraph.js skill install --client claude --runtime local --project /path/to/project --json
 ```
 
 To try a packed artifact without publishing:

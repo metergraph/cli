@@ -1,0 +1,4 @@
+# The bundled skill is verified by SHA-256 at runtime. Never convert its line
+# endings on checkout.
+assets/skill/SKILL.md -text
+assets/skill/manifest.json -text

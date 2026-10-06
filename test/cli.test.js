@@ -37,7 +37,29 @@ test("help works offline in text and JSON form", async () => {
     unhealthy: 5,
     unsupported: 6,
     redirect_rejected: 7,
+    conflict: 8,
+    filesystem_error: 9,
   });
+  assert.deepEqual(
+    result.data.commands.map((command) => command.name),
+    ["doctor", "skill install", "skill update"],
+  );
+  assert.deepEqual(result.data.skill_clients, ["codex", "claude", "cursor"]);
+  assert.deepEqual(result.data.skill_runtimes, ["local", "cloud"]);
+});
+
+test("skill help works offline and states what is not done", async () => {
+  for (const args of [["help", "skill"], ["skill", "--help"], ["skill", "install", "--help"]]) {
+    const run = await runCli(args, { offline: true });
+    assert.equal(run.code, 0);
+    assert.equal(run.stderr, "");
+    assert.match(run.stdout, /metergraph skill install --client CLIENT --runtime RUNTIME/);
+    assert.match(run.stdout, /metergraph skill update --client CLIENT --runtime RUNTIME/);
+    assert.match(run.stdout, /Discovery stays pending/);
+    assert.match(run.stdout, /does not sign in/);
+  }
+  const json = await runCli(["help", "skill", "--json"], { offline: true });
+  assert.equal(parseJsonLine(json.stdout).data.topic, "skill");
 });
 
 test("no arguments prints help and exits 0", async () => {

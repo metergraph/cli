@@ -28,11 +28,18 @@ export const MARKERS = Object.freeze([
 
 // Runs the CLI as a subprocess. stdin is an open pipe that is never written
 // or closed, so a CLI that waits on stdin would hang and fail the test.
-export function runCli(args, { offline = false, timeoutMs = 20000 } = {}) {
-  const nodeArgs = offline ? ["--import", NO_NETWORK, BIN, ...args] : [BIN, ...args];
+// imports are extra modules preloaded with --import, bin replaces the CLI
+// entry point (for example a tampered copy), and env adds variables.
+export function runCli(
+  args,
+  { offline = false, timeoutMs = 20000, cwd, imports = [], bin = BIN, env = {} } = {},
+) {
+  const preload = [...(offline ? [NO_NETWORK] : []), ...imports].flatMap((url) => ["--import", url]);
+  const nodeArgs = [...preload, bin, ...args];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, nodeArgs, {
-      env: { ...process.env, ...FAKE_SECRETS, NO_COLOR: "1" },
+      cwd,
+      env: { ...process.env, ...FAKE_SECRETS, NO_COLOR: "1", ...env },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";

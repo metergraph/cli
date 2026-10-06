@@ -2,11 +2,12 @@
 // project and runs the installed CLI. Nothing is written inside the checkout.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { healthyRoutes, parseJsonLine, startServer } from "../helpers.js";
 
@@ -17,6 +18,8 @@ const isWindows = process.platform === "win32";
 const EXPECTED_FILES = [
   "LICENSE",
   "README.md",
+  "assets/skill/SKILL.md",
+  "assets/skill/manifest.json",
   "bin/metergraph.js",
   "package.json",
   "src/args.js",
@@ -26,7 +29,11 @@ const EXPECTED_FILES = [
   "src/http.js",
   "src/origin.js",
   "src/output.js",
+  "src/skill-bundle.js",
+  "src/skill.js",
 ];
+const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
+const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;
 let tarball;
@@ -151,6 +158,48 @@ test("npm exec runs the packed artifact from an empty directory", async () => {
   const parsed = parseJsonLine(result.stdout);
   assert.equal(parsed.command, "help");
   assert.equal(parsed.ok, true);
+});
+
+test("the packed skill asset is byte-identical to the pinned source", () => {
+  const assetDir = path.join(projectDir, "node_modules", "metergraph-cli", "assets", "skill");
+  const skill = readFileSync(path.join(assetDir, "SKILL.md"));
+  const manifest = JSON.parse(readFileSync(path.join(assetDir, "manifest.json"), "utf8"));
+  assert.equal(createHash("sha256").update(skill).digest("hex"), SKILL_SHA256);
+  assert.equal(manifest.sha256, SKILL_SHA256);
+  assert.equal(manifest.size, skill.length);
+  assert.deepEqual(skill, readFileSync(path.join(PACKAGE_ROOT, "assets", "skill", "SKILL.md")));
+});
+
+test("the installed CLI installs the skill offline into a project with spaces", async () => {
+  const target = path.join(workDir, "skill project");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const args = [
+    "--import",
+    pathToFileURL(NO_NETWORK).href,
+    bin,
+    "skill",
+    "install",
+    "--client",
+    "claude",
+    "--runtime",
+    "local",
+    "--project",
+    target,
+    "--json",
+  ];
+  const result = check(await run(process.execPath, args, { cwd: workDir }), "packed skill install");
+  const parsed = parseJsonLine(result.stdout);
+  assert.equal(parsed.data.status, "installed");
+  assert.equal(parsed.data.discovery, "pending");
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.source.sha256, SKILL_SHA256);
+  const installed = readFileSync(path.join(target, ".claude", "skills", "metergraph", "SKILL.md"));
+  assert.equal(createHash("sha256").update(installed).digest("hex"), SKILL_SHA256);
+  assert.ok(existsSync(path.join(target, ".metergraph", "skill-installations.json")));
+
+  const rerun = check(await run(process.execPath, args, { cwd: workDir }), "packed skill rerun");
+  assert.equal(parseJsonLine(rerun.stdout).data.status, "reused");
 });
 
 test("the installed CLI probes a loopback service", async () => {
