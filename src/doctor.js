@@ -60,6 +60,16 @@ async function probe(origin, signal) {
   return { outcome: "internal_error", reason: "probe_incomplete", report };
 }
 
+// The same decision doctor makes for one GET /v1/deployment response, for
+// status. Returns { outcome, reason, profile } where outcome is null and
+// profile is one of SUPPORTED_PROFILES when the service reported a supported
+// profile.
+export function checkDeployment(response) {
+  const report = { reachable: null, healthy: null, deployment_profile: null, profile_status: "unknown" };
+  const { outcome, reason } = evaluate("deployment", response, report);
+  return { outcome, reason, profile: report.deployment_profile };
+}
+
 // Returns { outcome, reason } where outcome is null when the probe should
 // continue to the next check.
 function evaluate(name, response, report) {

@@ -1,10 +1,41 @@
 import http from "node:http";
 import https from "node:https";
 
-import { PACKAGE_NAME, VERSION } from "./constants.js";
+import { PACKAGE_NAME, READ_QUERY_KEYS, VERSION } from "./constants.js";
 import { classifyError } from "./http.js";
 
 const USER_AGENT = `${PACKAGE_NAME}/${VERSION}`;
+const MAX_QUERY_LENGTH = 2048;
+
+// Builds the request URL. Without a query the path must be a fixed path on
+// the origin with no search part. A query is accepted only as a
+// URLSearchParams the caller built, only on a path in READ_QUERY_KEYS, only
+// with that path's keys, each at most once. Anything else is a programming
+// error, so no input can choose another path, origin or header.
+function requestUrl(origin, pathname, query) {
+  const url = new URL(pathname, origin);
+  if (url.origin !== origin || url.pathname !== pathname || url.search !== "") {
+    // Paths are constants from this package, so this is a programming error.
+    throw new Error("request path is not a fixed path on the origin");
+  }
+  if (query === null) return url;
+  const allowed = Object.hasOwn(READ_QUERY_KEYS, pathname) ? READ_QUERY_KEYS[pathname] : null;
+  if (!(query instanceof URLSearchParams) || allowed === null) {
+    throw new Error("a query is not allowed on this path");
+  }
+  const seen = new Set();
+  for (const key of query.keys()) {
+    if (!allowed.includes(key) || seen.has(key)) throw new Error("query key is not allowed");
+    seen.add(key);
+  }
+  const search = query.toString();
+  if (search.length > MAX_QUERY_LENGTH) throw new Error("query is too long");
+  url.search = search;
+  if (url.origin !== origin || url.pathname !== pathname) {
+    throw new Error("request path is not a fixed path on the origin");
+  }
+  return url;
+}
 
 // Sends one request to a fixed path on an already validated origin and
 // resolves (never rejects) with either
@@ -17,13 +48,13 @@ const USER_AGENT = `${PACKAGE_NAME}/${VERSION}`;
 // other status are read up to maxBytes; a larger body sets tooLarge and is
 // discarded. The only credential ever sent is the bearer argument, and only
 // to this origin. Nothing is taken from the environment, and no cookies are
-// sent or kept.
-export function send(origin, pathname, { method = "GET", signal, maxBytes, bearer = null, form = null, json = null }) {
-  const url = new URL(pathname, origin);
-  if (url.origin !== origin || url.pathname !== pathname || url.search !== "") {
-    // Paths are constants from this package, so this is a programming error.
-    throw new Error("request path is not a fixed path on the origin");
-  }
+// sent or kept. query is null or a URLSearchParams accepted by requestUrl.
+export function send(
+  origin,
+  pathname,
+  { method = "GET", signal, maxBytes, bearer = null, form = null, json = null, query = null },
+) {
+  const url = requestUrl(origin, pathname, query);
 
   const headers = {
     accept: "application/json",

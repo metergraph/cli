@@ -36,6 +36,9 @@ const EXPECTED_FILES = [
   "src/http.js",
   "src/origin.js",
   "src/output.js",
+  "src/read-contract.js",
+  "src/read-output.js",
+  "src/read.js",
   "src/skill-bundle.js",
   "src/skill.js",
   "src/transport.js",
@@ -238,6 +241,36 @@ test("the installed CLI hands a cloud sign in off offline and writes nothing", a
   assert.equal(parsed.error.reason, "runtime_not_supported");
   assert.equal(parsed.data.authenticated, false);
   assert.equal(parsed.data.next_action.kind, "connection_guide");
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the installed CLI reports read commands honestly offline without a sign in", async () => {
+  const target = path.join(workDir, "read project");
+  const config = path.join(workDir, "read config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const offline = ["--import", pathToFileURL(NO_NETWORK).href, bin];
+
+  const status = await run(
+    process.execPath,
+    [...offline, "status", "--project", target, "--config-dir", config, "--json"],
+    { cwd: workDir },
+  );
+  assert.equal(status.code, 12);
+  assert.equal(status.stderr, "");
+  const parsed = parseJsonLine(status.stdout);
+  assert.equal(parsed.command, "status");
+  assert.equal(parsed.error.reason, "not_signed_in");
+  assert.equal(parsed.data.configured, false);
+  assert.equal(parsed.data.authenticated, false);
+  assert.equal(parsed.data.application_traffic_verified, false);
+
+  const environment = await run(process.execPath, [...offline, "usage", "--environment", "production", "--json"], {
+    cwd: workDir,
+  });
+  assert.equal(environment.code, 6);
+  assert.equal(parseJsonLine(environment.stdout).error.reason, "environment_selector_unsupported");
   assert.equal(existsSync(config), false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });

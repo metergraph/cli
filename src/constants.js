@@ -84,6 +84,37 @@ export const AUTH_PATHS = Object.freeze({
   capabilities: "/v1/agent/capabilities",
 });
 
+// Bearer-protected Metadata read endpoints. They are fixed paths on the bound
+// origin; the transport accepts a query string only on the paths listed in
+// READ_QUERY_KEYS, and only with those keys. GET /v1/agent/routes takes no
+// query at all, so its rows are bounded by the response size limit and cut to
+// --limit locally.
+export const READ_PATHS = Object.freeze({
+  usage: "/v1/agent/usage",
+  routes: "/v1/agent/routes",
+  traces: "/v1/agent/traces",
+});
+export const READ_QUERY_KEYS = Object.freeze({
+  "/v1/agent/usage": Object.freeze(["days", "limit"]),
+  "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor"]),
+});
+
+// Read commands share one total deadline for every request they make,
+// including a token refresh. It is never reset per request or page.
+export const READ_DEFAULT_TIMEOUT_MS = 15000;
+export const READ_MIN_TIMEOUT_MS = 1000;
+export const READ_MAX_TIMEOUT_MS = 60000;
+// A client bound below the service's own max_response_bytes. A larger body is
+// discarded and reported as response_too_large, never read further.
+export const READ_MAX_BYTES = 1024 * 1024;
+export const READ_MAX_DAYS = 90;
+export const READ_MAX_LIMIT = 200;
+export const READ_DEFAULT_DAYS = 7;
+export const READ_DEFAULT_LIMIT = 50;
+export const TRACES_DEFAULT_LIMIT = 20;
+export const MAX_CURSOR_LENGTH = 512;
+export const MAX_FILTER_LENGTH = 256;
+
 // One exit code per outcome. Documented in README.md; changing a value is a
 // breaking change for scripts. New outcomes are appended.
 export const EXIT_CODES = Object.freeze({
@@ -101,6 +132,10 @@ export const EXIT_CODES = Object.freeze({
   verification_failed: 11,
   login_required: 12,
   revocation_unconfirmed: 13,
+  capability_unavailable: 14,
+  permission_denied: 15,
+  rate_limited: 16,
+  cancelled: 17,
 });
 
 export const EXIT_CODE_MEANINGS = Object.freeze({
@@ -130,4 +165,11 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
     "No usable sign in for this project: none was saved, it expired, was revoked, lost access or could not be refreshed safely. Run login again.",
   revocation_unconfirmed:
     "Local credentials were removed, but the service did not confirm that the grant was revoked.",
+  capability_unavailable:
+    "The service does not make this read available to the project's Metadata grant. No data was read.",
+  permission_denied:
+    "The service refused this read for the signed in grant, for example for a missing scope or permission.",
+  rate_limited: "The service asked the CLI to slow down. Nothing was retried. Try again later.",
+  cancelled:
+    "A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry.",
 });

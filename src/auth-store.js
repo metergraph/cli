@@ -151,10 +151,15 @@ export function deleteCredential(store, slot) {
 // for another process to finish, then stops with a conflict. A lock left by
 // a killed process stays until it is deleted, because taking over a lock
 // that may still be held could let two refreshes use one refresh token.
-export async function withSlotLock(store, slot, work, { waitMs }) {
+// An optional signal (a deadline or Ctrl+C) stops the wait, and stops before
+// work starts, with authorization_failed/cancelled. A lock this call never
+// took is never touched.
+export async function withSlotLock(store, slot, work, { waitMs, signal = null }) {
   const lock = slotPath(store, slot, "lock");
   const until = Date.now() + waitMs;
+  const cancelled = () => new Stop("authorization_failed", "cancelled");
   for (;;) {
+    if (signal?.aborted) throw cancelled();
     try {
       const fd = fs.openSync(lock, "wx", 0o600);
       fs.closeSync(fd);
@@ -162,10 +167,11 @@ export async function withSlotLock(store, slot, work, { waitMs }) {
     } catch (error) {
       if (error.code !== "EEXIST") throw new Stop("filesystem_error", "credential_store_unavailable");
       if (Date.now() >= until) throw new Stop("conflict", "credential_locked");
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await pause(50, signal);
     }
   }
   try {
+    if (signal?.aborted) throw cancelled();
     return await work();
   } finally {
     try {
@@ -174,6 +180,19 @@ export async function withSlotLock(store, slot, work, { waitMs }) {
       // Reported by the next run as a held lock.
     }
   }
+}
+
+// Resolves after ms, or as soon as signal aborts.
+function pause(ms, signal) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 export function validRecord(record) {

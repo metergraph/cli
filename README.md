@@ -24,18 +24,24 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - They also need a Metergraph service that offers Metadata-only CLI sign in and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
+- The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
+  also exist only in this checkout and are part of the same unpublished upcoming preview.
+  They need a project signed in with `login`.
 
-This preview does three things:
+This preview does four things:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
   CLI into one coding agent's project skill directory.
 - `login` and `logout` (checkout only) sign a project in to one workspace through your
   browser with a delegated, Metadata-only grant, and sign it out again.
+- The read commands (checkout only) use that grant to read bounded workspace Metadata:
+  connection status, workspace context, capabilities, daily usage, routes and one page
+  of trace metadata.
 
-It does not query workspace telemetry, read retained content, call model providers,
-create an application ingest key, or send application data. Hosted setup commands are planned
-as a separate follow-up release.
+It does not read retained content, replay traces, call model providers, create an
+application ingest key, change workspace data, or send application data. Hosted setup
+commands are planned as a separate follow-up release.
 
 ## Requirements
 
@@ -58,10 +64,17 @@ metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--jso
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
+metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph usage [--days N] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login` and `logout` are not in the published `0.1.0` package.
+requests. `login`, `logout` and the read commands are not in the published `0.1.0`
+package.
 
 ### doctor
 
@@ -256,9 +269,147 @@ revocation request. If it does not answer `200`, local sign out still happens an
 command exits 13 with `revocation: "unconfirmed"`. A project that is not signed in
 exits 0 without any request.
 
+### Read commands (checkout only, unreleased)
+
+The read commands use the grant `login` saved for this project. They never open a
+browser, never sign in on their own and never request another scope. Each one:
+
+- reads `.metergraph/project.json` and the saved grant, and refreshes the grant at most
+  once, under the same lock and rules as `login` (an interrupted refresh is never
+  retried with a possibly used token);
+- asks the service for `/v1/agent/workspace` and `/v1/agent/capabilities` and checks,
+  as `login` does, that the workspace, deployment profile and `agent:metadata` scope
+  still match the binding and that content, evidence and replay are unavailable;
+- sends only `GET` requests to fixed paths on the bound origin, follows no redirects and
+  reads at most 1 MiB of a response;
+- runs every request, including a refresh and any wait for another command that is
+  refreshing the same grant, within one total `--timeout-ms` deadline (1000 to 60000,
+  default 15000), which is never reset per request or page. A deadline exits 4
+  (`timeout`) and Ctrl+C exits 17, also while waiting for that lock; a lock held by
+  another process is never removed or taken over;
+- prints only fields it validated. Unknown response fields are ignored and never named.
+  A metadata row that holds a field such as `prompt`, `messages`, `tool_calls` or
+  `access_token` is refused as a whole (exit 11). Names that contain control or
+  formatting characters are shown as `null`. Service warning and error text is not
+  printed. If any printed value, such as a workspace name, route name, cursor or
+  provenance source, contains a token the CLI holds for this project, nothing is
+  printed and the command exits 11 with `credential_in_metadata_response`.
+
+Read commands do not change workspace configuration or telemetry, send no ingest data
+and call no model provider. They are not side-effect free on the service: a command may
+refresh its own saved grant, and the service may update its audit records and last used
+times for the grant.
+
+| Command | Request | What it prints |
+| --- | --- | --- |
+| `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
+| `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
+| `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
+| `usage` | `GET /v1/agent/usage?days=N&limit=N` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. |
+| `routes` | `GET /v1/agent/routes` | Route name, calls, replay eligible calls, evaluation contract version and hash, and whether a description or contract exists. |
+| `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
+
+Bounds and honesty rules:
+
+- `--days` is 1 to 90 (default 7) and `--limit` 1 to 200 (default 50, or 20 for
+  `traces`). Values outside these ranges exit 2. A value above the service's own
+  advertised `max_days` or `max_rows` exits 6 with `exceeds_service_bounds`; it is never
+  reduced silently.
+- `usage` and `traces` report `truncated` and `complete`. Totals are sums of the
+  returned rows only; when `complete` is `false` they are not workspace totals. An
+  empty window is a successful result with `empty: true`.
+- `GET /v1/agent/routes` takes no limit or window. The CLI validates every returned row,
+  keeps the first `--limit`, and reports `server_rows`, `truncated` and
+  `truncation: "local"`. Route descriptions, constraints and evaluation contract bodies
+  are never printed; `omitted_fields` lists them.
+- `traces` fetches exactly one page. When more exist it returns `next_cursor`; pass it
+  back with `--cursor` to read the next page. The cursor is opaque and at most 512
+  printable characters. A page whose `limit` differs from the request, or rows that do
+  not match `--status` or `--route`, exit 11. Free-text filter values are not printed
+  back.
+- No trace links are printed. The service does not yet return a workspace-bound link,
+  so each trace has `link: null` and the page has
+  `link_status: "server_link_unavailable"`.
+- `--environment`, `--workload`, `--since`, `--until`, `--sql`, `--query`, `--content`,
+  `--include-content`, `--debug` and `--replay` are recognized and refused with exit 6
+  before any request. The agent access contract has no environment selector or
+  absolute time range, and these commands never read content or replay. `--workload`
+  is refused by this CLI version because the returned trace rows do not show which
+  workload they belong to, so a filtered page could not be verified.
+- A capability the service does not offer to this grant exits 14 without a read. A
+  refused read exits 15 (`insufficient_scope` or `forbidden`), rate limiting exits 16
+  with `retry_after_seconds` when the service sends a whole number of seconds, and a
+  token refused during the read exits 12. Nothing is retried. Ctrl+C exits 17.
+
+A successful `usage`, shortened:
+
+```json
+{
+  "schema_version": 1,
+  "command": "usage",
+  "ok": true,
+  "outcome": "ok",
+  "exit_code": 0,
+  "data": {
+    "origin": "https://metergraph.example.com",
+    "workspace": { "id": "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01" },
+    "deployment_profile": "managed",
+    "authenticated": true,
+    "scopes": ["agent:metadata"],
+    "result": {
+      "provenance": {
+        "deployment_profile": "managed",
+        "workspace_id": "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01",
+        "generated_at": "2026-01-08T12:00:00Z",
+        "source": "example-source"
+      },
+      "window": { "days": 7, "since": "2026-01-01T12:00:00Z", "until": "2026-01-08T12:00:00Z" },
+      "evidence": { "sources": ["telemetry"], "rows": 1, "complete": true },
+      "warnings": [],
+      "content_included": false,
+      "truncated": false,
+      "complete": true,
+      "empty": false,
+      "rows": 1,
+      "items": [
+        {
+          "date": "2026-01-02",
+          "route": "checkout-summary",
+          "calls": 40,
+          "error_calls": 2,
+          "cost_usd": 0.0125,
+          "input_tokens": 12000,
+          "output_tokens": 3400,
+          "avg_latency_ms": 820,
+          "p95_latency_ms": null
+        }
+      ],
+      "totals": {
+        "scope": "returned_rows",
+        "complete": true,
+        "calls": 40,
+        "error_calls": 2,
+        "cost_usd": 0.0125,
+        "input_tokens": 12000,
+        "output_tokens": 3400
+      }
+    },
+    "retry_after_seconds": null,
+    "notices": [],
+    "next_action": null
+  },
+  "error": null
+}
+```
+
+On failure `result` is `null`, `authenticated` says whether the grant was verified
+before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
+`evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted` or
+`trace_links_unavailable`.
+
 ## Exit codes
 
-Exit codes are stable. Changing one is a breaking change. Codes 10 to 13 exist only in
+Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 exist only in
 this checkout.
 
 | Code | Outcome | Meaning |
@@ -277,6 +428,10 @@ this checkout.
 | 11 | `verification_failed` | The service issued a grant that does not match the requested origin, workspace, client, resource or Metadata scope. Nothing was saved. |
 | 12 | `login_required` | No usable sign in for this project: none was saved, it expired, was revoked, lost access or could not be refreshed safely. Run login again. |
 | 13 | `revocation_unconfirmed` | Local credentials were removed, but the service did not confirm that the grant was revoked. |
+| 14 | `capability_unavailable` | The service does not make this read available to the project's Metadata grant. No data was read. |
+| 15 | `permission_denied` | The service refused this read for the signed in grant, for example for a missing scope or permission. |
+| 16 | `rate_limited` | The service asked the CLI to slow down. Nothing was retried. Try again later. |
+| 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
 
 ## JSON output
 
@@ -399,8 +554,11 @@ A successful `login` (checkout only):
   `run_in_terminal` or `no_browser`.
 - The schema version `1` is the version of this CLI's own JSON output. It is unrelated
   to the service's agent access contract version, `metergraph.agent-access/v1`.
-- Tokens, the authorization code, the PKCE verifier, user names, email addresses,
-  workspace names, absolute paths and server text are never printed.
+- `login` and `logout` never print tokens, the authorization code, the PKCE verifier,
+  user names, email addresses, workspace names, absolute paths or server text. The
+  read commands never print tokens, email addresses, absolute paths or server error
+  text either; `context` prints the workspace slug and name, and the read commands
+  print validated route, trace, provider and model names, as described above.
 
 `logout` prints `local_credentials` (`removed` or `none`), `binding` (`removed`,
 `kept` or `none`) and `revocation` (`accepted`, `unconfirmed` or `not_attempted`).
@@ -461,6 +619,22 @@ CLI never assumes such a server is hosted.
   bounded responses within fixed time limits.
 - It accepts no credential on the command line, in the environment or on stdin.
 
+## What the read commands do not do
+
+- They never sign in, open a browser, create a grant or change the project binding.
+  The only file they may write is the saved grant, when a refresh rotates it.
+- They never request `agent:read` or `agent:replay`, never read retained content,
+  evidence or replays, and never call a model provider.
+- They make only `GET` requests to the read endpoints (a grant refresh, when needed, is
+  the only `POST`). They send no ingest data and change no evaluations, provider
+  settings, workspace configuration or telemetry. The service may still record the
+  access, for example audit entries and the grant's last used time.
+- They never print a token the CLI holds, even inside an otherwise valid name.
+- They never follow a cursor or page on their own, and never widen a request: an
+  unsupported option, an out of range value or a capability the grant lacks fails
+  instead.
+- They accept no credential on the command line, in the environment or on stdin.
+
 ## Development
 
 ```sh
@@ -472,9 +646,10 @@ node bin/metergraph.js skill install --client claude --runtime local --project /
 node bin/metergraph.js login --runtime local --url http://127.0.0.1:8080 --project /path/to/project
 ```
 
-The sign in tests run against a synthetic loopback service and a test-only browser
-stand-in loaded with `--import`. They prove the protocol and file handling, not the
-real service, a real browser or real workspace consent. The Windows DPAPI round trip
+The sign in and read command tests run against a synthetic loopback service and a
+test-only browser stand-in loaded with `--import`. They prove the protocol, file
+handling and output rules, not the real service, a real browser, real workspace
+consent or real workspace data. The Windows DPAPI round trip
 runs only on the Windows CI runner.
 
 To try a packed artifact without publishing:
@@ -492,7 +667,7 @@ The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
 The first preview uses the `next` npm tag. `0.1.0` is the only published version.
 This checkout's `0.2.0-preview.0` is not published and must not be published until
-the service side of sign in is released. Subsequent releases must pass the checks
+the service side of sign in and the Metadata read endpoints are released. Subsequent releases must pass the checks
 below before publication.
 
 Releases are manual. The `Release CLI` workflow (`.github/workflows/release.yml`) runs

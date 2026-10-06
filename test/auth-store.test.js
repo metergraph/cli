@@ -220,6 +220,44 @@ test("the slot lock serializes work and reports a held lock as a conflict", asyn
   assert.equal(fs.existsSync(path.join(store.credentials, `${slot}.lock`)), true, "a held lock was removed");
 });
 
+test("a cancel signal stops the wait for a held lock and never touches that lock", async () => {
+  const store = openStore(freshDir(), { create: true });
+  const slot = newSlot();
+  const lock = path.join(store.credentials, `${slot}.lock`);
+  fs.writeFileSync(lock, "held by another process");
+  const before = fs.statSync(lock).mtimeMs;
+
+  const controller = new AbortController();
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 100);
+  await assert.rejects(
+    withSlotLock(store, slot, async () => assert.fail("ran without the lock"), {
+      waitMs: 20000,
+      signal: controller.signal,
+    }),
+    stopWith("authorization_failed", "cancelled"),
+  );
+  assert.ok(Date.now() - started < 2000, "the wait ignored the cancel signal");
+  assert.equal(fs.readFileSync(lock, "utf8"), "held by another process");
+  assert.equal(fs.statSync(lock).mtimeMs, before);
+
+  // Already cancelled: no attempt at all, and the lock stays.
+  await assert.rejects(
+    withSlotLock(store, slot, async () => assert.fail("ran"), { waitMs: 20000, signal: AbortSignal.abort() }),
+    stopWith("authorization_failed", "cancelled"),
+  );
+  assert.equal(fs.existsSync(lock), true);
+
+  // Without a held lock, a cancelled signal still stops before work and
+  // leaves no lock behind.
+  fs.unlinkSync(lock);
+  await assert.rejects(
+    withSlotLock(store, slot, async () => assert.fail("ran"), { waitMs: 100, signal: AbortSignal.abort() }),
+    stopWith("authorization_failed", "cancelled"),
+  );
+  assert.equal(fs.existsSync(lock), false);
+});
+
 test("the config directory comes from the flag, then METERGRAPH_CONFIG_DIR, then the home directory", () => {
   const flag = resolveConfigDir("relative dir", {});
   assert.equal(flag, path.resolve("relative dir"));

@@ -167,9 +167,61 @@ test("rejects bad login and logout input without echoing it", () => {
   }
 });
 
+test("parses read commands with bounded defaults and explicit values", () => {
+  assert.deepEqual(parseArgs(["status"]), {
+    ok: true,
+    command: "status",
+    project: null,
+    configDir: null,
+    timeoutMs: 15000,
+    days: null,
+    limit: null,
+    route: null,
+    status: null,
+    cursor: null,
+    json: false,
+  });
+  const usage = parseArgs(["--json", "usage", "--days=90", "--limit", "200", "--project", "app", "--timeout-ms", "60000"]);
+  assert.equal(usage.ok, true);
+  assert.equal(usage.days, 90);
+  assert.equal(usage.limit, 200);
+  assert.equal(usage.timeoutMs, 60000);
+  assert.equal(parseArgs(["usage"]).days, 7);
+  assert.equal(parseArgs(["usage"]).limit, 50);
+  assert.equal(parseArgs(["routes"]).limit, 50);
+  assert.equal(parseArgs(["routes"]).days, null);
+  const traces = parseArgs(["traces", "--route", "checkout summary", "--status", "error", "--cursor", "page:2"]);
+  assert.equal(traces.ok, true);
+  assert.equal(traces.limit, 20);
+  assert.deepEqual([traces.route, traces.status, traces.cursor], ["checkout summary", "error", "page:2"]);
+  assert.equal(parseArgs(["help", "traces"]).topic, "traces");
+  assert.equal(parseArgs(["usage", "--help"]).topic, "usage");
+});
+
+test("read commands refuse environment, time range, query and content requests as unsupported", () => {
+  const cases = [
+    [["usage", "--environment", "hunter2"], "environment_selector_unsupported"],
+    [["traces", "--workload", "hunter2"], "workload_filter_unsupported"],
+    [["traces", "--workload="], "workload_filter_unsupported"],
+    [["routes", "--since=hunter2"], "time_range_unsupported"],
+    [["traces", "--sql", "hunter2"], "query_unsupported"],
+    [["traces", "--content"], "content_access_unsupported"],
+  ];
+  for (const [argv, code] of cases) {
+    const parsed = parseArgs(argv);
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.outcome, "unsupported");
+    assert.equal(parsed.code, code);
+    assert.ok(!parsed.message.includes("hunter2"));
+  }
+  // Doctor does not know these options; they stay unknown arguments there.
+  assert.equal(parseArgs(["doctor", "--environment", "x"]).code, "unknown_argument");
+  assert.equal(parseArgs(["doctor", "--environment", "x"]).outcome, "invalid_input");
+});
+
 test("rejects bad input with fixed messages that never contain the input", () => {
   const cases = [
-    [["status"], "unknown_command"],
+    [["whoami"], "unknown_command"],
     [["sk-fake-2222222222222222"], "unknown_command"],
     [["doctor", "--token", "hunter2"], "unknown_argument"],
     [["doctor", "--url=https://user:hunter2@example.com"], "invalid_url"],

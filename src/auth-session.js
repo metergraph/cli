@@ -14,8 +14,10 @@ const REFRESH_MARGIN_MS = 60 * 1000;
 export const LOCK_WAIT_MS = AUTH_HTTP_TIMEOUT_MS + 5000;
 
 // Resolves with
-//   { ok: true, session: { origin, workspaceId, profile, scopes, accessToken } }
+//   { ok: true, session: { origin, workspaceId, profile, scopes, accessToken }, documents, knownCredentials }
 //   { ok: false, outcome, reason }
+// documents holds the workspace and capabilities documents the service
+// returned during verification, already checked by verifyContext.
 // for the project's binding. Throws nothing for expected failures.
 export async function verifiedSession({ project = null, configDir = null, cancel = null } = {}) {
   try {
@@ -40,14 +42,29 @@ export async function sessionFor(binding, store, cancel) {
   const context = checkIdentity(record, binding);
   if (!context.ok) return context;
 
+  // Every token value this session has seen, including ones a refresh
+  // replaced, so a caller can refuse to print a response that echoes one.
+  const known = new Set([record.access_token, record.refresh_token]);
+
   // A pending mark seen here may belong to a refresh another process is
-  // running right now, so it is judged only under the lock.
+  // running right now, so it is judged only under the lock. A deadline or
+  // Ctrl+C stops the wait for another process's lock.
   if (record.refresh_pending || record.expires_at - Date.now() <= REFRESH_MARGIN_MS) {
-    const refreshed = await withSlotLock(store, slot, () => refreshLocked(store, slot, binding, cancel), {
-      waitMs: LOCK_WAIT_MS,
-    });
+    let refreshed;
+    try {
+      refreshed = await withSlotLock(store, slot, () => refreshLocked(store, slot, binding, cancel), {
+        waitMs: LOCK_WAIT_MS,
+        signal: cancel,
+      });
+    } catch (error) {
+      if (error instanceof Stop && error.reason === "cancelled") return stop(error.outcome, error.reason);
+      throw error;
+    }
     if (!refreshed.ok) return refreshed;
     record = refreshed.record;
+    for (const seen of [refreshed.previous, record]) {
+      if (seen) known.add(seen.access_token).add(seen.refresh_token);
+    }
   }
 
   const limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
@@ -73,6 +90,10 @@ export async function sessionFor(binding, store, cancel) {
       scopes: [METADATA_SCOPE],
       accessToken: record.access_token,
     },
+    documents: verified.documents,
+    // Internal only: for checking output before it is printed. Never part
+    // of a result, envelope, log or file.
+    knownCredentials: [...known],
   };
 }
 
@@ -145,7 +166,7 @@ async function refreshLocked(store, slot, binding, cancel) {
     if (error instanceof Stop) return stop("login_required", "refresh_not_saved");
     throw error;
   }
-  return { ok: true, record: next };
+  return { ok: true, record: next, previous: current };
 }
 
 function stop(outcome, reason) {

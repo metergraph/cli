@@ -10,19 +10,65 @@ import {
   LOGIN_RUNTIMES,
   MAX_TIMEOUT_MS,
   MIN_TIMEOUT_MS,
+  READ_DEFAULT_DAYS,
+  READ_DEFAULT_LIMIT,
+  READ_DEFAULT_TIMEOUT_MS,
+  READ_MAX_DAYS,
+  READ_MAX_LIMIT,
+  READ_MAX_TIMEOUT_MS,
+  READ_MIN_TIMEOUT_MS,
   SKILL_CLIENTS,
   SKILL_RUNTIMES,
+  TRACES_DEFAULT_LIMIT,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
+import { isCursor, isSafeFilter } from "./read-contract.js";
 
-const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout"]);
-const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout"]);
+export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
+const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", ...READ_COMMANDS]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
+const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
   logout: new Set(["--project", "--config-dir"]),
+  status: new Set(READ_BASE),
+  context: new Set(READ_BASE),
+  capabilities: new Set(READ_BASE),
+  usage: new Set([...READ_BASE, "--days", "--limit"]),
+  routes: new Set([...READ_BASE, "--limit"]),
+  traces: new Set([...READ_BASE, "--days", "--limit", "--route", "--status", "--cursor"]),
+};
+// Requests the read commands recognize and refuse, so a script gets an
+// explicit unsupported result instead of an unknown argument or, worse, a
+// broader query than it asked for. Nothing is sent for them.
+const REFUSED = {
+  "--environment": { value: true, reason: "environment_selector_unsupported" },
+  "--workload": { value: true, reason: "workload_filter_unsupported" },
+  "--since": { value: true, reason: "time_range_unsupported" },
+  "--until": { value: true, reason: "time_range_unsupported" },
+  "--sql": { value: true, reason: "query_unsupported" },
+  "--query": { value: true, reason: "query_unsupported" },
+  "--content": { value: false, reason: "content_access_unsupported" },
+  "--include-content": { value: false, reason: "content_access_unsupported" },
+  "--debug": { value: false, reason: "content_access_unsupported" },
+  "--replay": { value: false, reason: "content_access_unsupported" },
+};
+const REFUSED_MESSAGES = {
+  environment_selector_unsupported:
+    "--environment is not supported: the service's agent access contract has no environment selector, " +
+    "so the CLI never sends one. Results cover the bound workspace. No request was made.",
+  workload_filter_unsupported:
+    "--workload is not supported by this CLI version: it cannot verify from the returned traces that a " +
+    "workload filter was applied, so it never sends one. No request was made.",
+  time_range_unsupported:
+    "--since and --until are not supported. Use --days N (1 to 90) for a window relative to now. No request was made.",
+  query_unsupported:
+    "Free-form queries are not supported. Use the fixed options of this command. No request was made.",
+  content_access_unsupported:
+    "Read commands return Metadata only. They never read retained content, debug data or replays. No request was made.",
 };
 // Options that take no value.
 const FLAGS = {
@@ -38,7 +84,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 //   { ok: true, command: "login", runtime, origin, workspace, project,
 //     configDir, timeoutMs, signup, noBrowser, reconnect, json }
 //   { ok: true, command: "logout", project, configDir, json }
-//   { ok: false, command, json, code, message }
+//   { ok: true, command: one of READ_COMMANDS, project, configDir, timeoutMs,
+//     days, limit, route, status, cursor, json }
+//   { ok: false, command, json, code, message, outcome }
+// outcome is invalid_input, or unsupported for a recognized request the read
+// commands refuse (such as --environment).
 // Error messages are fixed strings. They never contain an argument value,
 // because a mistyped argument can be a credential.
 export function parseArgs(argv) {
@@ -56,12 +106,13 @@ export function parseArgs(argv) {
   const values = {};
   const flags = new Set();
 
-  const fail = (code, message) => ({
+  const fail = (code, message, outcome = "invalid_input") => ({
     ok: false,
     command: command === "skill" && action !== null ? `skill ${action}` : command ?? (version ? "version" : null),
     json,
     code,
     message,
+    outcome,
   });
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -85,6 +136,15 @@ export function parseArgs(argv) {
     if (command === "skill" && action === null && SKILL_ACTIONS.has(arg)) {
       action = arg;
       continue;
+    }
+
+    if (READ_COMMANDS.includes(command)) {
+      const equals = arg.indexOf("=");
+      const name = equals === -1 ? arg : arg.slice(0, equals);
+      if (Object.hasOwn(REFUSED, name)) {
+        const { reason } = REFUSED[name];
+        return fail(reason, REFUSED_MESSAGES[reason], "unsupported");
+      }
     }
 
     if (Object.hasOwn(OPTIONS, command ?? "")) {
@@ -139,6 +199,7 @@ export function parseArgs(argv) {
   }
   if (command === "skill") return parseSkill(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);
+  if (READ_COMMANDS.includes(command)) return parseRead(command, values, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
     if (!paths.ok) return paths;
@@ -243,6 +304,72 @@ function parseLogin(values, flags, json, fail) {
     reconnect: flags.has("--reconnect"),
     json,
   };
+}
+
+// Read commands take the project and config directory, one total timeout and,
+// where the endpoint supports them, bounded days, limit and trace filters.
+// Out of range values fail here; nothing is clamped.
+function parseRead(command, values, json, fail) {
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs =
+    rawTimeout === undefined
+      ? READ_DEFAULT_TIMEOUT_MS
+      : parseTimeout(rawTimeout, READ_MIN_TIMEOUT_MS, READ_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) {
+    return fail(
+      "invalid_timeout",
+      `--timeout-ms must be a whole number from ${READ_MIN_TIMEOUT_MS} to ${READ_MAX_TIMEOUT_MS}.`,
+    );
+  }
+  const takesDays = command === "usage" || command === "traces";
+  const takesLimit = takesDays || command === "routes";
+  let days = null;
+  if (takesDays) {
+    days = values["--days"] === undefined ? READ_DEFAULT_DAYS : parseBounded(values["--days"], 1, READ_MAX_DAYS);
+    if (days === null) return fail("invalid_days", `--days must be a whole number from 1 to ${READ_MAX_DAYS}.`);
+  }
+  let limit = null;
+  if (takesLimit) {
+    const fallback = command === "traces" ? TRACES_DEFAULT_LIMIT : READ_DEFAULT_LIMIT;
+    limit = values["--limit"] === undefined ? fallback : parseBounded(values["--limit"], 1, READ_MAX_LIMIT);
+    if (limit === null) return fail("invalid_limit", `--limit must be a whole number from 1 to ${READ_MAX_LIMIT}.`);
+  }
+  const route = values["--route"] ?? null;
+  if (route !== null && !isSafeFilter(route)) {
+    return fail("invalid_route", "--route must be 1 to 256 characters without control characters.");
+  }
+  const status = values["--status"] ?? null;
+  if (status !== null && status !== "success" && status !== "error") {
+    return fail("invalid_status", "--status must be success or error.");
+  }
+  const cursor = values["--cursor"] ?? null;
+  if (cursor !== null && !isCursor(cursor)) {
+    return fail(
+      "invalid_cursor",
+      "--cursor must be the next_cursor value from an earlier traces result, at most 512 printable characters.",
+    );
+  }
+  return {
+    ok: true,
+    command,
+    project: paths.project,
+    configDir: paths.configDir,
+    timeoutMs,
+    days,
+    limit,
+    route,
+    status,
+    cursor,
+    json,
+  };
+}
+
+function parseBounded(raw, min, max) {
+  if (!/^[0-9]{1,3}$/.test(raw)) return null;
+  const value = Number(raw);
+  return value < min || value > max ? null : value;
 }
 
 function parsePaths(values, fail) {

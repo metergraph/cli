@@ -16,6 +16,10 @@ const b64 = (value) => Buffer.from(typeof value === "string" ? value : JSON.stri
 export async function startOAuthServer(initial = {}) {
   const behavior = {
     profile: "local",
+    // What GET /v1/deployment reports, when it should differ from profile,
+    // and its status.
+    deploymentProfile: null,
+    deploymentStatus: 200,
     workspaceId: WORKSPACE_A,
     // Hooks that may rewrite a document or response just before it is sent.
     prm: (doc) => doc,
@@ -36,6 +40,15 @@ export async function startOAuthServer(initial = {}) {
     // example 403 after membership loss.
     bearerStatus: 200,
     expiresIn: 3600,
+    // Metadata read endpoints: hooks that rewrite each document, a status
+    // used instead of 200 (with readHeaders), and readRaw, which may answer
+    // the request itself and return true.
+    usage: (doc) => doc,
+    routes: (doc) => doc,
+    traces: (doc) => doc,
+    readStatus: 200,
+    readHeaders: {},
+    readRaw: null,
     ...initial,
   };
 
@@ -79,7 +92,10 @@ export async function startOAuthServer(initial = {}) {
   function route(request, response, url, body) {
     const path = url.pathname;
     if (path === "/healthz") return send(response, 200, { ok: true });
-    if (path === "/v1/deployment") return send(response, 200, { deployment_profile: behavior.profile });
+    if (path === "/v1/deployment") {
+      if (behavior.deploymentStatus !== 200) return send(response, behavior.deploymentStatus, { error: "not_found" });
+      return send(response, 200, { deployment_profile: behavior.deploymentProfile ?? behavior.profile });
+    }
     // A hook that returns null emulates a server without that document.
     if (path === "/.well-known/oauth-protected-resource/v1/agent/mcp") {
       const doc = behavior.prm(protectedResource());
@@ -101,8 +117,8 @@ export async function startOAuthServer(initial = {}) {
     }
     if (path === "/v1/oauth/token" && request.method === "POST") return token(response, new URLSearchParams(body));
     if (path === "/v1/oauth/revoke" && request.method === "POST") return revokeToken(response, new URLSearchParams(body));
-    if (path === "/v1/agent/workspace" || path === "/v1/agent/capabilities") {
-      return bearer(request, response, path);
+    if (path === "/v1/agent/workspace" || path === "/v1/agent/capabilities" || READ_DOCUMENTS[path]) {
+      return bearer(request, response, path, url.searchParams);
     }
     return send(response, 404, { error: "not_found" });
   }
@@ -264,7 +280,7 @@ export async function startOAuthServer(initial = {}) {
     return response.end("{}");
   }
 
-  function bearer(request, response, path) {
+  function bearer(request, response, path, query) {
     const header = request.headers.authorization ?? "";
     const grant = header.startsWith("Bearer ") ? state.access.get(header.slice(7)) : undefined;
     if (grant === undefined || grant.revoked) {
@@ -285,12 +301,22 @@ export async function startOAuthServer(initial = {}) {
       served.workspace = behavior.workspace(workspaceDocument(provenance, grant.workspaceId));
       return send(response, 200, served.workspace);
     }
+    if (READ_DOCUMENTS[path]) {
+      if (behavior.readRaw !== null && behavior.readRaw(request, response, path, query)) return undefined;
+      if (behavior.readStatus !== 200) {
+        response.writeHead(behavior.readStatus, { "content-type": "application/json", ...behavior.readHeaders });
+        return response.end(JSON.stringify({ error: "refused", detail: "SYNTHETIC_BODY_MARKER" }));
+      }
+      const { name, build } = READ_DOCUMENTS[path];
+      served.read = behavior[name](build(provenance, query), query);
+      return send(response, 200, served.read);
+    }
     served.capabilities = behavior.capabilities(capabilitiesDocument(provenance));
     return send(response, 200, served.capabilities);
   }
 
   // The last bearer documents actually sent, so tests can assert the wire shape.
-  const served = { workspace: null, capabilities: null };
+  const served = { workspace: null, capabilities: null, read: null };
 
   return {
     origin,
@@ -371,6 +397,173 @@ export function capabilitiesDocument(provenance) {
     bounds: { max_days: 90, max_rows: 200, max_response_bytes: 5242880, content_included_by_default: false },
   };
 }
+
+// Synthetic Metadata read documents in the service's actual field types:
+// schema_version is the contract string, latency may be null, cost is a
+// number (nullable on traces), counts are integers. Route descriptions,
+// constraints and evaluation contracts carry a marker so tests prove they are
+// never printed.
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const USAGE_ROWS = Object.freeze([
+  {
+    date: "2026-01-02",
+    route: "checkout-summary",
+    calls: 40,
+    cost_usd: 0.0125,
+    input_tokens: 12000,
+    output_tokens: 3400,
+    avg_latency_ms: 820,
+    p95_latency_ms: 1900,
+    error_calls: 2,
+  },
+  {
+    date: "2026-01-02",
+    route: "support-triage",
+    calls: 12,
+    cost_usd: 0.004,
+    input_tokens: 3000,
+    output_tokens: 900,
+    avg_latency_ms: null,
+    p95_latency_ms: null,
+    error_calls: 0,
+  },
+  {
+    date: "2026-01-03",
+    route: "checkout-summary",
+    calls: 25,
+    cost_usd: 0.0081,
+    input_tokens: 7600,
+    output_tokens: 2100,
+    avg_latency_ms: 790,
+    p95_latency_ms: 1650,
+    error_calls: 1,
+  },
+]);
+
+export function usageDocument(provenance, query) {
+  const days = Number(query.get("days"));
+  const limit = Number(query.get("limit"));
+  const items = USAGE_ROWS.slice(0, limit).map((row) => ({ ...row }));
+  return {
+    schema_version: CONTRACT_VERSION,
+    provenance,
+    window: {
+      days,
+      since: new Date(Date.now() - days * DAY_MS).toISOString(),
+      until: new Date().toISOString(),
+    },
+    evidence: { sources: ["telemetry"], rows: items.length, complete: true },
+    warnings: [],
+    days,
+    content_included: false,
+    truncated: USAGE_ROWS.length > limit,
+    items,
+  };
+}
+
+export function routesDocument(provenance) {
+  return {
+    schema_version: CONTRACT_VERSION,
+    provenance,
+    routes: [
+      {
+        route: "checkout-summary",
+        description: "SYNTHETIC_BODY_MARKER description",
+        constraints: { max_cost_usd: 0.01, note: "SYNTHETIC_BODY_MARKER constraint" },
+        evaluation_contract: { rubric: "SYNTHETIC_BODY_MARKER rubric" },
+        evaluation_contract_version: 3,
+        evaluation_contract_hash: "sha256:0f1e2d3c4b5a",
+        updated_at: "2026-01-01T00:00:00Z",
+        calls: 65,
+        replay_eligible_calls: 10,
+      },
+      {
+        route: "support-triage",
+        description: null,
+        constraints: {},
+        evaluation_contract: null,
+        evaluation_contract_version: null,
+        evaluation_contract_hash: null,
+        updated_at: "2026-01-01T00:00:00Z",
+        calls: 12,
+        replay_eligible_calls: 0,
+      },
+      {
+        route: "nightly-digest",
+        description: "SYNTHETIC_BODY_MARKER digest",
+        constraints: {},
+        evaluation_contract: { checks: ["SYNTHETIC_BODY_MARKER"] },
+        evaluation_contract_version: "2",
+        evaluation_contract_hash: "sha256:a1b2c3d4e5f6",
+        updated_at: "2026-01-02T00:00:00.123456+00:00",
+        calls: 3,
+        replay_eligible_calls: 3,
+      },
+    ],
+  };
+}
+
+export const TRACE_ROWS = Object.freeze(
+  [
+    ["0001", "success", ["checkout-summary"], 0.0031],
+    ["0002", "error", ["support-triage"], null],
+    ["0003", "success", ["checkout-summary", "support-triage"], 0.0012],
+  ].map(([n, status, routes, cost], index) => ({
+    id: `7d1c2b3a-0000-4000-8000-00000000${n}`,
+    trace_id: `trace-${n}`,
+    trace_name: `synthetic trace ${n}`,
+    started_at: `2026-01-0${3 - index}T10:00:00Z`,
+    last_span_at: `2026-01-0${3 - index}T10:00:05.250000+00:00`,
+    span_count: 4,
+    input_tokens: 1200,
+    output_tokens: 300,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    cost_usd: cost,
+    status,
+    routes,
+    providers: ["example-provider"],
+    models: ["example-model-small"],
+  })),
+);
+
+// The cursor is opaque to the CLI. Here it is "page:OFFSET".
+export function tracesDocument(provenance, query) {
+  const days = Number(query.get("days"));
+  const limit = Number(query.get("limit"));
+  const offset = query.has("cursor") ? Number(query.get("cursor").slice(5)) : 0;
+  const rows = TRACE_ROWS.filter(
+    (row) =>
+      (!query.has("status") || row.status === query.get("status")) &&
+      (!query.has("route") || row.routes.includes(query.get("route"))),
+  );
+  const traces = rows.slice(offset, offset + limit).map((row) => ({ ...row }));
+  const truncated = offset + limit < rows.length;
+  const next = truncated ? `page:${offset + limit}` : null;
+  return {
+    schema_version: CONTRACT_VERSION,
+    provenance,
+    window: {
+      days,
+      since: new Date(Date.now() - days * DAY_MS).toISOString(),
+      until: new Date().toISOString(),
+    },
+    evidence: { sources: ["telemetry"], rows: traces.length, complete: true },
+    warnings: [],
+    page: { limit, truncated, next_cursor: next },
+    content_included: false,
+    truncated,
+    next_cursor: next,
+    traces,
+  };
+}
+
+const READ_DOCUMENTS = {
+  "/v1/agent/usage": { name: "usage", build: usageDocument },
+  "/v1/agent/routes": { name: "routes", build: routesDocument },
+  "/v1/agent/traces": { name: "traces", build: tracesDocument },
+};
 
 function readBody(request) {
   return new Promise((resolve) => {

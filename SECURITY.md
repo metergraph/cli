@@ -15,7 +15,8 @@ include real credentials, tokens or customer data in a report.
 
 The published `0.1.0` package holds no credentials of its own. This checkout
 (`0.2.0-preview.0`, unpublished) adds `login` and `logout`, which hold one delegated,
-Metadata-only grant per signed in project; see [Sign in](#sign-in-checkout-only). The
+Metadata-only grant per signed in project, and read commands that use it; see
+[Sign in](#sign-in-checkout-only) and [Read commands](#read-commands-checkout-only). The
 CLI is designed to limit what it reads, writes, sends and prints. These are the
 boundaries it is designed to keep:
 
@@ -122,6 +123,55 @@ these boundaries:
 - **Redacted output.** Tokens, the authorization code, the PKCE verifier, workspace
   names, user names, email addresses, absolute paths and server text are never
   printed. `--json` prints one line on stdout and nothing on stderr.
+
+### Read commands (checkout only)
+
+`status`, `context`, `capabilities`, `usage`, `routes` and `traces` are not in any
+published package yet. They are designed to keep these boundaries:
+
+- **Existing grant only.** They use the project's saved Metadata grant through the same
+  verified session as `login`: the workspace, deployment profile and `agent:metadata`
+  scope are checked with the service on every run, and content, evidence and replay
+  capabilities must be unavailable. They never open a browser, sign in, request a
+  broader scope or accept a credential from arguments, the environment or stdin.
+- **Fixed GET requests.** Requests go only to fixed paths on the bound origin. A query
+  string is built from validated options and is accepted by the transport only on the
+  usage and traces paths, with an allowlist of keys per path, so no argument can choose
+  a path, origin or header. Redirects are not followed and bodies over 1 MiB are
+  discarded.
+- **One deadline, no silent retries.** Every request of a command, including a token
+  refresh and any wait for another process's grant lock, shares one `--timeout-ms`
+  deadline, and Ctrl+C stops that wait too. A lock held by another process is never
+  removed or taken over. A refused, rate limited or failed read is
+  reported, not retried, and a refresh that may have consumed the refresh token is
+  never repeated.
+- **Validated output only.** Every read document must carry the service's contract
+  version and the bound workspace and profile in its provenance, and must state that
+  content is not included. Only fields the CLI validates are printed. Unknown fields
+  are dropped without naming them, a row with a content or credential field is refused
+  as a whole, and names with control or formatting characters are replaced with
+  `null`. Route descriptions, constraints, evaluation contracts, warning messages and
+  server error text are not printed. Free-text filter arguments are not echoed. Before
+  anything is printed, every output string is checked against the token values the CLI
+  holds for the project (including ones a refresh just replaced); a match fails closed
+  with `credential_in_metadata_response` and prints none of the response. This is an
+  exact check for known values, not a detector for secrets in general.
+- **No unbounded or implied reads.** `--days` and `--limit` are bounded and never
+  clamped. Traces are read one page at a time and a cursor is followed only when you
+  pass it. Requests for an environment, a workload filter (which the returned rows
+  cannot prove was applied), an absolute time range, a free-form query, content, debug
+  data or replay are refused before any request.
+- **No invented links or verification.** No trace link is printed, because the service
+  does not yet return a workspace-bound one. `status` checks the service's reported
+  deployment profile against the binding and never reports application traffic as
+  verified.
+- **Not side-effect free.** Read commands change no workspace configuration or
+  telemetry and send no ingest data, but they may refresh their own grant, and the
+  service may record the access (audit entries, last used times).
+
+Route, trace, provider and model names come from your workspace data. They are printed
+as data and should never be treated as instructions, by people or by agents reading
+the output.
 
 Limits: anyone who can run code as your user can read or use the saved grant, as with
 any per-user credential file. The `0700`/`0600` fallback on Linux and macOS is not an

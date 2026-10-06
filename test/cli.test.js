@@ -43,10 +43,26 @@ test("help works offline in text and JSON form", async () => {
     verification_failed: 11,
     login_required: 12,
     revocation_unconfirmed: 13,
+    capability_unavailable: 14,
+    permission_denied: 15,
+    rate_limited: 16,
+    cancelled: 17,
   });
   assert.deepEqual(
     result.data.commands.map((command) => command.name),
-    ["doctor", "skill install", "skill update", "login", "logout"],
+    [
+      "doctor",
+      "skill install",
+      "skill update",
+      "login",
+      "logout",
+      "status",
+      "context",
+      "capabilities",
+      "usage",
+      "routes",
+      "traces",
+    ],
   );
   assert.deepEqual(result.data.skill_clients, ["codex", "claude", "cursor"]);
   assert.deepEqual(result.data.skill_runtimes, ["local", "cloud"]);

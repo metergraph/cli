@@ -1,4 +1,4 @@
-import { parseArgs } from "./args.js";
+import { READ_COMMANDS, parseArgs } from "./args.js";
 import { runLogin, runLogout } from "./auth-login.js";
 import { runDoctor } from "./doctor.js";
 import {
@@ -13,6 +13,8 @@ import {
   toJsonLine,
   versionData,
 } from "./output.js";
+import { runRead } from "./read.js";
+import { readMessage, readText } from "./read-output.js";
 import { runSkill } from "./skill.js";
 import { VERSION } from "./constants.js";
 
@@ -43,7 +45,7 @@ async function run(argv, { stdout, stderr }) {
   if (!parsed.ok) {
     const result = envelope({
       command: parsed.command,
-      outcome: "invalid_input",
+      outcome: parsed.outcome,
       reason: parsed.code,
       message: parsed.message,
     });
@@ -79,6 +81,20 @@ async function run(argv, { stdout, stderr }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : authText(result, message));
+    return result;
+  }
+
+  if (READ_COMMANDS.includes(parsed.command)) {
+    const { outcome, reason, data } = await runRead(parsed);
+    const message = readMessage(outcome, reason);
+    const result = envelope({
+      command: parsed.command,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : readText(result, message));
     return result;
   }
 

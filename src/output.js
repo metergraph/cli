@@ -13,7 +13,15 @@ import {
   METADATA_SCOPE,
   MIN_TIMEOUT_MS,
   PACKAGE_NAME,
+  READ_DEFAULT_DAYS,
+  READ_DEFAULT_LIMIT,
+  READ_DEFAULT_TIMEOUT_MS,
+  READ_MAX_DAYS,
+  READ_MAX_LIMIT,
+  READ_MAX_TIMEOUT_MS,
+  READ_MIN_TIMEOUT_MS,
   SCHEMA_VERSION,
+  TRACES_DEFAULT_LIMIT,
   SKILL_CLIENTS,
   SKILL_RUNTIMES,
   SUPPORTED_PROFILES,
@@ -120,6 +128,102 @@ const LOGIN_USAGE =
   "[--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
 
+const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
+const READ_BASE_OPTIONS = [
+  { name: "--project", value: "DIR", summary: "Signed in project directory. Default: the current directory." },
+  CONFIG_DIR_OPTION,
+  {
+    name: "--timeout-ms",
+    value: "N",
+    summary:
+      `Total time for every request of the command, ${READ_MIN_TIMEOUT_MS} to ${READ_MAX_TIMEOUT_MS}. ` +
+      `Default ${READ_DEFAULT_TIMEOUT_MS}.`,
+  },
+];
+const DAYS_OPTION = {
+  name: "--days",
+  value: "N",
+  summary: `Window of the last N days, 1 to ${READ_MAX_DAYS}. Default ${READ_DEFAULT_DAYS}.`,
+};
+const limitOption = (fallback, extra = "") => ({
+  name: "--limit",
+  value: "N",
+  summary: `Rows to return, 1 to ${READ_MAX_LIMIT}. Default ${fallback}.${extra}`,
+});
+const READ_BASE_USAGE = "[--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
+const REFUSED_NOTE =
+  "--environment, --workload, --since, --until, --sql, --query, --content, --include-content, --debug and --replay " +
+  "are recognized and refused with exit code 6 before any request.";
+
+// The read commands. Each uses the project's saved Metadata grant, makes GET
+// requests to fixed paths on the bound origin and never opens a browser.
+export const READ_HELP = Object.freeze([
+  {
+    name: "status",
+    usage: `metergraph status ${READ_BASE_USAGE}`,
+    summary:
+      "Show whether this project is configured, the service is reachable and reports the bound deployment " +
+      "profile, and the grant is verified for the bound workspace, with its Metadata capabilities. " +
+      "Never claims application traffic is verified.",
+    options: [...READ_BASE_OPTIONS, JSON_OPTION],
+  },
+  {
+    name: "context",
+    usage: `metergraph context ${READ_BASE_USAGE}`,
+    summary: "Show the verified workspace: ID, slug, name, Metadata retention and access scope.",
+    options: [...READ_BASE_OPTIONS, JSON_OPTION],
+  },
+  {
+    name: "capabilities",
+    usage: `metergraph capabilities ${READ_BASE_USAGE}`,
+    summary: "Show which agent reads the service offers this grant, their privacy class and the service's bounds.",
+    options: [...READ_BASE_OPTIONS, JSON_OPTION],
+  },
+  {
+    name: "usage",
+    usage: `metergraph usage [--days N] [--limit N] ${READ_BASE_USAGE}`,
+    summary: "Show daily calls, errors, cost, tokens and latency per route for a recent window. Metadata only.",
+    options: [...READ_BASE_OPTIONS, DAYS_OPTION, limitOption(READ_DEFAULT_LIMIT), JSON_OPTION],
+  },
+  {
+    name: "routes",
+    usage: `metergraph routes [--limit N] ${READ_BASE_USAGE}`,
+    summary:
+      "List routes with call counts and evaluation contract versions. Descriptions, constraints and contract " +
+      "bodies are not printed.",
+    options: [
+      ...READ_BASE_OPTIONS,
+      limitOption(
+        READ_DEFAULT_LIMIT,
+        " The service has no route limit, so extra rows are cut locally and reported as truncated.",
+      ),
+      JSON_OPTION,
+    ],
+  },
+  {
+    name: "traces",
+    usage:
+      `metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] ` +
+      `[--cursor CURSOR] ${READ_BASE_USAGE}`,
+    summary:
+      "List one page of trace metadata: status, span count, tokens, cost, routes, providers and models. " +
+      "No prompts, responses or tool calls.",
+    options: [
+      ...READ_BASE_OPTIONS,
+      DAYS_OPTION,
+      limitOption(TRACES_DEFAULT_LIMIT),
+      { name: "--route", value: "NAME", summary: "Only traces that include this route." },
+      { name: "--status", value: "STATUS", summary: "Only success or error traces." },
+      {
+        name: "--cursor",
+        value: "CURSOR",
+        summary: "next_cursor from an earlier result, to read the next page. Pages are never fetched automatically.",
+      },
+      JSON_OPTION,
+    ],
+  },
+]);
+
 export function helpData(topic) {
   return {
     topic,
@@ -130,6 +234,7 @@ export function helpData(topic) {
       ...SKILL_USAGE,
       LOGIN_USAGE,
       LOGOUT_USAGE,
+      ...READ_HELP.map((entry) => entry.usage),
     ],
     commands: [
       {
@@ -164,6 +269,7 @@ export function helpData(topic) {
           "Ask the service to revoke this project's grant, then remove the saved grant and the project binding.",
         options: LOGOUT_OPTIONS,
       },
+      ...READ_HELP.map(({ name, summary, options }) => ({ name, summary, options })),
     ],
     skill_clients: Object.keys(SKILL_CLIENTS),
     skill_runtimes: [...SKILL_RUNTIMES],
@@ -232,6 +338,26 @@ export function helpText(topic) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
       lines.push(`  ${flag.padEnd(18)}${option.summary}`);
     }
+  } else if (READ_HELP.some((entry) => entry.name === topic)) {
+    const entry = READ_HELP.find((candidate) => candidate.name === topic);
+    lines.push(
+      `Usage: ${entry.usage}`,
+      "",
+      entry.summary,
+      "",
+      "Uses this project's saved Metadata grant (see \"metergraph help login\"). Sends GET requests only, to",
+      "fixed paths on the bound origin, follows no redirects and reads bounded responses. Never opens a",
+      "browser, signs in, writes project files, reads retained content, replays or calls a model provider.",
+      "It may refresh its own saved grant, and the service may record the access (for example last used",
+      "times); it never changes workspace configuration or telemetry and never sends ingest data.",
+      REFUSED_NOTE,
+      "",
+      "Options:",
+    );
+    for (const option of entry.options) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
+    }
   } else if (topic === "skill") {
     lines.push(
       "Usage:",
@@ -270,10 +396,17 @@ export function helpText(topic) {
       "  metergraph skill install|update  Install or update the agent skill in a project",
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
+      "  metergraph status [options]      Show configured, reachable and verified state",
+      "  metergraph context [options]     Show the verified workspace",
+      "  metergraph capabilities [opts]   Show the agent reads offered to this grant",
+      "  metergraph usage [options]       Daily usage per route, Metadata only",
+      "  metergraph routes [options]      Routes and evaluation contract versions",
+      "  metergraph traces [options]      One page of trace metadata",
       "",
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',
       'Run "metergraph help login" or "metergraph help logout" for sign in options.',
+      'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
     );
   }
   lines.push("", "Exit codes:");

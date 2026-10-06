@@ -355,7 +355,7 @@ function decodeClaims(token) {
 //     every capability that reads content or replays, or calls a configured
 //     provider, must be unavailable to this grant.
 // Nothing else is read: no telemetry, content or provider requests.
-// Returns { ok: true, workspaceId } or { ok: false, outcome, reason, denied }
+// Returns { ok: true, workspaceId, documents } or { ok: false, outcome, reason, denied }
 // where denied means the service refused the token (401 or 403).
 export async function verifyContext(origin, accessToken, { profile, workspaceId }, signal) {
   const workspace = await bearerJson(origin, AUTH_PATHS.workspace, accessToken, WORKSPACE_BYTES, signal, "workspace");
@@ -374,7 +374,9 @@ export async function verifyContext(origin, accessToken, { profile, workspaceId 
   if (!capabilities.ok) return capabilities;
   const allowed = checkCapabilities(capabilities.body, { profile, workspaceId });
   if (!allowed.ok) return allowed;
-  return { ok: true, workspaceId };
+  // The verified documents stay in memory for read commands, which print
+  // only fields they validate themselves.
+  return { ok: true, workspaceId, documents: { workspace: workspace.body, capabilities: capabilities.body } };
 }
 
 // Both documents carry the service's contract version string in
