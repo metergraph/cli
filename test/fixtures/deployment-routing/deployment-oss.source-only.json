@@ -1,0 +1,7 @@
+{
+  "fixture": "source-only module contract fixture: a hypothetical open source server that serves GET /v1/deployment with the oss profile. It exercises this module's route contract only. It is not a capture from any open source release and makes no parity claim. A server that does not serve this endpoint is handed off to its operator.",
+  "source_only": true,
+  "module_contract_fixture": true,
+  "current_release_parity": false,
+  "body": { "deployment_profile": "oss" }
+}

@@ -1,0 +1,4 @@
+{
+  "fixture": "Synthetic GET /v1/deployment body for a customer-local deployment.",
+  "body": { "deployment_profile": "local", "capabilities": { "agent": true } }
+}

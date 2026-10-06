@@ -1,0 +1,22 @@
+{
+  "fixture": "Synthetic OAuth discovery documents that advertise the Metadata scope on the fixed paths. Tests replace {origin} with the test server origin. For the oss profile this is a source-only module contract fixture: no released open source server serves these documents.",
+  "protected_resource": {
+    "resource": "{origin}/v1/agent/mcp",
+    "authorization_servers": ["{origin}/v1/oauth"],
+    "scopes_supported": ["agent:metadata"],
+    "bearer_methods_supported": ["header"]
+  },
+  "authorization_server": {
+    "issuer": "{origin}/v1/oauth",
+    "authorization_endpoint": "{origin}/v1/oauth/authorize",
+    "token_endpoint": "{origin}/v1/oauth/token",
+    "registration_endpoint": "{origin}/v1/oauth/register",
+    "revocation_endpoint": "{origin}/v1/oauth/revoke",
+    "scopes_supported": ["agent:metadata"],
+    "response_types_supported": ["code"],
+    "grant_types_supported": ["authorization_code", "refresh_token"],
+    "code_challenge_methods_supported": ["S256"],
+    "token_endpoint_auth_methods_supported": ["none"],
+    "revocation_endpoint_auth_methods_supported": ["none"]
+  }
+}

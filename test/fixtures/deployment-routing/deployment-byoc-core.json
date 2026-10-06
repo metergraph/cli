@@ -1,0 +1,4 @@
+{
+  "fixture": "Synthetic GET /v1/deployment body for a BYOC core deployment.",
+  "body": { "deployment_profile": "byoc-core", "cloud": { "provider": "example" }, "capabilities": { "agent": true } }
+}

@@ -1,0 +1,21 @@
+{
+  "fixture": "Synthetic GET /v1/agent/workspace body for a Metadata-only grant. Tests set provenance.deployment_profile.",
+  "body": {
+    "schema_version": "metergraph.agent-access/v1",
+    "provenance": {
+      "workspace_id": "00000000-0000-4000-8000-00000000000a",
+      "deployment_profile": "local",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "source": "agent_access"
+    },
+    "workspace": {
+      "id": "00000000-0000-4000-8000-00000000000a",
+      "slug": "example-SYNTHETIC_BODY_MARKER",
+      "name": "SYNTHETIC_BODY_MARKER workspace",
+      "created_at": "2026-01-01T00:00:00Z"
+    },
+    "retention": { "metadata_days": 90 },
+    "content": { "captured": true, "included": false },
+    "access": { "scopes": ["agent:metadata"] }
+  }
+}
