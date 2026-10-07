@@ -302,6 +302,21 @@ test("the installed CLI exposes exact trace verification without claiming traffi
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });
 
+test("the packed CLI passes the offline three-client parity matrix", { timeout: 120000 }, async () => {
+  const script = path.join(PACKAGE_ROOT, "scripts", "client-parity.mjs");
+  const result = check(await run(process.execPath, [script, "--tarball", tarball], { cwd: workDir }),
+    "packed client parity");
+  const report = JSON.parse(result.stdout);
+  assert.equal(result.stderr, "");
+  assert.equal(report.artifact_version, sourcePackage.version);
+  assert.equal(report.artifact_sha256, createHash("sha256").update(readFileSync(tarball)).digest("hex"));
+  assert.deepEqual(report.clients.map(({ client }) => client), ["codex", "claude", "cursor"]);
+  assert.ok(report.clients.every(({ discovery, rerun, status, verify }) =>
+    discovery === "pending" && rerun === "reused" && status === "login_required" && verify === "login_required"));
+  assert.equal(report.grants_created, false);
+  assert.equal(report.network, "blocked");
+});
+
 test("the installed CLI probes a loopback service", async () => {
   const server = await startServer(healthyRoutes("local"));
   try {
