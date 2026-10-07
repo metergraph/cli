@@ -41,6 +41,12 @@ const EXPECTED_FILES = [
   "src/read-contract.js",
   "src/read-output.js",
   "src/read.js",
+  "src/setup-env-acl.js",
+  "src/setup-env-git.js",
+  "src/setup-env-parse.js",
+  "src/setup-env.js",
+  "src/setup-state.js",
+  "src/setup.js",
   "src/skill-bundle.js",
   "src/skill.js",
   "src/trace-contract.js",
@@ -247,6 +253,24 @@ test("the installed CLI hands a cloud sign in off offline and writes nothing", a
   assert.equal(parsed.data.authenticated, false);
   assert.equal(parsed.data.next_action.kind, "connection_guide");
   assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the installed CLI exposes setup help and hands cloud setup off offline", async () => {
+  const target = path.join(workDir, "setup project");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const offline = ["--import", pathToFileURL(NO_NETWORK).href, bin];
+  const help = check(await run(process.execPath, [...offline, "help", "setup", "--json"], { cwd: workDir }), "packed setup help");
+  assert.equal(parseJsonLine(help.stdout).data.topic, "setup");
+  const result = await run(process.execPath,
+    [...offline, "setup", "--runtime", "cloud", "--project", target, "--json"], { cwd: workDir });
+  assert.equal(result.code, 6);
+  assert.equal(result.stderr, "");
+  const parsed = parseJsonLine(result.stdout);
+  assert.equal(parsed.command, "setup");
+  assert.equal(parsed.error.reason, "run_on_local_machine");
+  assert.equal(parsed.data.application_traffic_verified, false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });
 

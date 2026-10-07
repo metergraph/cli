@@ -127,6 +127,8 @@ const LOGIN_USAGE =
   "metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] " +
   "[--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
+const SETUP_USAGE = "metergraph setup --runtime local [--project DIR] [--config-dir DIR] [--env-file .env] " +
+  "[--timeout-ms N] [--no-browser] [--repair] [--json]";
 
 const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
 const READ_BASE_OPTIONS = [
@@ -234,6 +236,7 @@ export function helpData(topic) {
       ...SKILL_USAGE,
       LOGIN_USAGE,
       LOGOUT_USAGE,
+      SETUP_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
     ],
     commands: [
@@ -268,6 +271,20 @@ export function helpData(topic) {
         summary:
           "Ask the service to revoke this project's grant, then remove the saved grant and the project binding.",
         options: LOGOUT_OPTIONS,
+      },
+      {
+        name: "setup",
+        summary: "Ask for browser approval to issue one ingest-only key for the signed-in workspace, write a private env file, and acknowledge delivery. Does not verify application traffic.",
+        options: [
+          { name: "--runtime", value: "RUNTIME", summary: "Required. local only; other runtimes get a handoff." },
+          { name: "--project", value: "DIR", summary: "Signed-in project directory. Default: current directory." },
+          CONFIG_DIR_OPTION,
+          { name: "--env-file", value: "FILE", summary: "Project-relative env file. Default: .env." },
+          { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
+          { name: "--no-browser", value: null, summary: "Print approval URL on stderr; requires terminal output." },
+          { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
+          JSON_OPTION,
+        ],
       },
       ...READ_HELP.map(({ name, summary, options }) => ({ name, summary, options })),
     ],
@@ -306,6 +323,11 @@ export function helpText(topic) {
       "A healthy, supported service that requires sign in exits with code 3.",
       "Doctor never sends credentials, so it never reports a connected workspace.",
     );
+  } else if (topic === "setup") {
+    lines.push(`Usage: ${SETUP_USAGE}`, "", "Requires a signed-in project and local browser approval.",
+      "The browser approves an ingest-only key for the exact workspace. The CLI stores it in",
+      "a private env file and confirms delivery with the service. No application traffic is",
+      "claimed until an exact application trace is verified.");
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
     lines.push(`Usage: ${login ? LOGIN_USAGE : LOGOUT_USAGE}`, "");
@@ -396,6 +418,7 @@ export function helpText(topic) {
       "  metergraph skill install|update  Install or update the agent skill in a project",
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
+      "  metergraph setup [options]       Approve and write a private ingest key",
       "  metergraph status [options]      Show configured, reachable and verified state",
       "  metergraph context [options]     Show the verified workspace",
       "  metergraph capabilities [opts]   Show the agent reads offered to this grant",

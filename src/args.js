@@ -25,14 +25,15 @@ import { parseOrigin } from "./origin.js";
 import { isCursor, isSafeFilter } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", ...READ_COMMANDS]);
+const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "setup", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "setup", ...READ_COMMANDS]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
+  setup: new Set(["--runtime", "--project", "--config-dir", "--env-file", "--timeout-ms"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
@@ -73,6 +74,7 @@ const REFUSED_MESSAGES = {
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
+  setup: new Set(["--no-browser", "--repair"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -199,6 +201,7 @@ export function parseArgs(argv) {
   }
   if (command === "skill") return parseSkill(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);
+  if (command === "setup") return parseSetup(values, flags, json, fail);
   if (READ_COMMANDS.includes(command)) return parseRead(command, values, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
@@ -304,6 +307,24 @@ function parseLogin(values, flags, json, fail) {
     reconnect: flags.has("--reconnect"),
     json,
   };
+}
+
+function parseSetup(values, flags, json, fail) {
+  const runtime = values["--runtime"];
+  if (runtime === undefined) return fail("missing_runtime", "--runtime is required. Use local.");
+  if (!LOGIN_RUNTIMES.includes(runtime) && !HANDOFF_LOGIN_RUNTIMES.includes(runtime)) {
+    return fail("invalid_runtime", "--runtime must be local, cloud or cloud-no-shell.");
+  }
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const envFile = values["--env-file"] ?? ".env";
+  if (envFile === "" || envFile.includes("\0")) return fail("invalid_env_file", "--env-file must name a project-relative env file.");
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs = rawTimeout === undefined ? LOGIN_DEFAULT_TIMEOUT_MS :
+    parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) return fail("invalid_timeout", `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`);
+  return { ok: true, command: "setup", runtime, project: paths.project, configDir: paths.configDir,
+    envFile, timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"), json };
 }
 
 // Read commands take the project and config directory, one total timeout and,

@@ -49,6 +49,9 @@ export async function startOAuthServer(initial = {}) {
     readStatus: 200,
     readHeaders: {},
     readRaw: null,
+    setup: false,
+    setupMetadata: (doc) => doc,
+    setupRedeem: "issue", // issue, drop-after-issue, reject
     ...initial,
   };
 
@@ -61,6 +64,8 @@ export async function startOAuthServer(initial = {}) {
     // Every credential value the server issued, so tests can prove none of
     // them is ever printed.
     issued: [],
+    setupFamilies: new Map(),
+    setupReceipts: new Map(),
   };
 
   const sockets = new Set();
@@ -106,6 +111,7 @@ export async function startOAuthServer(initial = {}) {
       return doc === null ? send(response, 404, { error: "not_found" }) : send(response, 200, doc);
     }
     if (path === "/v1/oauth/register" && request.method === "POST") return registerClient(response, body);
+    if (behavior.setup && path.startsWith("/v1/cli/setup/")) return setupRoute(request, response, path, url, body);
     if (path === "/v1/oauth/authorize" && request.method === "GET") return authorize(response, url.searchParams);
     if (path === "/v1/auth/signup" && request.method === "GET") {
       const returnTo = url.searchParams.get("return_to") ?? "";
@@ -119,6 +125,66 @@ export async function startOAuthServer(initial = {}) {
     if (path === "/v1/oauth/revoke" && request.method === "POST") return revokeToken(response, new URLSearchParams(body));
     if (path === "/v1/agent/workspace" || path === "/v1/agent/capabilities" || READ_DOCUMENTS[path]) {
       return bearer(request, response, path, url.searchParams);
+    }
+    return send(response, 404, { error: "not_found" });
+  }
+
+  function setupRoute(request, response, path, url, body) {
+    const base = `${origin}/v1/cli/setup`;
+    if (path === "/v1/cli/setup/metadata" && request.method === "GET") return send(response, 200,
+      behavior.setupMetadata({ schema_version: "metergraph.cli-setup/v1", supported: true, unsupported_reason: null,
+        resource: base, authorization_endpoint: `${base}/authorize`, redemption_endpoint: `${base}/redeem`,
+        credential_endpoint: `${base}/credential`, registration_endpoint: `${origin}/v1/oauth/register`,
+        deployment_profile: behavior.profile, profiles_supported: ["local", "managed", "byoc-core"],
+        purpose: "ingest-bootstrap-v1", intents_supported: ["create", "replace_pending", "repair"],
+        code_challenge_methods_supported: ["S256"], credential_scope: "ingest", receipt_lifetime_seconds: 300 }));
+    if (path === "/v1/cli/setup/authorize" && request.method === "GET") {
+      const params = url.searchParams;
+      const family = state.setupFamilies.get(params.get("family_id"));
+      const intent = params.get("intent");
+      if (!state.clients.has(params.get("client_id")) || !["create", "replace_pending", "repair"].includes(intent) ||
+          params.get("workspace_id") !== behavior.workspaceId || params.get("code_challenge_method") !== "S256" ||
+          (intent === "create" && family) || (intent === "replace_pending" && family?.delivery !== "pending") ||
+          (intent === "repair" && (family?.delivery !== "acknowledged" || family?.keyId !== params.get("expected_key_id")))) {
+        return send(response, 409, { error: "setup_state_mismatch" });
+      }
+      const receipt = `mgbs_${randomBytes(32).toString("base64url")}`;
+      state.setupReceipts.set(receipt, { familyId: params.get("family_id"), intent, challenge: params.get("code_challenge"),
+        clientId: params.get("client_id"), redirectUri: params.get("redirect_uri"), workspaceId: params.get("workspace_id") });
+      const target = new URL(params.get("redirect_uri"));
+      target.searchParams.set("code", receipt);
+      target.searchParams.set("state", params.get("state"));
+      response.writeHead(302, { location: target.href });
+      return response.end();
+    }
+    if (path === "/v1/cli/setup/redeem" && request.method === "POST") {
+      const form = new URLSearchParams(body);
+      const receipt = state.setupReceipts.get(form.get("code"));
+      state.setupReceipts.delete(form.get("code"));
+      if (receipt === undefined || behavior.setupRedeem === "reject" ||
+          form.get("client_id") !== receipt.clientId || form.get("redirect_uri") !== receipt.redirectUri ||
+          form.get("family_id") !== receipt.familyId || form.get("workspace_id") !== receipt.workspaceId ||
+          createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url") !== receipt.challenge) {
+        return send(response, 400, { error: "invalid_grant" });
+      }
+      const token = `mg_${randomBytes(32).toString("base64url")}`;
+      const keyId = randomUUID();
+      state.issued.push(token);
+      state.setupFamilies.set(receipt.familyId, { keyId, token, delivery: "pending" });
+      if (behavior.setupRedeem === "drop-after-issue") return response.socket.destroy();
+      return send(response, 200, { schema_version: "metergraph.cli-setup/v1", token_type: "ingest",
+        ingest_token: token, scope: "ingest", delivery_state: "pending", workspace_id: receipt.workspaceId,
+        family_id: receipt.familyId, key_id: keyId, deployment: { origin, profile: behavior.profile } });
+    }
+    if (path === "/v1/cli/setup/credential") {
+      const familyId = request.method === "GET" ? url.searchParams.get("family_id") : new URLSearchParams(body).get("family_id");
+      const family = state.setupFamilies.get(familyId);
+      if (!family || request.headers.authorization !== `Bearer ${family.token}`) return send(response, 401, { error: "invalid_token" });
+      if (request.method === "POST") family.delivery = "acknowledged";
+      return send(response, 200, { schema_version: "metergraph.cli-setup/v1",
+        provenance: { origin, deployment_profile: behavior.profile, purpose: "ingest-bootstrap-v1" },
+        workspace_id: behavior.workspaceId, family_id: familyId, key_id: family.keyId,
+        delivery_state: family.delivery, scopes: ["ingest"] });
     }
     return send(response, 404, { error: "not_found" });
   }

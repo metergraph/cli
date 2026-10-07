@@ -16,6 +16,7 @@ import {
 import { runRead } from "./read.js";
 import { readMessage, readText } from "./read-output.js";
 import { runSkill } from "./skill.js";
+import { runSetup } from "./setup.js";
 import { VERSION } from "./constants.js";
 
 // Runs one command and resolves with the exit code. With --json, stdout gets
@@ -81,6 +82,16 @@ async function run(argv, { stdout, stderr }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : authText(result, message));
+    return result;
+  }
+
+  if (parsed.command === "setup") {
+    const progress = parsed.json ? () => {} : (line) => stderr.write(`${line}\n`);
+    const { outcome, reason, data } = await runSetup(parsed, progress);
+    const result = envelope({ command: "setup", outcome, reason, data,
+      message: outcome === "ok" ? null : "Setup did not complete. Review the reason and retry safely." });
+    stdout.write(parsed.json ? toJsonLine(result) :
+      `Metergraph setup: ${data.status}\nApplication traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${outcome} (${reason})\n`}`);
     return result;
   }
 

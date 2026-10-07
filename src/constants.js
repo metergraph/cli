@@ -97,6 +97,7 @@ export const READ_PATHS = Object.freeze({
 export const READ_QUERY_KEYS = Object.freeze({
   "/v1/agent/usage": Object.freeze(["days", "limit"]),
   "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor"]),
+  "/v1/cli/setup/credential": Object.freeze(["family_id"]),
 });
 
 // Read commands share one total deadline for every request they make,

@@ -27,8 +27,10 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
   also exist only in this checkout and are part of the same unpublished upcoming preview.
   They need a project signed in with `login`.
+- `setup` also exists only in this checkout. It requires the deployment's separate
+  ingest bootstrap API and browser approval by a member of the bound workspace.
 
-This preview does four things:
+This development preview does five things:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
@@ -38,10 +40,11 @@ This preview does four things:
 - The read commands (checkout only) use that grant to read bounded workspace Metadata:
   connection status, workspace context, capabilities, daily usage, routes and one page
   of trace metadata.
+- `setup` (checkout only) asks for ingest-only browser approval, then writes a private
+  project env file and confirms that the key was delivered.
 
-It does not read retained content, replay traces, call model providers, create an
-application ingest key, change workspace data, or send application data. Hosted setup
-commands are planned as a separate follow-up release.
+It does not read retained content, replay traces, call model providers or send
+application data. Setup does not prove that the application sent a trace.
 
 ## Requirements
 
@@ -64,6 +67,7 @@ metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--jso
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
+metergraph setup --runtime local [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--no-browser] [--repair] [--json]
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
@@ -73,7 +77,7 @@ metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login`, `logout` and the read commands are not in the published `0.1.0`
+requests. `login`, `logout`, `setup` and the read commands are not in the published `0.1.0`
 package.
 
 ### doctor
@@ -268,6 +272,46 @@ slots and project files are kept. A `200` from the service means it accepted the
 revocation request. If it does not answer `200`, local sign out still happens and the
 command exits 13 with `revocation: "unconfirmed"`. A project that is not signed in
 exits 0 without any request.
+
+### setup (checkout only, unreleased)
+
+Sign in to the intended workspace first, then run:
+
+```sh
+metergraph setup --runtime local --project /path/to/project
+```
+
+The bound deployment must advertise `metergraph.cli-setup/v1` on its own origin.
+`setup` verifies the saved Metadata session, checks the env file and Git state,
+then opens the deployment's consent page. An owner or member of the exact bound
+workspace approves an ingest-only key. The CLI redeems the single-use receipt,
+writes `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` into `.env`, checks the
+new key with the service, and acknowledges delivery. It never asks for Debug or
+Replay access. The browser page shows the workspace and the consequence of the
+approval. A signed-in browser on another workspace must switch in Metergraph
+and rerun; the CLI does not switch it automatically.
+
+The env file must be a project-relative `.env`, `.env.<name>` or `<name>.env`
+(`--env-file` selects another). The writer refuses tracked files, links,
+ambiguous dotenv syntax and unsafe paths. It adds a project `.gitignore` rule
+when needed and makes the env file private; Windows uses a user-only ACL.
+The env token is never printed, read from argv or stdin, or copied to the
+project's setup state file. An already working key is checked and reused without
+another browser approval.
+
+`.metergraph/setup.json` holds a family UUID, its current key ID and fixed state,
+but no credential. It is written before approval. If the redemption response is
+lost, a rerun asks for a new browser approval to replace only that family's
+pending key; the old receipt is not retried. If an acknowledged key no longer
+verifies, use `--repair` to explicitly approve replacement of that exact key.
+An unsafe or changed state file is refused. If the earlier approval never
+reached redemption, rerun the command; the `create` intent is still safe.
+
+Success means the key was delivered and the project is ready to instrument.
+It does **not** mean application traffic has arrived. Run your application and
+verify one exact trace afterward. This checkout and the matching server slice
+are development work; neither their availability on a deployed service nor a
+published package has been established by these local tests.
 
 ### Read commands (checkout only, unreleased)
 
