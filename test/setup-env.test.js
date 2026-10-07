@@ -120,6 +120,9 @@ test("tokens and ingest URLs are validated without echoing input", () => {
     assert.equal(isAppToken(bad), false);
   }
   assert.equal(parseIngestUrl(INGEST), INGEST);
+  assert.equal(parseIngestUrl("https://ingest.example.com"), "https://ingest.example.com");
+  assert.equal(parseIngestUrl("HTTPS://Ingest.Example.COM"), "https://ingest.example.com");
+  assert.equal(parseIngestUrl("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
   assert.equal(parseIngestUrl("HTTPS://Ingest.Example.COM/v1/ingest"), INGEST);
   assert.equal(parseIngestUrl("https://ingest.example.com:8443/v1/ingest"), "https://ingest.example.com:8443/v1/ingest");
   assert.equal(parseIngestUrl("http://127.0.0.1:8080/v1/ingest"), "http://127.0.0.1:8080/v1/ingest");
@@ -131,7 +134,6 @@ test("tokens and ingest URLs are validated without echoing input", () => {
     "https://ingest.example.com/v1/ingest#hunter2",
     "https://ingest.example.com/v1/ingest/",
     "https://ingest.example.com/v1/other",
-    "https://ingest.example.com",
     "https://ingest.example.com/v1/ingest\nOTHER=1",
     "https://ingest.example.com/v1/ingest x",
     "javascript:alert(1)",

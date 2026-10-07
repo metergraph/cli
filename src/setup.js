@@ -111,7 +111,9 @@ export async function runSetup(options, progress = () => {}) {
     if (previous && existing.token !== null) {
       const checked = await checkCredential(origin, existing.token, previous.value, profile, trap.signal);
       if (checked.ok) {
-        if (existing.ingestUrl !== `${origin}/v1/ingest`) return stop("conflict", "ingest_url_mismatch");
+        if (existing.ingestUrl !== origin && existing.ingestUrl !== `${origin}/v1/ingest`) {
+          return stop("conflict", "ingest_url_mismatch");
+        }
         if (previous.value.key_id !== null && previous.value.key_id !== checked.keyId) {
           return stop("conflict", "setup_key_changed");
         }
@@ -120,6 +122,13 @@ export async function runSetup(options, progress = () => {}) {
         credentialVerified = true;
         if (previous.value.phase !== "delivered" || previous.value.key_id === null) {
           writeSetupState(root, withSetupState(previous.value, { key_id: checked.keyId, phase: "delivered" }), previous);
+        }
+        // The first preview wrote the endpoint, which the SDK appends again.
+        // Repair only after verifying this family's saved key, without issuing
+        // another key or changing the workspace binding.
+        if (existing.ingestUrl !== origin) {
+          const repaired = await commitEnv(plan, { ingestUrl: origin, signal: trap.signal });
+          return finishSkill(root, options, repaired.receipt.file);
         }
         return finishSkill(root, options, "unchanged");
       }
@@ -188,7 +197,7 @@ export async function runSetup(options, progress = () => {}) {
       redirect_uri: listener.redirectUri, code_verifier: pkce.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal);
     if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending");
-    const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: `${origin}/v1/ingest`, signal: trap.signal });
+    const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: origin, signal: trap.signal });
     const checked = await checkCredential(origin, redeemed.token, state, profile, trap.signal);
     if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
     const ack = await acknowledge(origin, redeemed.token, state, profile, redeemed.keyId, trap.signal);

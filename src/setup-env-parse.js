@@ -13,14 +13,14 @@ export const ENV_NAMES = Object.freeze({
 });
 const NAMES = Object.values(ENV_NAMES);
 
-// Ingest paths the service accepts on an origin. A URL with any other path,
-// a query, a fragment or user information is refused.
-export const INGEST_PATHS = Object.freeze(["/v1/ingest"]);
+// The SDK expects a service root and appends /v1/ingest itself. Accept the
+// endpoint form only while reading setup files written by the first preview.
+export const INGEST_PATHS = Object.freeze(["", "/v1/ingest"]);
 
 // Server-generated application tokens are RFC 3986 unreserved characters
 // only, so a value can never carry a quote, newline, comment or space.
 const TOKEN = /^[A-Za-z0-9._~-]{16,1024}$/;
-const URL_TEXT = /^(https?:\/\/[^/?#@\\]+)(\/[A-Za-z0-9/_.-]*)$/i;
+const URL_TEXT = /^(https?:\/\/[^/?#@\\]+)(\/[A-Za-z0-9/_.-]*)?$/i;
 const SAFE_URL = /^[A-Za-z0-9.:/[\]_-]+$/;
 
 const ASSIGNMENT = /^([ \t]*)(export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)([ \t]*=[ \t]*)(.*)$/;
@@ -35,15 +35,15 @@ export function isAppToken(value) {
   return typeof value === "string" && TOKEN.test(value);
 }
 
-// Returns the normalized ingest URL (origin plus a supported path) or null.
+// Returns the normalized service root or legacy ingest endpoint, or null.
 // The caller must not echo the raw input when this returns null.
 export function parseIngestUrl(raw) {
   if (typeof raw !== "string" || raw.length > 2048) return null;
   const match = URL_TEXT.exec(raw);
-  if (match === null || !INGEST_PATHS.includes(match[2])) return null;
+  if (match === null || !INGEST_PATHS.includes(match[2] ?? "")) return null;
   const origin = parseOrigin(match[1]);
   if (origin === null) return null;
-  const url = `${origin}${match[2]}`;
+  const url = `${origin}${match[2] ?? ""}`;
   return SAFE_URL.test(url) ? url : null;
 }
 

@@ -1,5 +1,6 @@
 import { normalizeUuid } from "./auth-oauth.js";
 import { AGENT_CONTRACT_VERSION, MAX_CURSOR_LENGTH, METADATA_SCOPE } from "./constants.js";
+import { traceLink } from "./trace-contract.js";
 
 // Validators for the service's Metadata read documents. Each one checks the
 // document against the agent access contract, the bound workspace and the
@@ -530,6 +531,8 @@ export function tracesReport(body, ctx, request, notices) {
       ) {
         throw new Invalid("verification_failed", reason);
       }
+      const link = traceLink(row.metergraph_links?.trace ?? null, ctx.origin, row, ctx.workspaceId);
+      if (!link.ok) throw new Invalid(link.outcome, link.reason);
       return {
         id: row.id,
         trace_id: row.trace_id,
@@ -546,12 +549,16 @@ export function tracesReport(body, ctx, request, notices) {
         routes: nameList(row.routes, notices, reason),
         providers: nameList(row.providers, notices, reason),
         models: nameList(row.models, notices, reason),
-        link: null,
+        link: link.value,
+        link_workspace_bound: link.workspaceBound === true,
       };
     });
     if (!proof.complete) notices.add("evidence_incomplete");
     if (page.truncated) notices.add("more_pages");
-    notices.add("trace_links_unavailable");
+    const missingLinks = traces.length === 0 || traces.some((trace) => trace.link === null);
+    if (missingLinks) notices.add("trace_links_unavailable");
+    const unboundLinks = traces.some((trace) => trace.link !== null && !trace.link_workspace_bound);
+    if (unboundLinks) notices.add("trace_workspace_binding_unavailable");
     return {
       provenance: origin,
       window: span,
@@ -570,7 +577,8 @@ export function tracesReport(body, ctx, request, notices) {
       next_cursor: page.next_cursor,
       complete: proof.complete && !page.truncated,
       empty: traces.length === 0,
-      link_status: "server_link_unavailable",
+      link_status: missingLinks ? "server_link_unavailable" :
+        unboundLinks ? "workspace_binding_unavailable" : "available",
       traces,
     };
   });

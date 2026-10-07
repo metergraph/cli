@@ -57,7 +57,7 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     assert.ok(fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")));
     const env = fs.readFileSync(path.join(box.project, ".env"), "utf8");
     assert.match(env, /^METERGRAPH_APP_TOKEN=mg_[A-Za-z0-9_-]+/m);
-    assert.ok(env.includes(`METERGRAPH_INGEST_URL=${server.origin}/v1/ingest`));
+    assert.ok(env.includes(`METERGRAPH_INGEST_URL=${server.origin}`));
     if (process.platform === "win32") assert.equal(aclStatus(path.join(box.project, ".env")), "private");
     else assert.equal(fs.statSync(path.join(box.project, ".env")).mode & 0o077, 0);
     assert.ok(fs.readFileSync(path.join(box.project, ".gitignore"), "utf8").includes(".env"));
@@ -78,6 +78,13 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     assert.equal(authorization.query.resource, undefined);
     assert.equal(authorization.query.expected_key_id, undefined);
     assert.equal(server.state.setupFamilies.get(state.family_id).delivery, "acknowledged");
+    fs.writeFileSync(path.join(box.project, ".env"), env.replace(
+      `METERGRAPH_INGEST_URL=${server.origin}`, `METERGRAPH_INGEST_URL=${server.origin}/v1/ingest`));
+    const migrated = await setup(box, server);
+    assert.equal(migrated.outcome, "ok");
+    assert.equal(migrated.data.env, "updated");
+    assert.equal(fs.readFileSync(path.join(box.project, ".env"), "utf8"), env);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, authorizeCount);
   } finally { await server.close(); }
 });
 

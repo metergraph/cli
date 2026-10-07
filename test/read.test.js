@@ -425,6 +425,45 @@ test("traces return one page with an opaque cursor, never follow it, and check f
   });
 });
 
+test("traces retain validated workspace-bound server links", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    server.behavior.traces = (doc) => ({
+      ...doc,
+      traces: doc.traces.map((row) => ({
+        ...row,
+        metergraph_links: { trace: `${server.origin}/#traces?${new URLSearchParams({
+          from: row.started_at,
+          to: new Date(Date.parse(row.started_at) + 1).toISOString(),
+          q: row.trace_id,
+          trace: row.trace_id,
+          workspace: WORKSPACE_A,
+        })}` },
+      })),
+    });
+    const { result } = await read(box, server, ["traces", "--limit", "2"]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.result.link_status, "available");
+    assert.equal(result.data.result.traces[0].link_workspace_bound, true);
+    assert.match(result.data.result.traces[0].link, /workspace=/);
+    assert.ok(!result.data.notices.includes("trace_links_unavailable"));
+
+    server.behavior.traces = (doc) => ({
+      ...doc,
+      traces: doc.traces.map((row) => ({ ...row, metergraph_links: { trace: `${server.origin}/#traces?${new URLSearchParams({
+        from: row.started_at,
+        to: new Date(Date.parse(row.started_at) + 1).toISOString(),
+        q: row.trace_id,
+        trace: row.trace_id,
+        workspace: WORKSPACE_B,
+      })}` } })),
+    });
+    const unsafe = await read(box, server, ["traces", "--limit", "2"]);
+    assert.equal(unsafe.result.outcome, "verification_failed");
+    assert.equal(unsafe.result.error.reason, "unsafe_trace_link");
+  });
+});
+
 test("a filter or page the service did not honor fails closed", async () => {
   await withServer(async (server) => {
     const box = await signedIn(server);
