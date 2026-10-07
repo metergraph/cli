@@ -49,7 +49,7 @@ const handoff = (outcome, reason, nextAction = null, details = {}) => ({
 function guardKnownCredentials(value, verified) {
   const known = verified.knownCredentials;
   if (!known) return value;
-  const safe = known.some((token) => JSON.stringify(value).includes(token))
+  const safe = known.some((token) => holdsKnown(value, token))
     ? { proceed: false, outcome: "unsupported", reason: "credential_echo", data: null }
     : value;
   Object.defineProperty(safe, "knownCredentials", { value: known, enumerable: false });
@@ -57,7 +57,13 @@ function guardKnownCredentials(value, verified) {
 }
 
 export function containsKnownCredential(value, routed) {
-  return routed?.knownCredentials?.some((token) => JSON.stringify(value).includes(token)) ?? false;
+  return routed?.knownCredentials?.some((token) => holdsKnown(value, token)) ?? false;
+}
+
+function holdsKnown(value, token) {
+  if (typeof value === "string") return value.includes(token);
+  if (value === null || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, entry]) => holdsKnown(key, token) || holdsKnown(entry, token));
 }
 
 export function planNonHostedSetup(options) {

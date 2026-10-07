@@ -138,6 +138,17 @@ test("a Metadata failure cannot echo a private token coinciding with a fixed han
     ["/v1/agent/workspace"]);
 });
 
+test("output guard compares decoded strings and keys, including printable quotes and slashes", () => {
+  const token = 'credential "abcdefghij"';
+  const routed = { knownCredentials: [token] };
+  assert.equal(containsKnownCredential({ message: token }, routed), true);
+  assert.equal(containsKnownCredential({ [token]: "value" }, routed), true);
+  assert.equal(containsKnownCredential({ message: `safe ${token} suffix` }, routed), true);
+  assert.equal(containsKnownCredential({ message: "safe" }, routed), false);
+  const slash = String.raw`credential \abcdefghij`;
+  assert.equal(containsKnownCredential({ message: slash }, { knownCredentials: [slash] }), true);
+});
+
 test("successful local verification keeps the separate agent token guarded without printing it", { skip: process.platform === "win32" }, async () => {
   const token = "operator_handoff";
   const server = await serve(healthyRoutes("local", {
