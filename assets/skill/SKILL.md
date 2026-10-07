@@ -12,21 +12,37 @@ Connection and troubleshooting: https://www.metergraph.dev/docs/guides/agent-acc
 
 Ask for or confirm these non-secret choices. Do not guess from the agent brand:
 
-1. Client: Claude Desktop, Claude Code, ChatGPT or Codex.
+1. Client: Claude Desktop, Claude Code, ChatGPT, Codex or Cursor.
 2. Execution runtime: customer machine or cloud. Codex local app/CLI/IDE is distinct from cloud execution. Claude Desktop remote connectors execute in Anthropic's cloud; Desktop local MCP is a separate mechanism. ChatGPT MCP apps execute in the cloud.
 3. Deployment: Metergraph hosted cloud, the signed commercial customer-local bundle, a customer-owned AWS installation (`byoc-core`), or the open-source self-hosted server. These have different addresses, accounts and credentials. Staging is not a customer setup path.
 4. Fresh workspace/installation or connecting an existing workspace. Ask for the intended workspace name and deployment origin, never a token.
 
 Use the routing below with those four choices. Follow the matching credential and client configuration instructions in the connection guide.
 
+For a first application trace, check the installed CLI's version and help before
+using it. `metergraph-cli@0.1.0` supports `doctor` and project skill
+installation; later versions may also offer `login`, `setup` and `verify`.
+Use those commands only if the installed package lists them. Use the [first
+trace guide](https://www.metergraph.dev/docs/start/first-trace/) for steps the
+package does not support. A CLI login or health probe alone does not prove
+application traffic. Verification needs an exact trace or request ID from an
+application invocation, its time window and the intended workspace.
+
 ## Route honestly
 
 | Client and runtime | Hosted | Customer-local bundle | Customer AWS | Open source self-hosted |
 | --- | --- | --- | --- | --- |
 | Claude Code or Codex on the customer machine | Keyed HTTP at `https://app.metergraph.dev/v1/agent/mcp` | Keyed HTTP at the installed local address, normally `http://127.0.0.1:8080/v1/agent/mcp` | Keyed HTTP at the customer's reachable installation address | Static `MG_AGENT_TOKENS` bearer at the OSS server address, normally `http://localhost:8787/v1/agent/mcp` |
+| Cursor on the customer machine | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide |
 | Claude Desktop remote connector on an individual account | Custom connector with a scoped bearer key if Request headers are available for the account; verify tools before claiming success | Cannot reach localhost from Anthropic's cloud | Default private installation is unreachable from Anthropic's cloud; no validated public route in this guide | Cannot reach localhost from Anthropic's cloud |
 | Claude Desktop local MCP | Separate local extension required; not supported by this guide | Docker does not install a host extension | Separate local extension required; not supported by this guide | Docker does not install a host extension |
 | ChatGPT MCP app or cloud execution | Separate cloud client configuration; not supported by this guide | Cannot reach localhost | Default private installation is unreachable | Cannot reach localhost |
+
+For Cursor, the published CLI can install a project skill with
+`metergraph skill install --client cursor --runtime local` when installed.
+Confirm Cursor discovers the skill. This does not configure MCP or sign in.
+Use the first trace guide for instrumentation, and report the read connection
+as unverified until a supported Cursor MCP route is tested.
 
 For hosted Claude Desktop on an individual account, guide the human through Customize → Connectors → Add custom connector with `https://app.metergraph.dev/v1/agent/mcp`. They create a coding-agent key in the intended hosted workspace. If Request headers are available, choose No sign-in and enter a required header named `Authorization` with value `Bearer <key>` in the connector's private settings, never in chat. Request headers are in beta and may be unavailable for the account; do not claim the route works without them. They must enable the connector in a conversation. Team and Enterprise connectors may share fixed credentials across users, so do not put one person's workspace key in a shared connector. Do not present OAuth server code, a tool listing, local CLI installation or a saved configuration as connection success. Do not invent a released plugin, extension, tunnel or signup path. If a route is blocked, name the blocker and offer the customer-machine Claude Code/Codex keyed HTTP route or hosted deployment as appropriate. Do not expose localhost publicly or disable authentication as a workaround.
 
