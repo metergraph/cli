@@ -35,6 +35,7 @@ const handoff = (outcome, reason, nextAction = null, details = {}) => ({
     origin: details.origin ?? null,
     workspace_id: details.workspaceId ?? null,
     prerequisites: details.prerequisites ?? "not_confirmed",
+    pending_prerequisites: details.pendingPrerequisites ?? [],
     metadata_access: details.metadataAccess ?? "not_checked",
     ingest_credential: "not_checked",
     next_action: nextAction,
@@ -63,6 +64,7 @@ export function planNonHostedSetup(options) {
     return handoff(planned.outcome, planned.reason, planned.plan?.next_action ?? null, {
       profile: EXPECTED_PROFILE[options.deployment], origin: planned.plan?.origin,
       workspaceId: planned.plan?.workspace_id,
+      pendingPrerequisites: planned.plan?.prerequisites.filter((item) => item.status !== "ready").map((item) => item.name),
     });
   }
   return { proceed: true, plan: planned.plan, prerequisites };
