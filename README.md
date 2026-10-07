@@ -27,8 +27,10 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
   also exist only in this checkout and are part of the same unpublished upcoming preview.
   They need a project signed in with `login`.
+- `verify` also exists only in this checkout. It checks one exact trace identity in an
+  explicit invocation window using Metadata access. It never sends application data.
 
-This preview does four things:
+This checkout does five things:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
@@ -38,6 +40,8 @@ This preview does four things:
 - The read commands (checkout only) use that grant to read bounded workspace Metadata:
   connection status, workspace context, capabilities, daily usage, routes and one page
   of trace metadata.
+- `verify` (checkout only) polls for one exact processed trace in a bounded window.
+  It does not infer application provenance from a Metadata match.
 
 It does not read retained content, replay traces, call model providers, create an
 application ingest key, change workspace data, or send application data. Hosted setup
@@ -70,11 +74,27 @@ metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--j
 metergraph usage [--days N] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login`, `logout` and the read commands are not in the published `0.1.0`
+requests. `login`, `logout`, `verify` and the read commands are not in the published `0.1.0`
 package.
+
+### Exact trace verification
+
+After an application invocation, pass its exact trace ID or request ID and the
+invocation start and end timestamps to `verify`. The optional `--source` label is a
+caller assertion. A matching Metadata row proves a processed trace is visible in the
+bound workspace, but does not independently prove that it came from your application.
+The result therefore keeps `application_traffic_verified: false` until a separate
+application instrumentation check supplies that evidence. A missing, ambiguous, stale
+or wrong-workspace result fails closed. The command neither creates an ingest key nor
+sends a test event.
+
+The service's current trace links do not select a dashboard workspace. A verified
+link can be copied for manual inspection after selecting the correct workspace, but
+`--open` reports unsupported rather than opening it automatically.
 
 ### doctor
 

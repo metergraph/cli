@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -46,6 +46,7 @@ const EXPECTED_FILES = [
   "src/trace-contract.js",
   "src/trace-open.js",
   "src/transport.js",
+  "src/verify-output.js",
   "src/verify.js",
 ];
 const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
@@ -67,9 +68,9 @@ function npm(args, cwd) {
   return run(command, commandArgs, { cwd, shell: !viaNode && isWindows });
 }
 
-function run(command, args, { cwd, shell = false }) {
+function run(command, args, { cwd, shell = false, env = npmEnv }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env: npmEnv, shell, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, shell, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
@@ -278,6 +279,49 @@ test("the installed CLI reports read commands honestly offline without a sign in
   assert.equal(parseJsonLine(environment.stdout).error.reason, "environment_selector_unsupported");
   assert.equal(existsSync(config), false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the installed CLI exposes exact trace verification without claiming traffic", async () => {
+  const target = path.join(workDir, "verify project");
+  const config = path.join(workDir, "verify config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const since = new Date(Date.now() - 60000).toISOString();
+  const until = new Date(Date.now() - 30000).toISOString();
+  const runResult = await run(process.execPath,
+    ["--import", pathToFileURL(NO_NETWORK).href, bin, "verify", "--trace-id", "example-trace",
+      "--since", since, "--until", until, "--source", "application",
+      "--project", target, "--config-dir", config, "--json"], { cwd: workDir });
+  assert.equal(runResult.code, 12);
+  assert.equal(runResult.stderr, "");
+  const parsed = parseJsonLine(runResult.stdout);
+  assert.equal(parsed.command, "verify");
+  assert.equal(parsed.outcome, "login_required");
+  assert.equal(parsed.data, null);
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the packed CLI passes the offline three-client parity matrix", { timeout: 120000 }, async () => {
+  const script = path.join(PACKAGE_ROOT, "scripts", "client-parity.mjs");
+  const specialDir = path.join(workDir, "packed & parity");
+  mkdirSync(specialDir);
+  const specialTarball = path.join(specialDir, path.basename(tarball));
+  copyFileSync(tarball, specialTarball);
+  const standaloneEnv = { ...npmEnv };
+  delete standaloneEnv.npm_execpath;
+  const result = check(await run(process.execPath, [script, "--tarball", specialTarball],
+    { cwd: workDir, env: standaloneEnv }),
+    "packed client parity");
+  const report = JSON.parse(result.stdout);
+  assert.equal(result.stderr, "");
+  assert.equal(report.artifact_version, sourcePackage.version);
+  assert.equal(report.artifact_sha256, createHash("sha256").update(readFileSync(specialTarball)).digest("hex"));
+  assert.deepEqual(report.clients.map(({ client }) => client), ["codex", "claude", "cursor"]);
+  assert.ok(report.clients.every(({ discovery, rerun, status, verify }) =>
+    discovery === "pending" && rerun === "reused" && status === "login_required" && verify === "login_required"));
+  assert.equal(report.grants_created, false);
+  assert.equal(report.network, "blocked");
 });
 
 test("the installed CLI probes a loopback service", async () => {
