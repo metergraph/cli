@@ -46,6 +46,7 @@ const EXPECTED_FILES = [
   "src/trace-contract.js",
   "src/trace-open.js",
   "src/transport.js",
+  "src/verify-output.js",
   "src/verify.js",
 ];
 const SKILL_SHA256 = "90f7d8d78a5b0b7a57436f194222f0c73310b0b04201c297c8fbf0b00ad6bb3f";
@@ -276,6 +277,27 @@ test("the installed CLI reports read commands honestly offline without a sign in
   });
   assert.equal(environment.code, 6);
   assert.equal(parseJsonLine(environment.stdout).error.reason, "environment_selector_unsupported");
+  assert.equal(existsSync(config), false);
+  assert.equal(existsSync(path.join(target, ".metergraph")), false);
+});
+
+test("the installed CLI exposes exact trace verification without claiming traffic", async () => {
+  const target = path.join(workDir, "verify project");
+  const config = path.join(workDir, "verify config");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const since = new Date(Date.now() - 60000).toISOString();
+  const until = new Date(Date.now() - 30000).toISOString();
+  const runResult = await run(process.execPath,
+    ["--import", pathToFileURL(NO_NETWORK).href, bin, "verify", "--trace-id", "example-trace",
+      "--since", since, "--until", until, "--source", "application",
+      "--project", target, "--config-dir", config, "--json"], { cwd: workDir });
+  assert.equal(runResult.code, 12);
+  assert.equal(runResult.stderr, "");
+  const parsed = parseJsonLine(runResult.stdout);
+  assert.equal(parsed.command, "verify");
+  assert.equal(parsed.outcome, "login_required");
+  assert.equal(parsed.data, null);
   assert.equal(existsSync(config), false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });
