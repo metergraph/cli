@@ -33,7 +33,7 @@ const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
-  setup: new Set(["--runtime", "--project", "--config-dir", "--env-file", "--timeout-ms"]),
+  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
@@ -74,7 +74,7 @@ const REFUSED_MESSAGES = {
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
-  setup: new Set(["--no-browser", "--repair"]),
+  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -317,14 +317,33 @@ function parseSetup(values, flags, json, fail) {
   }
   const paths = parsePaths(values, fail);
   if (!paths.ok) return paths;
+  const origin = parseUrlOption(values);
+  if (origin === null) return fail("invalid_url", INVALID_URL);
+  const rawWorkspace = values["--workspace"];
+  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
+    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  const client = values["--client"] ?? null;
+  if (client === null && !flags.has("--skip-skill")) {
+    return fail("client_required", "Choose --client codex, claude or cursor, or explicitly use --skip-skill.");
+  }
+  if (client !== null && !Object.hasOwn(SKILL_CLIENTS, client)) {
+    return fail("invalid_client", "--client must be codex, claude or cursor.");
+  }
+  if (client !== null && flags.has("--skip-skill")) {
+    return fail("client_conflict", "Use either --client or --skip-skill, not both.");
+  }
   const envFile = values["--env-file"] ?? ".env";
   if (envFile === "" || envFile.includes("\0")) return fail("invalid_env_file", "--env-file must name a project-relative env file.");
   const rawTimeout = values["--timeout-ms"];
   const timeoutMs = rawTimeout === undefined ? LOGIN_DEFAULT_TIMEOUT_MS :
     parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
   if (timeoutMs === null) return fail("invalid_timeout", `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`);
-  return { ok: true, command: "setup", runtime, project: paths.project, configDir: paths.configDir,
-    envFile, timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"), json };
+  return { ok: true, command: "setup", runtime, origin, originExplicit: values["--url"] !== undefined,
+    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    project: paths.project, configDir: paths.configDir, envFile, client, skipSkill: flags.has("--skip-skill"),
+    timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"),
+    signup: flags.has("--signup"), reconnect: flags.has("--reconnect"), json };
 }
 
 // Read commands take the project and config directory, one total timeout and,

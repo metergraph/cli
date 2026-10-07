@@ -127,8 +127,9 @@ const LOGIN_USAGE =
   "metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] " +
   "[--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
-const SETUP_USAGE = "metergraph setup --runtime local [--project DIR] [--config-dir DIR] [--env-file .env] " +
-  "[--timeout-ms N] [--no-browser] [--repair] [--json]";
+const SETUP_USAGE = "metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) " +
+  "[--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] " +
+  "[--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]";
 
 const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
 const READ_BASE_OPTIONS = [
@@ -274,13 +275,19 @@ export function helpData(topic) {
       },
       {
         name: "setup",
-        summary: "Ask for browser approval to issue one ingest-only key for the signed-in workspace, write a private env file, and acknowledge delivery. Does not verify application traffic.",
+        summary: "Guide browser sign in and workspace choice, approve an ingest-only key, and install the selected client skill. Does not verify application traffic.",
         options: [
           { name: "--runtime", value: "RUNTIME", summary: "Required. local only; other runtimes get a handoff." },
-          { name: "--project", value: "DIR", summary: "Signed-in project directory. Default: current directory." },
+          { name: "--url", value: "ORIGIN", summary: "Deployment origin. Defaults to an existing project binding, else the hosted origin." },
+          { name: "--workspace", value: "UUID", summary: "Expected workspace; the browser must approve this exact workspace." },
+          { name: "--project", value: "DIR", summary: "Project directory. Default: current directory." },
           CONFIG_DIR_OPTION,
           { name: "--env-file", value: "FILE", summary: "Project-relative env file. Default: .env." },
+          { name: "--client", value: "CLIENT", summary: "Install the bundled skill for codex, claude or cursor." },
+          { name: "--skip-skill", value: null, summary: "Explicitly leave client skill installation pending." },
           { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
+          { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
+          { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
           { name: "--no-browser", value: null, summary: "Print approval URL on stderr; requires terminal output." },
           { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
           JSON_OPTION,
@@ -324,10 +331,10 @@ export function helpText(topic) {
       "Doctor never sends credentials, so it never reports a connected workspace.",
     );
   } else if (topic === "setup") {
-    lines.push(`Usage: ${SETUP_USAGE}`, "", "Requires a signed-in project and local browser approval.",
+    lines.push(`Usage: ${SETUP_USAGE}`, "", "Opens the service's browser sign in and workspace choice when needed.",
       "The browser approves an ingest-only key for the exact workspace. The CLI stores it in",
-      "a private env file and confirms delivery with the service. No application traffic is",
-      "claimed until an exact application trace is verified.");
+      "a private env file, confirms delivery, and installs the chosen client skill unless",
+      "--skip-skill is explicit. No application traffic is claimed until an exact trace is verified.");
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
     lines.push(`Usage: ${login ? LOGIN_USAGE : LOGOUT_USAGE}`, "");
