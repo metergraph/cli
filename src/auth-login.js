@@ -73,7 +73,8 @@ export async function runLogin(options, progress) {
     const bound = existing?.binding ?? null;
     // Setup pins a deployment model before sign in. A stale binding for a
     // different profile must never be silently reused or reconnected.
-    if (options.expectedProfile && bound !== null && bound.deployment_profile !== options.expectedProfile) {
+    if (options.expectedProfile && bound !== null && !options.reconnect &&
+        bound.deployment_profile !== options.expectedProfile) {
       return end("conflict", "deployment_profile_mismatch");
     }
     if (bound !== null && !options.reconnect) {
