@@ -590,6 +590,8 @@ const AUTH_MESSAGES = {
   workspace_mismatch: "The browser granted a different workspace than --workspace. It was not kept.",
   workspace_context_mismatch: "The service reported a different workspace than the grant names. It was not kept.",
   profile_mismatch: "The service reported a different deployment profile than before sign in. It was not kept.",
+  deployment_profile_mismatch:
+    "The service or saved binding has a different deployment profile from the selected setup route. Nothing was changed.",
   workspace_response_invalid: "The service's workspace response is not usable. Nothing was saved.",
   capabilities_response_invalid: "The service's capabilities response is not usable. Nothing was saved.",
   content_access_granted:
