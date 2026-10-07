@@ -1,12 +1,14 @@
 import { detectRemoteSession, openBrowser } from "./auth-browser.js";
-import { resolveProject } from "./auth-binding.js";
+import { readBinding, resolveProject } from "./auth-binding.js";
 import { startCallbackListener } from "./auth-callback.js";
+import { runLogin } from "./auth-login.js";
 import { newPkce, register, endpointsFor } from "./auth-oauth.js";
 import { Stop } from "./auth-store.js";
 import { verifiedSession } from "./auth-session.js";
 import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
 import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-env.js";
-import { newSetupState, readSetupState, writeSetupState } from "./setup-state.js";
+import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
+import { runSkill } from "./skill.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 
@@ -21,7 +23,8 @@ const PURPOSE = "ingest-bootstrap-v1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RECEIPT = /^mgbs_[A-Za-z0-9_-]{32,256}$/;
 const KEY = (value) => typeof value === "string" && UUID.test(value);
-const fail = (outcome, reason, status = "not_ready") => ({ outcome, reason, data: { status, application_traffic_verified: false } });
+const fail = (outcome, reason, status = "not_ready", receipt = null) => ({ outcome, reason,
+  data: { status, application_traffic_verified: false, receipt } });
 
 // This command never receives an ingest key from argv, stdin, an environment
 // variable or a Metadata OAuth grant. Only the purpose-bound redemption
@@ -30,19 +33,53 @@ export async function runSetup(options, progress = () => {}) {
   if (options.runtime !== "local" || detectRemoteSession() !== null) return fail("unsupported", "run_on_local_machine");
   if (options.json && options.noBrowser) return fail("unsupported", "no_browser_requires_terminal");
   const trap = trapSignals();
+  let receipt = null;
+  const stop = (outcome, reason, status = "not_ready") => fail(outcome, reason, status, receipt);
   try {
     const root = resolveProject(options.project);
-    const signedIn = await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
-    if (!signedIn.ok) return fail(signedIn.outcome, signedIn.reason);
+    const bound = readBinding(root)?.binding ?? null;
+    const intendedOrigin = options.originExplicit ? options.origin : bound?.origin ?? options.origin;
+    const intendedWorkspace = options.workspace;
+    const bindingDiffers = bound !== null && (bound.origin !== intendedOrigin ||
+      (intendedWorkspace !== null && bound.workspace_id !== intendedWorkspace));
+    if (bindingDiffers && !options.reconnect) return stop("conflict", "bound_to_other_workspace");
+    let signedIn = bindingDiffers || options.reconnect ? { ok: false, outcome: "login_required" } :
+      await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
+    if (!signedIn.ok && signedIn.outcome === "login_required") {
+      const login = await runLogin({ ...options, origin: intendedOrigin, workspace: intendedWorkspace,
+        project: root, reconnect: options.reconnect }, progress);
+      if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending");
+      signedIn = await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
+    }
+    if (!signedIn.ok) return stop(signedIn.outcome, signedIn.reason, "login_pending");
     const { origin, workspaceId, profile } = signedIn.session;
+    if (origin !== intendedOrigin || (intendedWorkspace !== null && workspaceId !== intendedWorkspace)) {
+      return stop("verification_failed", "workspace_mismatch", "login_pending");
+    }
     const plan = preflightEnv({ project: root, envFile: options.envFile, signal: trap.signal });
     const existing = currentEnvValues(plan);
     let previous = readSetupState(root);
+    if (previous) receipt = setupReceipt(previous.value);
     if (previous && (previous.value.origin !== origin || previous.value.workspace_id !== workspaceId)) {
-      return fail("conflict", "setup_binding_changed");
+      return stop("conflict", "setup_binding_changed");
     }
-    if (!previous && existing.token !== null) return fail("conflict", "existing_ingest_key_unowned");
-    if (existing.token !== null && !isAppToken(existing.token)) return fail("conflict", "existing_ingest_key_invalid");
+    if (previous && previous.value.deployment_profile !== null && previous.value.deployment_profile !== profile) {
+      return stop("conflict", "setup_profile_changed");
+    }
+    // Upgrade a pre-composition state, or record the current client choice.
+    // A changed client leaves the existing key untouched and marks the new
+    // client's skill pending until its own installer confirms ownership.
+    if (previous && (previous.value.deployment_profile === null ||
+        previous.value.selected_client !== options.client ||
+        (options.client === null && previous.value.skill_status !== "skipped"))) {
+      const next = withSetupState(previous.value, { deployment_profile: profile,
+        selected_client: options.client, skill_status: options.client === null ? "skipped" : "pending" });
+      writeSetupState(root, next, previous);
+      previous = readSetupState(root);
+      receipt = setupReceipt(previous.value);
+    }
+    if (!previous && existing.token !== null) return stop("conflict", "existing_ingest_key_unowned");
+    if (existing.token !== null && !isAppToken(existing.token)) return stop("conflict", "existing_ingest_key_invalid");
 
     // A saved token is checked against this family and workspace before
     // being reused. Pending delivery is acknowledged, including after a
@@ -50,43 +87,44 @@ export async function runSetup(options, progress = () => {}) {
     if (previous && existing.token !== null) {
       const checked = await checkCredential(origin, existing.token, previous.value, profile, trap.signal);
       if (checked.ok) {
-        if (existing.ingestUrl !== `${origin}/v1/ingest`) return fail("conflict", "ingest_url_mismatch");
+        if (existing.ingestUrl !== `${origin}/v1/ingest`) return stop("conflict", "ingest_url_mismatch");
         if (previous.value.key_id !== null && previous.value.key_id !== checked.keyId) {
-          return fail("conflict", "setup_key_changed");
+          return stop("conflict", "setup_key_changed");
         }
         const ack = await acknowledge(origin, existing.token, previous.value, profile, checked.keyId, trap.signal);
-        if (!ack.ok) return fail(ack.outcome, ack.reason, "delivery_pending");
+        if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
         if (previous.value.phase !== "delivered" || previous.value.key_id === null) {
-          writeSetupState(root, { ...previous.value, key_id: checked.keyId, phase: "delivered" }, previous);
+          writeSetupState(root, withSetupState(previous.value, { key_id: checked.keyId, phase: "delivered" }), previous);
         }
-        return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation", application_traffic_verified: false, env: "unchanged" } };
+        return finishSkill(root, options, "unchanged");
       }
-      if (!options.repair && previous.value.phase !== "redeem_attempted") return fail("verification_failed", "saved_key_unverified");
-      if (options.repair && previous.value.key_id === null) return fail("conflict", "repair_key_unknown");
-    } else if (options.repair) {
-      return fail("conflict", "repair_requires_saved_key");
+      if (!options.repair && previous.value.phase !== "redeem_attempted") return stop("verification_failed", "saved_key_unverified");
+      if (options.repair && previous.value.key_id === null) return stop("conflict", "repair_key_unknown");
+    } else if (options.repair && (previous === null || previous.value.key_id === null)) {
+      return stop("conflict", "repair_requires_saved_key");
     }
 
     const setup = await discoverSetup(origin, profile, trap.signal);
-    if (!setup.ok) return fail(setup.outcome, setup.reason);
+    if (!setup.ok) return stop(setup.outcome, setup.reason);
 
     if (previous === null) {
-      writeSetupState(root, newSetupState(origin, workspaceId), null);
+      writeSetupState(root, newSetupState(origin, workspaceId, profile, options.client), null);
       previous = readSetupState(root);
+      receipt = setupReceipt(previous.value);
     }
     const state = previous.value;
     const intent = options.repair ? "repair" : state.phase === "redeem_attempted" || state.phase === "delivered"
       ? "replace_pending" : "create";
     // An acknowledged family is never implicitly replaced. Repair requires
     // the explicit flag and the key ID saved from its original issuance.
-    if (intent === "replace_pending" && state.phase === "delivered") return fail("conflict", "repair_required");
+    if (intent === "replace_pending" && state.phase === "delivered") return stop("conflict", "repair_required");
     const listener = await startCallbackListener();
     let callback;
     let clientId;
     let pkce;
     try {
       const registered = await register(endpointsFor(origin), listener.redirectUri, deadline(AUTH_HTTP_TIMEOUT_MS, trap.signal).signal);
-      if (!registered.ok) return fail(registered.outcome, registered.reason);
+      if (!registered.ok) return stop(registered.outcome, registered.reason);
       clientId = registered.clientId;
       pkce = newPkce();
       const pending = listener.wait({ state: pkce.state, issuer: `${origin}/v1/oauth`, requireIss: false,
@@ -99,18 +137,18 @@ export async function runSetup(options, progress = () => {}) {
       };
       if (intent === "repair") params.expected_key_id = state.key_id;
       url.search = new URLSearchParams(params).toString();
-      if (trap.signal.aborted) return fail("authorization_failed", "cancelled");
+      if (trap.signal.aborted) return stop("authorization_failed", "cancelled");
       if (options.noBrowser) progress(`Open this URL on this machine to approve ingest-only setup:\n${url.href}`);
-      else if (!(await openBrowser(url.href))) return fail("authorization_failed", "browser_unavailable");
+      else if (!(await openBrowser(url.href))) return stop("authorization_failed", "browser_unavailable");
       else progress("Opened your browser for ingest-only setup approval.");
       callback = await pending;
     } finally {
       await listener.close();
     }
-    if (callback.kind === "denied") return fail("authorization_failed", "access_denied");
-    if (callback.kind === "timeout") return fail("authorization_failed", "timeout");
-    if (callback.kind === "cancelled") return fail("authorization_failed", "cancelled");
-    if (callback.kind !== "code" || !RECEIPT.test(callback.code)) return fail("authorization_failed", "callback_invalid");
+    if (callback.kind === "denied") return stop("authorization_failed", "access_denied");
+    if (callback.kind === "timeout") return stop("authorization_failed", "timeout");
+    if (callback.kind === "cancelled") return stop("authorization_failed", "cancelled");
+    if (callback.kind !== "code" || !RECEIPT.test(callback.code)) return stop("authorization_failed", "callback_invalid");
 
     // Persist the ambiguity boundary before a single-use receipt is sent.
     // If the response is lost, a later run asks the browser to replace only
@@ -118,28 +156,52 @@ export async function runSetup(options, progress = () => {}) {
     previous = readSetupState(root);
     if (previous?.value.family_id !== state.family_id || previous.value.origin !== origin ||
         previous.value.workspace_id !== workspaceId || previous.value.phase !== state.phase) {
-      return fail("conflict", "setup_state_changed");
+      return stop("conflict", "setup_state_changed");
     }
-    writeSetupState(root, { ...state, phase: "redeem_attempted" }, previous);
+    writeSetupState(root, withSetupState(state, { phase: "redeem_attempted" }), previous);
     previous = readSetupState(root);
     const redeemed = await redeem(origin, { code: callback.code, client_id: clientId,
       redirect_uri: listener.redirectUri, code_verifier: pkce.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal);
-    if (!redeemed.ok) return fail(redeemed.outcome, redeemed.reason, "delivery_pending");
+    if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending");
     const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: `${origin}/v1/ingest`, signal: trap.signal });
     const checked = await checkCredential(origin, redeemed.token, state, profile, trap.signal);
-    if (!checked.ok || checked.keyId !== redeemed.keyId) return fail("verification_failed", "issued_key_unverified", "delivery_pending");
+    if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
     const ack = await acknowledge(origin, redeemed.token, state, profile, redeemed.keyId, trap.signal);
-    if (!ack.ok) return fail(ack.outcome, ack.reason, "delivery_pending");
-    writeSetupState(root, { ...previous.value, key_id: redeemed.keyId, phase: "delivered" }, previous);
-    return { outcome: "ok", reason: null, data: {
-      status: "ready_for_instrumentation", application_traffic_verified: false,
-      env: written.receipt.file,
-    } };
+    if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
+    writeSetupState(root, withSetupState(previous.value, { key_id: redeemed.keyId, phase: "delivered" }), previous);
+    return finishSkill(root, options, written.receipt.file);
   } catch (error) {
-    if (error instanceof Stop) return fail(error.outcome, error.reason);
+    if (error instanceof Stop) return stop(error.outcome, error.reason);
     throw error;
   } finally { trap.release(); }
+}
+
+function finishSkill(root, options, envStatus) {
+  let previous = readSetupState(root);
+  if (previous === null || previous.value.phase !== "delivered") return fail("conflict", "setup_state_changed");
+  if (options.skipSkill) {
+    if (previous.value.skill_status !== "skipped") {
+      writeSetupState(root, withSetupState(previous.value, { selected_client: null, skill_status: "skipped" }), previous);
+      previous = readSetupState(root);
+    }
+    return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
+      application_traffic_verified: false, env: envStatus, skill: "skipped", receipt: setupReceipt(previous.value) } };
+  }
+  let skill = runSkill({ action: "install", client: options.client, runtime: "local", project: root });
+  if (skill.reason === "update_required") {
+    skill = runSkill({ action: "update", client: options.client, runtime: "local", project: root });
+  }
+  if (skill.outcome !== "ok") {
+    return fail(skill.outcome, skill.reason, "credential_ready_skill_pending", setupReceipt(previous.value));
+  }
+  if (previous.value.skill_status !== "installed") {
+    writeSetupState(root, withSetupState(previous.value, { skill_status: "installed" }), previous);
+    previous = readSetupState(root);
+  }
+  return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
+    application_traffic_verified: false, env: envStatus, skill: skill.data.status,
+    receipt: setupReceipt(previous.value) } };
 }
 
 async function discoverSetup(origin, profile, cancel) {

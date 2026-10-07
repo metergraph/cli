@@ -264,7 +264,7 @@ test("the installed CLI exposes setup help and hands cloud setup off offline", a
   const help = check(await run(process.execPath, [...offline, "help", "setup", "--json"], { cwd: workDir }), "packed setup help");
   assert.equal(parseJsonLine(help.stdout).data.topic, "setup");
   const result = await run(process.execPath,
-    [...offline, "setup", "--runtime", "cloud", "--project", target, "--json"], { cwd: workDir });
+    [...offline, "setup", "--runtime", "cloud", "--skip-skill", "--project", target, "--json"], { cwd: workDir });
   assert.equal(result.code, 6);
   assert.equal(result.stderr, "");
   const parsed = parseJsonLine(result.stdout);

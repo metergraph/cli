@@ -14,8 +14,9 @@ after(() => fs.rmSync(dir, { recursive: true, force: true }));
 const boxFor = sandboxes(dir);
 
 async function setup(box, server, extra = []) {
+  const clientSelection = extra.includes("--skip-skill") || extra.includes("--client") ? [] : ["--client", "codex"];
   const run = await runCli(["--json", "setup", "--runtime", "local", "--project", box.project,
-    "--config-dir", box.config, ...extra], { imports: [BROWSER],
+    "--config-dir", box.config, ...clientSelection, ...extra], { imports: [BROWSER],
     env: { ...LOCAL_ENV, METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
   assertNoLeak(assert, run.stdout, run.stderr);
   assert.equal(run.stderr, "");
@@ -37,6 +38,12 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     const first = await setup(box, server);
     assert.equal(first.outcome, "ok");
     assert.equal(first.data.status, "ready_for_instrumentation");
+    assert.equal(first.data.skill, "installed");
+    assert.deepEqual(first.data.receipt.completed_steps, ["login", "credential", "skill"]);
+    assert.deepEqual(first.data.receipt.pending_steps, ["instrument", "verify", "view"]);
+    assert.equal(first.data.receipt.origin, server.origin);
+    assert.equal(first.data.receipt.deployment_profile, "local");
+    assert.ok(fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")));
     const env = fs.readFileSync(path.join(box.project, ".env"), "utf8");
     assert.match(env, /^METERGRAPH_APP_TOKEN=mg_[A-Za-z0-9_-]+/m);
     assert.ok(env.includes(`METERGRAPH_INGEST_URL=${server.origin}/v1/ingest`));
@@ -50,6 +57,7 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     const second = await setup(box, server);
     assert.equal(second.outcome, "ok");
     assert.equal(second.data.env, "unchanged");
+    assert.equal(second.data.skill, "reused");
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, authorizeCount);
     const authorization = server.requestsTo("/v1/cli/setup/authorize")[0];
     assert.equal(authorization.query.intent, "create");
@@ -59,6 +67,116 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     assert.equal(authorization.query.resource, undefined);
     assert.equal(authorization.query.expected_key_id, undefined);
     assert.equal(server.state.setupFamilies.get(state.family_id).delivery, "acknowledged");
+  } finally { await server.close(); }
+});
+
+test("one setup command signs in an unbound project, chooses the verified workspace and installs its client skill", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.receipt.workspace_id, server.behavior.workspaceId);
+    assert.deepEqual(result.data.receipt.completed_steps, ["login", "credential", "skill"]);
+    assert.ok(fs.existsSync(path.join(box.project, ".metergraph", "project.json")));
+    assert.ok(fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")));
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("an expected workspace mismatch stops before ingest approval", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin,
+      "--workspace", "6f1e2d3c-4b5a-4968-8776-655443322110"]);
+    assert.equal(result.outcome, "verification_failed");
+    assert.equal(result.error.reason, "workspace_mismatch");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});
+
+test("explicit skip leaves the skill pending while acknowledging credential delivery", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin, "--skip-skill"]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.skill, "skipped");
+    assert.deepEqual(result.data.receipt.completed_steps, ["login", "credential"]);
+    assert.deepEqual(result.data.receipt.pending_steps, ["skill", "instrument", "verify", "view"]);
+    assert.equal(fs.existsSync(path.join(box.project, ".agents")), false);
+  } finally { await server.close(); }
+});
+
+test("a preexisting unowned skill leaves a receipt and can be retried without another grant", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const skillDir = path.join(box.project, ".agents", "skills", "metergraph");
+    fs.mkdirSync(skillDir, { recursive: true });
+    const skillFile = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(skillFile, "user owned\n");
+    const first = await setup(box, server, ["--url", server.origin]);
+    assert.equal(first.outcome, "conflict");
+    assert.equal(first.error.reason, "not_owned");
+    assert.equal(first.data.status, "credential_ready_skill_pending");
+    assert.deepEqual(first.data.receipt.completed_steps, ["login", "credential"]);
+    assert.deepEqual(first.data.receipt.pending_steps, ["skill", "instrument", "verify", "view"]);
+    assert.equal(fs.readFileSync(skillFile, "utf8"), "user owned\n");
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    fs.rmSync(skillDir, { recursive: true });
+    const second = await setup(box, server);
+    assert.equal(second.outcome, "ok");
+    assert.equal(second.data.env, "unchanged");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+  } finally { await server.close(); }
+});
+
+test("switching the selected client installs its own skill without rotating the key", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    const second = await setup(box, server, ["--client", "claude"]);
+    assert.equal(second.outcome, "ok");
+    assert.equal(second.data.receipt.client, "claude");
+    assert.ok(fs.existsSync(path.join(box.project, ".claude", "skills", "metergraph", "SKILL.md")));
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+  } finally { await server.close(); }
+});
+
+test("a prior setup state upgrades in place and composes a skill without a new approval", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin, "--skip-skill"])).outcome, "ok");
+    const stateFile = path.join(box.project, ".metergraph", "setup.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    for (const key of ["deployment_profile", "selected_client", "skill_status", "completed_steps", "pending_steps"]) {
+      delete state[key];
+    }
+    fs.writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    const next = await setup(box, server);
+    assert.equal(next.outcome, "ok");
+    assert.equal(next.data.receipt.client, "codex");
+    assert.deepEqual(next.data.receipt.completed_steps, ["login", "credential", "skill"]);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+  } finally { await server.close(); }
+});
+
+test("hosted signup goes through the existing browser login before ingest approval", async () => {
+  const server = await startOAuthServer({ setup: true, profile: "managed" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin, "--signup"]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.receipt.deployment_profile, "managed");
+    assert.equal(server.requestsTo("/v1/auth/signup").length, 1);
   } finally { await server.close(); }
 });
 
@@ -158,5 +276,23 @@ test("an acknowledged key is replaced only with explicit repair bound to its key
     assert.equal(authorize.query.intent, "repair");
     assert.equal(authorize.query.expected_key_id, oldKey);
     assert.notEqual(server.state.setupFamilies.get(state.family_id).keyId, oldKey);
+  } finally { await server.close(); }
+});
+
+test("an explicitly repaired family can recover after its private env file was lost", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    fs.unlinkSync(path.join(box.project, ".env"));
+    const refused = await setup(box, server);
+    assert.equal(refused.outcome, "conflict");
+    assert.equal(refused.error.reason, "repair_required");
+    const repaired = await setup(box, server, ["--repair"]);
+    assert.equal(repaired.outcome, "ok");
+    const authorize = server.requestsTo("/v1/cli/setup/authorize").at(-1);
+    assert.equal(authorize.query.intent, "repair");
+    assert.equal(authorize.query.expected_key_id, state.key_id);
   } finally { await server.close(); }
 });
