@@ -13,14 +13,62 @@ const LOCK = "setup.lock";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_BYTES = 4096;
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+const PROFILES = new Set(["managed", "local", "byoc-core"]);
+const CLIENTS = new Set(["codex", "claude", "cursor"]);
+const PHASES = new Set(["unsubmitted", "redeem_attempted", "delivered"]);
+const SKILL = new Set(["pending", "installed", "skipped"]);
+const LEGACY_KEYS = "family_id,key_id,origin,phase,schema_version,workspace_id";
+const KEYS = "completed_steps,deployment_profile,family_id,key_id,origin,pending_steps,phase,schema_version,selected_client,skill_status,workspace_id";
+
+function steps(value) {
+  const completed = ["login"];
+  if (value.phase === "delivered") completed.push("credential");
+  if (value.skill_status === "installed") completed.push("skill");
+  const pending = [];
+  if (value.phase !== "delivered") pending.push("credential");
+  if (value.skill_status !== "installed") pending.push("skill");
+  pending.push("instrument", "verify", "view");
+  return { completed, pending };
+}
+
+export function withSetupState(value, patch = {}) {
+  const next = { ...value, ...patch };
+  const { completed, pending } = steps(next);
+  next.completed_steps = completed;
+  next.pending_steps = pending;
+  return next;
+}
+
+export function setupReceipt(value) {
+  return {
+    origin: value.origin,
+    workspace_id: value.workspace_id,
+    deployment_profile: value.deployment_profile,
+    client: value.selected_client,
+    completed_steps: [...value.completed_steps],
+    pending_steps: [...value.pending_steps],
+  };
+}
+
+function core(value) {
+  return value.schema_version === 1 && UUID.test(value.family_id) &&
+    (value.key_id === null || UUID.test(value.key_id)) && PHASES.has(value.phase) &&
+    typeof value.origin === "string" && typeof value.workspace_id === "string" && UUID.test(value.workspace_id);
+}
 
 function valid(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).sort().join() === "family_id,key_id,origin,phase,schema_version,workspace_id" &&
-    value.schema_version === 1 && UUID.test(value.family_id) &&
-    (value.key_id === null || UUID.test(value.key_id)) &&
-    ["unsubmitted", "redeem_attempted", "delivered"].includes(value.phase) &&
-    typeof value.origin === "string" && typeof value.workspace_id === "string" && UUID.test(value.workspace_id);
+    Object.keys(value).sort().join() === KEYS && core(value) &&
+    PROFILES.has(value.deployment_profile) &&
+    (value.selected_client === null || CLIENTS.has(value.selected_client)) && SKILL.has(value.skill_status) &&
+    (value.skill_status !== "installed" || value.selected_client !== null) &&
+    JSON.stringify(value.completed_steps) === JSON.stringify(steps(value).completed) &&
+    JSON.stringify(value.pending_steps) === JSON.stringify(steps(value).pending);
+}
+
+function legacy(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).sort().join() === LEGACY_KEYS && core(value);
 }
 
 function fileFor(root) { return path.join(root, ".metergraph", FILE); }
@@ -42,8 +90,9 @@ export function readSetupState(root) {
         opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Stop("conflict", "setup_state_unsafe");
     const content = fs.readFileSync(fd);
     const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(content));
-    if (!valid(value)) throw new Stop("conflict", "setup_state_invalid");
-    return { value, content };
+    if (!valid(value) && !legacy(value)) throw new Stop("conflict", "setup_state_invalid");
+    return { value: legacy(value) ? withSetupState({ ...value, deployment_profile: null,
+      selected_client: null, skill_status: "pending" }) : value, content };
   } catch (error) {
     if (error instanceof Stop) throw error;
     throw new Stop("conflict", "setup_state_invalid");
@@ -52,8 +101,10 @@ export function readSetupState(root) {
   }
 }
 
-export function newSetupState(origin, workspaceId) {
-  return { schema_version: 1, origin, workspace_id: workspaceId, family_id: randomUUID(), key_id: null, phase: "unsubmitted" };
+export function newSetupState(origin, workspaceId, profile, client) {
+  return withSetupState({ schema_version: 1, origin, workspace_id: workspaceId,
+    deployment_profile: profile, selected_client: client, skill_status: client === null ? "skipped" : "pending",
+    family_id: randomUUID(), key_id: null, phase: "unsubmitted" });
 }
 
 // Compare-and-swap under a project-local exclusive lock. A concurrent setup

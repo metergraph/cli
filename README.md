@@ -27,8 +27,9 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
   also exist only in this checkout and are part of the same unpublished upcoming preview.
   They need a project signed in with `login`.
-- `setup` also exists only in this checkout. It requires the deployment's separate
-  ingest bootstrap API and browser approval by a member of the bound workspace.
+- `setup` also exists only in this checkout. It guides sign in and workspace choice,
+  then requires the deployment's separate ingest bootstrap API and browser approval
+  by a member of that workspace.
 
 This development preview does five things:
 
@@ -40,8 +41,9 @@ This development preview does five things:
 - The read commands (checkout only) use that grant to read bounded workspace Metadata:
   connection status, workspace context, capabilities, daily usage, routes and one page
   of trace metadata.
-- `setup` (checkout only) asks for ingest-only browser approval, then writes a private
-  project env file and confirms that the key was delivered.
+- `setup` (checkout only) guides browser sign in and workspace choice, asks for
+  ingest-only approval, writes a private project env file, confirms delivery, and
+  installs the selected client skill.
 
 It does not read retained content, replay traces, call model providers or send
 application data. Setup does not prove that the application sent a trace.
@@ -67,7 +69,7 @@ metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--jso
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
-metergraph setup --runtime local [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--no-browser] [--repair] [--json]
+metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
@@ -275,21 +277,30 @@ exits 0 without any request.
 
 ### setup (checkout only, unreleased)
 
-Sign in to the intended workspace first, then run:
+Run setup once from a project directory, choosing the coding client that will use
+the skill:
 
 ```sh
-metergraph setup --runtime local --project /path/to/project
+metergraph setup --runtime local --client codex --project /path/to/project
 ```
 
-The bound deployment must advertise `metergraph.cli-setup/v1` on its own origin.
-`setup` verifies the saved Metadata session, checks the env file and Git state,
-then opens the deployment's consent page. An owner or member of the exact bound
-workspace approves an ingest-only key. The CLI redeems the single-use receipt,
-writes `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` into `.env`, checks the
-new key with the service, and acknowledges delivery. It never asks for Debug or
-Replay access. The browser page shows the workspace and the consequence of the
-approval. A signed-in browser on another workspace must switch in Metergraph
-and rerun; the CLI does not switch it automatically.
+If the project has no usable Metadata sign in, `setup` opens the deployment's
+browser sign in and workspace choice. `--signup` starts at hosted sign up;
+`--workspace UUID` requires that exact workspace. An existing binding to a
+different origin or workspace requires explicit `--reconnect`. The selected
+deployment must advertise `metergraph.cli-setup/v1` on its own origin. Setup
+refuses reconnecting an existing ingest family to another workspace; its
+original workspace must be restored before that family can be reused. Setup
+checks the env file and Git state, then opens the deployment's consent page. An
+owner or member of the verified workspace approves an ingest-only key. The CLI
+redeems the single-use receipt, writes `METERGRAPH_APP_TOKEN` and
+`METERGRAPH_INGEST_URL` into `.env`, checks the new key with the service, and
+acknowledges delivery. It then installs the bundled skill for `codex`, `claude`
+or `cursor`. Use `--skip-skill` only if you intentionally want to install it
+later. Neither sign in nor setup requests Debug or Replay access. The browser
+page shows the workspace and the consequence of approval. A signed-in browser
+on another workspace must switch in Metergraph and rerun; the CLI does not
+switch it automatically.
 
 The env file must be a project-relative `.env`, `.env.<name>` or `<name>.env`
 (`--env-file` selects another). The writer refuses tracked files, links,
@@ -303,11 +314,16 @@ another browser approval.
 but no credential. It is written before approval. If the redemption response is
 lost, a rerun asks for a new browser approval for that same family. The server
 resolves the request to creation if no key was issued or replacement of that
-family's pending key if one exists; the old receipt is not retried. If an acknowledged key no longer
-verifies, use `--repair` to explicitly approve replacement of that exact key.
+family's pending key if one exists; the old receipt is not retried. If an
+acknowledged key no longer verifies or its env file was lost, use `--repair`
+to explicitly approve replacement of that exact key.
 An unsafe or changed state file is refused. If the earlier approval never
 reached redemption, rerun the command; the `create` intent is still safe.
 
+The JSON result includes a secret-free `receipt` with the origin, workspace ID,
+deployment profile, selected client, and completed and pending steps. A skill
+conflict leaves the delivered key in place and reports `credential_ready_skill_pending`;
+resolve the skill file conflict and rerun setup without another approval.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
 verify one exact trace afterward. This checkout and the matching server slice
