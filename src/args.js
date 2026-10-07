@@ -25,8 +25,8 @@ import { parseOrigin } from "./origin.js";
 import { isCursor, isSafeFilter } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "setup", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "setup", ...READ_COMMANDS]);
+const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 const OPTIONS = {
@@ -41,6 +41,7 @@ const OPTIONS = {
   usage: new Set([...READ_BASE, "--days", "--limit"]),
   routes: new Set([...READ_BASE, "--limit"]),
   traces: new Set([...READ_BASE, "--days", "--limit", "--route", "--status", "--cursor"]),
+  verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
 };
 // Requests the read commands recognize and refuse, so a script gets an
 // explicit unsupported result instead of an unknown argument or, worse, a
@@ -75,6 +76,7 @@ const REFUSED_MESSAGES = {
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
   setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites"]),
+  verify: new Set(["--open", "--no-browser"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -202,6 +204,7 @@ export function parseArgs(argv) {
   if (command === "skill") return parseSkill(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);
   if (command === "setup") return parseSetup(values, flags, json, fail);
+  if (command === "verify") return parseVerify(values, flags, json, fail);
   if (READ_COMMANDS.includes(command)) return parseRead(command, values, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
@@ -223,6 +226,39 @@ export function parseArgs(argv) {
   }
 
   return { ok: true, command: "doctor", origin, timeoutMs, json };
+}
+
+function parseVerify(values, flags, json, fail) {
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const traceId = values["--trace-id"] ?? null;
+  const requestId = values["--request-id"] ?? null;
+  if ((traceId === null) === (requestId === null) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(traceId ?? requestId)) {
+    return fail("invalid_trace_identity", "Provide exactly one --trace-id or --request-id (1 to 200 safe characters).");
+  }
+  const since = values["--since"];
+  const until = values["--until"];
+  const validTime = (value) => typeof value === "string" && value.length <= 40 &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  if (!validTime(since) || !validTime(until) || Date.parse(since) > Date.parse(until) || Date.parse(until) > Date.now()) {
+    return fail("invalid_invocation_window", "--since and --until must bound a past invocation using ISO 8601 timestamps.");
+  }
+  const source = values["--source"] ?? "unspecified";
+  if (!["application", "synthetic", "demo", "import", "unspecified"].includes(source)) {
+    return fail("invalid_source", "--source must be application, synthetic, demo, import or unspecified.");
+  }
+  const days = values["--days"] === undefined ? undefined : parseBounded(values["--days"], 1, 90);
+  if (days === null) return fail("invalid_days", "--days must be a whole number from 1 to 90.");
+  const timeoutMs = values["--timeout-ms"] === undefined ? 30000 : parseTimeout(values["--timeout-ms"], 100, 60000);
+  if (timeoutMs === null) return fail("invalid_timeout", "--timeout-ms must be a whole number from 100 to 60000.");
+  const pollIntervalMs = values["--poll-ms"] === undefined ? 1000 : parseTimeout(values["--poll-ms"], 100, 10000);
+  if (pollIntervalMs === null) return fail("invalid_poll_interval", "--poll-ms must be a whole number from 100 to 10000.");
+  const maxAttempts = values["--max-attempts"] === undefined ? 30 : parseBounded(values["--max-attempts"], 1, 60);
+  if (maxAttempts === null) return fail("invalid_max_attempts", "--max-attempts must be a whole number from 1 to 60.");
+  return { ok: true, command: "verify", project: paths.project, configDir: paths.configDir,
+    traceId, requestId, since, until, source, days, timeoutMs, pollIntervalMs, maxAttempts,
+    open: flags.has("--open"), noBrowser: flags.has("--no-browser"), json };
 }
 
 // Client and runtime are required, so a script states where the skill is

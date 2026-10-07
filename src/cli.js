@@ -18,6 +18,8 @@ import { readMessage, readText } from "./read-output.js";
 import { runSkill } from "./skill.js";
 import { runSetup } from "./setup.js";
 import { VERSION } from "./constants.js";
+import { runVerify } from "./verify.js";
+import { verifyMessage, verifyText } from "./verify-output.js";
 
 // Runs one command and resolves with the exit code. With --json, stdout gets
 // exactly one JSON line and stderr stays empty. Without it, results go to
@@ -106,6 +108,14 @@ async function run(argv, { stdout, stderr }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : readText(result, message));
+    return result;
+  }
+
+  if (parsed.command === "verify") {
+    const { outcome, reason, data } = await runVerify(parsed);
+    const message = verifyMessage(outcome, reason);
+    const result = envelope({ command: "verify", outcome, reason, data, message: outcome === "ok" ? null : message });
+    stdout.write(parsed.json ? toJsonLine(result) : verifyText(result));
     return result;
   }
 

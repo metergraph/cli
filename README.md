@@ -30,8 +30,10 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - `setup` also exists only in this checkout. It guides sign in and workspace choice,
   then requires the deployment's separate ingest bootstrap API and browser approval
   by a member of that workspace.
+- `verify` also exists only in this checkout. It checks one exact trace identity in an
+  explicit invocation window using Metadata access. It never sends application data.
 
-This development preview does five things:
+This checkout includes:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
@@ -44,6 +46,8 @@ This development preview does five things:
 - `setup` (checkout only) guides browser sign in and workspace choice, asks for
   ingest-only approval, writes a private project env file, confirms delivery, and
   installs the selected client skill.
+- `verify` (checkout only) polls for one exact processed trace in a bounded window.
+  It does not infer application provenance from a Metadata match.
 
 It does not read retained content, replay traces, call model providers or send
 application data. Setup does not prove that the application sent a trace.
@@ -69,18 +73,34 @@ metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--jso
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
-metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]
+metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [--deployment managed|customer-local|byoc|oss] [--url ORIGIN] [--workspace UUID] [--confirm-prerequisites] [--agent-token-file FILE] [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph usage [--days N] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login`, `logout`, `setup` and the read commands are not in the published `0.1.0`
+requests. `login`, `logout`, `setup`, `verify` and the read commands are not in the published `0.1.0`
 package.
+
+### Exact trace verification
+
+After an application invocation, pass its exact trace ID or request ID and the
+invocation start and end timestamps to `verify`. The optional `--source` label is a
+caller assertion. A matching Metadata row proves a processed trace is visible in the
+bound workspace, but does not independently prove that it came from your application.
+The result therefore keeps `application_traffic_verified: false` until a separate
+application instrumentation check supplies that evidence. A missing, ambiguous, stale
+or wrong-workspace result fails closed. The command neither creates an ingest key nor
+sends a test event.
+
+The service's current trace links do not select a dashboard workspace. A verified
+link can be copied for manual inspection after selecting the correct workspace, but
+`--open` reports unsupported rather than opening it automatically.
 
 ### doctor
 

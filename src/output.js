@@ -129,9 +129,30 @@ const LOGIN_USAGE =
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
 const SETUP_USAGE = "metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) " +
   "[--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] " +
+  "[--deployment managed|customer-local|byoc|oss] [--confirm-prerequisites] [--agent-token-file FILE] " +
   "[--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]";
-
 const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
+const VERIFY_USAGE =
+  "metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME " +
+  "[--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] " +
+  "[--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]";
+const VERIFY_OPTIONS = [
+  { name: "--trace-id", value: "ID", summary: "Exact trace ID from the application invocation." },
+  { name: "--request-id", value: "ID", summary: "Exact request ID, used only when a trace ID is unavailable." },
+  { name: "--since", value: "TIME", summary: "Start of the invocation in ISO 8601 form." },
+  { name: "--until", value: "TIME", summary: "End of the invocation in ISO 8601 form." },
+  { name: "--source", value: "SOURCE", summary: "Explicit provenance label. Default unspecified; this is a caller claim." },
+  { name: "--days", value: "N", summary: "Metadata lookback, 1 to 90 days. Derived from --since by default." },
+  { name: "--timeout-ms", value: "N", summary: "Total verification deadline, 100 to 60000. Default 30000." },
+  { name: "--poll-ms", value: "N", summary: "Poll interval, 100 to 10000. Default 1000." },
+  { name: "--max-attempts", value: "N", summary: "Maximum Metadata queries, 1 to 60. Default 30." },
+  { name: "--open", value: null, summary: "Open only a verified workspace-bound server link. Current dashboard links cannot select a workspace, so opening is unsupported." },
+  { name: "--no-browser", value: null, summary: "Never launch a browser." },
+  { name: "--project", value: "DIR", summary: "Signed in project directory. Default current directory." },
+  CONFIG_DIR_OPTION,
+  JSON_OPTION,
+];
+
 const READ_BASE_OPTIONS = [
   { name: "--project", value: "DIR", summary: "Signed in project directory. Default: the current directory." },
   CONFIG_DIR_OPTION,
@@ -238,6 +259,7 @@ export function helpData(topic) {
       LOGIN_USAGE,
       LOGOUT_USAGE,
       SETUP_USAGE,
+      VERIFY_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
     ],
     commands: [
@@ -290,8 +312,16 @@ export function helpData(topic) {
           { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
           { name: "--no-browser", value: null, summary: "Print approval URL on stderr; requires terminal output." },
           { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
+          { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
+          { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },
+          { name: "--agent-token-file", value: "FILE", summary: "Optional separate Metadata token for local/BYOC; required for OSS handoff." },
           JSON_OPTION,
         ],
+      },
+      {
+        name: "verify",
+        summary: "Poll Metadata for one exact trace in an explicit invocation window. Never sends application traffic.",
+        options: VERIFY_OPTIONS,
       },
       ...READ_HELP.map(({ name, summary, options }) => ({ name, summary, options })),
     ],
@@ -366,6 +396,15 @@ export function helpText(topic) {
     for (const option of login ? LOGIN_OPTIONS : LOGOUT_OPTIONS) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
       lines.push(`  ${flag.padEnd(18)}${option.summary}`);
+    }
+  } else if (topic === "verify") {
+    lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
+      "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
+      "The current dashboard link does not select a workspace, so --open cannot launch it automatically.",
+      "", "Options:");
+    for (const option of VERIFY_OPTIONS) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(22)}${option.summary}`);
     }
   } else if (READ_HELP.some((entry) => entry.name === topic)) {
     const entry = READ_HELP.find((candidate) => candidate.name === topic);
