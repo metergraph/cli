@@ -38,12 +38,18 @@ const report = {
 };
 
 function npmInstall(directory) {
-  const exec = process.env.npm_execpath;
-  const viaNode = exec && /\.c?js$/.test(exec);
-  const command = viaNode ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
-  const npmArgs = viaNode ? [exec, "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball]
-    : ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball];
-  const result = spawnSync(command, npmArgs, { cwd: directory, encoding: "utf8", shell: !viaNode && process.platform === "win32",
+  // On Windows npm.cmd requires a shell, where an absolute tarball path may
+  // contain command metacharacters. Invoke npm's JS entry point with Node.
+  const npmCli = [
+    process.env.npm_execpath,
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    path.resolve(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  ].find((candidate) => candidate && /\.c?js$/i.test(candidate) && existsSync(candidate));
+  requireCheck(npmCli || process.platform !== "win32", "npm_js_cli_unavailable");
+  const command = npmCli ? process.execPath : "npm";
+  const npmArgs = [...(npmCli ? [npmCli] : []),
+    "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball];
+  const result = spawnSync(command, npmArgs, { cwd: directory, encoding: "utf8",
     timeout: 60000, maxBuffer: 1024 * 1024,
     env: { ...process.env, npm_config_cache: path.join(work, "npm-cache"), npm_config_audit: "false", npm_config_fund: "false" } });
   requireCheck(result.status === 0, "offline_tarball_install_failed");

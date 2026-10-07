@@ -16,7 +16,9 @@ The harness requires an absolute tarball path. It installs that tarball with
 installed binary with network and DNS calls blocked, and removes the temporary
 projects when it finishes. It creates no sign-in grant or project binding.
 `npm run test:package` runs the same harness against its freshly packed tarball
-in the repository's Node 22/24 and Linux/macOS/Windows CI matrix.
+in the repository's Node 22/24 and Linux/macOS/Windows CI matrix. That test
+uses a tarball path containing spaces and `&` without an `npm_execpath`
+environment variable, covering standalone invocation without a command shell.
 
 The single JSON report includes the tarball SHA-256, package and Node versions,
 platform, each client's installed skill path and SHA-256, rerun state, status

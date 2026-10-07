@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -68,9 +68,9 @@ function npm(args, cwd) {
   return run(command, commandArgs, { cwd, shell: !viaNode && isWindows });
 }
 
-function run(command, args, { cwd, shell = false }) {
+function run(command, args, { cwd, shell = false, env = npmEnv }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env: npmEnv, shell, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, shell, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
@@ -304,12 +304,19 @@ test("the installed CLI exposes exact trace verification without claiming traffi
 
 test("the packed CLI passes the offline three-client parity matrix", { timeout: 120000 }, async () => {
   const script = path.join(PACKAGE_ROOT, "scripts", "client-parity.mjs");
-  const result = check(await run(process.execPath, [script, "--tarball", tarball], { cwd: workDir }),
+  const specialDir = path.join(workDir, "packed & parity");
+  mkdirSync(specialDir);
+  const specialTarball = path.join(specialDir, path.basename(tarball));
+  copyFileSync(tarball, specialTarball);
+  const standaloneEnv = { ...npmEnv };
+  delete standaloneEnv.npm_execpath;
+  const result = check(await run(process.execPath, [script, "--tarball", specialTarball],
+    { cwd: workDir, env: standaloneEnv }),
     "packed client parity");
   const report = JSON.parse(result.stdout);
   assert.equal(result.stderr, "");
   assert.equal(report.artifact_version, sourcePackage.version);
-  assert.equal(report.artifact_sha256, createHash("sha256").update(readFileSync(tarball)).digest("hex"));
+  assert.equal(report.artifact_sha256, createHash("sha256").update(readFileSync(specialTarball)).digest("hex"));
   assert.deepEqual(report.clients.map(({ client }) => client), ["codex", "claude", "cursor"]);
   assert.ok(report.clients.every(({ discovery, rerun, status, verify }) =>
     discovery === "pending" && rerun === "reused" && status === "login_required" && verify === "login_required"));
