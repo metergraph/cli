@@ -30,6 +30,7 @@ test("verify requires one exact identity and a bounded invocation window", () =>
 test("verify help exposes exact identity and the workspace-safe open limit", () => {
   assert.match(helpText("verify"), /verified workspace/i);
   assert.ok(helpData(null).commands.some((entry) => entry.name === "verify"));
+  assert.match(helpText(null), /metergraph verify \[options\]/);
 });
 
 test("verify without a saved grant returns one structured refusal", async () => {
