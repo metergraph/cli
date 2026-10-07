@@ -18,7 +18,8 @@ function documentFor(origin, opts, config = {}) {
   if (doc.traces.length) {
     doc.traces[0].started_at = started;
     doc.traces[0].last_span_at = new Date(Date.parse(started) + 1000).toISOString();
-    if (config.link) doc.traces[0].metergraph_links.trace = origin + "/#traces?" + new URLSearchParams({ from: started, to: new Date(Date.parse(started) + 1).toISOString(), q: "example-sdk-trace", trace: "example-sdk-trace" });
+    if (config.link) doc.traces[0].metergraph_links.trace = origin + "/#traces?" + new URLSearchParams({ from: started, to: new Date(Date.parse(started) + 1).toISOString(), q: "example-sdk-trace", trace: "example-sdk-trace",
+      ...(config.workspace ? { workspace: doc.provenance.workspace_id } : {}) });
   }
   return doc;
 }
@@ -128,9 +129,10 @@ test("an installed service without exact identity support reports unsupported wi
 });
 
 test("JSON and no-browser modes return the server URL without a launcher", async () => {
-  const receipt = { ...traceReceipt(traceDocument("https://example.com", { link: true }), context(), selection()).value, link_workspace_bound: true, link_status: "available" };
-  // A trusted internal receipt exercises the opener policy. Current server
-  // fragments do not produce this workspace-bound state in runVerify.
+  const doc = traceDocument("https://example.com", { link: true });
+  doc.traces[0].metergraph_links.trace += "&workspace=" + doc.provenance.workspace_id;
+  const receipt = traceReceipt(doc, context(), selection()).value;
+  assert.equal(receipt.link_workspace_bound, true);
   for (const extra of [{ json: true }, { noBrowser: true }, { open: false }]) {
     const result = await openTrace(receipt, { open: true, ...extra }, async () => { assert.fail("launcher should not run"); });
     assert.equal(result.outcome, "ok"); assert.equal(result.data.app_url, receipt.app_url);
@@ -148,13 +150,41 @@ test("open requires a verified receipt and reports absent canonical links as uns
 });
 
 test("browser launch honors cancellation of a trusted workspace-bound receipt", async () => {
-  const receipt = { ...traceReceipt(traceDocument("https://example.com", { link: true }), context(), selection()).value, link_workspace_bound: true, link_status: "available" };
+  const doc = traceDocument("https://example.com", { link: true });
+  doc.traces[0].metergraph_links.trace += "&workspace=" + doc.provenance.workspace_id;
+  const receipt = traceReceipt(doc, context(), selection()).value;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10);
   try {
     const result = await openTrace(receipt, { open: true, signal: controller.signal }, () => new Promise(() => {}));
     assert.equal(result.outcome, "cancelled");
   } finally { clearTimeout(timer); }
+});
+
+test("verified workspace-bound server link opens only the exact trace", async () => {
+  const opts = options({ open: true });
+  await withServer((r, n, origin) => ({ document: documentFor(origin, opts, { link: true, workspace: true }) }), async (server) => {
+    let launched = null;
+    const result = await runVerify(opts, { session: server.session, launch: async (url) => { launched = url; return true; } });
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.link_workspace_bound, true);
+    assert.equal(result.data.browser, "launcher_started");
+    assert.equal(new URLSearchParams(new URL(launched).hash.slice(8)).get("workspace"), result.data.workspace.id);
+  });
+});
+
+test("wrong workspace in a server link refuses output and browser launch", async () => {
+  const opts = options({ open: true });
+  await withServer((r, n, origin) => {
+    const document = documentFor(origin, opts, { link: true, workspace: true });
+    document.traces[0].metergraph_links.trace =
+      document.traces[0].metergraph_links.trace.replace(document.provenance.workspace_id, "22222222-2222-4222-8222-222222222222");
+    return { document };
+  }, async (server) => {
+    const result = await runVerify(opts, { session: server.session, launch: () => { assert.fail("mismatched workspace"); } });
+    assert.equal(result.reason, "unsafe_trace_link");
+    assert.equal(result.data, null);
+  });
 });
 
 test("a canonical link without browser workspace selection is returned but never opened", async () => {

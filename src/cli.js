@@ -17,6 +17,7 @@ import { runRead } from "./read.js";
 import { readMessage, readText } from "./read-output.js";
 import { runSkill } from "./skill.js";
 import { runSetup } from "./setup.js";
+import { containsKnownCredential, preflightNonHostedSetup } from "./setup-deployment.js";
 import { VERSION } from "./constants.js";
 import { runVerify } from "./verify.js";
 import { verifyMessage, verifyText } from "./verify-output.js";
@@ -88,12 +89,27 @@ async function run(argv, { stdout, stderr }) {
   }
 
   if (parsed.command === "setup") {
-    const progress = parsed.json ? () => {} : (line) => stderr.write(`${line}\n`);
-    const { outcome, reason, data } = await runSetup(parsed, progress);
-    const result = envelope({ command: "setup", outcome, reason, data,
+    const routed = parsed.deployment === "managed" ? { proceed: true } : await preflightNonHostedSetup(parsed);
+    const progress = parsed.json ? () => {} : (line) =>
+      stderr.write(containsKnownCredential(line, routed) ? "Setup progress.\n" : `${line}\n`);
+    const response = routed.proceed
+      ? await runSetup({ ...parsed, expectedProfile: routed.profile ?? null }, progress)
+      : routed;
+    const { outcome, reason, data } = response;
+    let result = envelope({ command: "setup", outcome, reason, data,
       message: outcome === "ok" ? null : "Setup did not complete. Review the reason and retry safely." });
-    stdout.write(parsed.json ? toJsonLine(result) :
-      `Metergraph setup: ${data.status}\nApplication traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${outcome} (${reason})\n`}`);
+    if (containsKnownCredential(result, routed)) {
+      result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
+    }
+    const receipt = result.data?.receipt;
+    const summary = receipt ? `Workspace: ${receipt.workspace_id}\nDeployment: ${receipt.deployment_profile} at ${receipt.origin}\nCompleted: ${receipt.completed_steps.join(", ")}\nPending: ${receipt.pending_steps.join(", ")}\n` : "";
+    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
+    if (containsKnownCredential(human, routed)) {
+      result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
+      stdout.write(parsed.json ? toJsonLine(result) : "Setup stopped.\n");
+    } else {
+      stdout.write(parsed.json ? toJsonLine(result) : human);
+    }
     return result;
   }
 

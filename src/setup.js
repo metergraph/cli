@@ -55,12 +55,15 @@ export async function runSetup(options, progress = () => {}) {
       await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
     if (!signedIn.ok && signedIn.outcome === "login_required") {
       const login = await runLogin({ ...options, origin: intendedOrigin, workspace: intendedWorkspace,
-        project: root, reconnect: options.reconnect }, progress);
+        project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null }, progress);
       if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending");
       signedIn = await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
     }
     if (!signedIn.ok) return stop(signedIn.outcome, signedIn.reason, "login_pending");
     const { origin, workspaceId, profile } = signedIn.session;
+    if (options.expectedProfile && profile !== options.expectedProfile) {
+      return stop("unsupported", "deployment_profile_mismatch", "login_pending");
+    }
     if (origin !== intendedOrigin || (intendedWorkspace !== null && workspaceId !== intendedWorkspace)) {
       return stop("verification_failed", "workspace_mismatch", "login_pending");
     }
@@ -188,6 +191,9 @@ export async function runSetup(options, progress = () => {}) {
 function finishSkill(root, options, envStatus) {
   let previous = readSetupState(root);
   if (previous === null || previous.value.phase !== "delivered") return fail("conflict", "setup_state_changed");
+  if (previous.value.selected_client !== options.client) {
+    return fail("conflict", "setup_state_changed", "credential_ready_skill_pending", setupReceipt(previous.value));
+  }
   if (options.skipSkill) {
     if (previous.value.skill_status !== "skipped") {
       writeSetupState(root, withSetupState(previous.value, { selected_client: null, skill_status: "skipped" }), previous);
@@ -200,7 +206,19 @@ function finishSkill(root, options, envStatus) {
   if (skill.reason === "update_required") {
     skill = runSkill({ action: "update", client: options.client, runtime: "local", project: root });
   }
+  // Another process may have chosen a different client while installation
+  // ran. Re-read before changing the receipt, and let the CAS protect writes.
+  previous = readSetupState(root);
+  if (previous === null || previous.value.phase !== "delivered" ||
+      previous.value.selected_client !== options.client) {
+    return fail("conflict", "setup_state_changed", "credential_ready_skill_pending",
+      previous === null ? null : setupReceipt(previous.value));
+  }
   if (skill.outcome !== "ok") {
+    if (previous.value.skill_status === "installed") {
+      writeSetupState(root, withSetupState(previous.value, { skill_status: "pending" }), previous);
+      previous = readSetupState(root);
+    }
     return fail(skill.outcome, skill.reason, "credential_ready_skill_pending", setupReceipt(previous.value));
   }
   if (previous.value.skill_status !== "installed") {

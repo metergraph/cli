@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 
 import { containsKnownCredential, planNonHostedSetup, preflightNonHostedSetup } from "../src/setup-deployment.js";
+import { main } from "../src/cli.js";
 import { healthyRoutes, json, startServer } from "./helpers.js";
 
 const WORKSPACE = "00000000-0000-4000-8000-00000000000a";
@@ -136,6 +137,27 @@ test("a Metadata failure cannot echo a private token coinciding with a fixed han
   assert.equal(Object.keys(routed).includes("knownCredentials"), false);
   assert.deepEqual(server.requests.filter((request) => request.headers.authorization).map((request) => request.path),
     ["/v1/agent/workspace"]);
+});
+
+test("CLI handoff suppresses a credential that collides with its output", { skip: process.platform === "win32" }, async () => {
+  const token = "operator_handoff";
+  const server = await serve(healthyRoutes("local", {
+    ...discoveryRoutes(),
+    "/v1/agent/workspace": json(401, { error: "invalid_token" }),
+  }));
+  const output = [];
+  const errors = [];
+  const code = await main(["setup", "--runtime", "local", "--deployment", "customer-local",
+    "--confirm-prerequisites", "--url", server.origin, "--workspace", WORKSPACE,
+    "--agent-token-file", credentialFile(token), "--skip-skill", "--json"], {
+    stdout: { write: (value) => output.push(value) },
+    stderr: { write: (value) => errors.push(value) },
+  });
+  assert.equal(code, 6);
+  assert.equal(errors.length, 0);
+  assert.equal(output.length, 1);
+  assert.ok(!output[0].includes(token));
+  assert.equal(JSON.parse(output[0]).error.reason, "credential_echo");
 });
 
 test("output guard compares decoded strings and keys, including printable quotes and slashes", () => {

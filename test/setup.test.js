@@ -135,6 +135,50 @@ test("a preexisting unowned skill leaves a receipt and can be retried without an
   } finally { await server.close(); }
 });
 
+test("a modified installed skill is reported pending on rerun", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    const skillFile = path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md");
+    fs.appendFileSync(skillFile, "\nuser edit\n");
+    const rerun = await setup(box, server);
+    assert.equal(rerun.outcome, "conflict");
+    assert.equal(rerun.data.status, "credential_ready_skill_pending");
+    assert.deepEqual(rerun.data.receipt.completed_steps, ["login", "credential"]);
+    assert.deepEqual(rerun.data.receipt.pending_steps, ["skill", "instrument", "verify", "view"]);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("customer-local setup verifies route before browser login and completes on the exact profile", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--deployment", "customer-local",
+      "--confirm-prerequisites", "--url", server.origin, "--workspace", server.behavior.workspaceId]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.receipt.deployment_profile, "local");
+    assert.equal(result.data.receipt.workspace_id, server.behavior.workspaceId);
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("customer-local profile mismatch stops before login or ingest approval", async () => {
+  const server = await startOAuthServer({ setup: true, deploymentProfile: "managed" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--deployment", "customer-local",
+      "--confirm-prerequisites", "--url", server.origin, "--workspace", server.behavior.workspaceId]);
+    assert.equal(result.outcome, "unsupported");
+    assert.equal(result.error.reason, "deployment_profile_mismatch");
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 0);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});
+
 test("switching the selected client installs its own skill without rotating the key", async () => {
   const server = await startOAuthServer({ setup: true });
   try {

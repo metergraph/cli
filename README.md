@@ -98,9 +98,10 @@ application instrumentation check supplies that evidence. A missing, ambiguous, 
 or wrong-workspace result fails closed. The command neither creates an ingest key nor
 sends a test event.
 
-The service's current trace links do not select a dashboard workspace. A verified
-link can be copied for manual inspection after selecting the correct workspace, but
-`--open` reports unsupported rather than opening it automatically.
+`--open` launches only a server-provided link carrying the exact trace and the
+verified workspace ID. The dashboard must check that ID against its signed-in
+workspace before displaying traces. Older links without a workspace remain a
+manual handoff; a conflicting workspace or unsafe link is refused.
 
 ### doctor
 
@@ -303,6 +304,26 @@ the skill:
 ```sh
 metergraph setup --runtime local --client codex --project /path/to/project
 ```
+
+For a customer-local bundle, point setup at its installed origin and exact
+workspace:
+
+```sh
+metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --confirm-prerequisites --client codex
+```
+
+`--confirm-prerequisites` records the operator's attestation that the released
+signed bundle, registry invitation, local admin, and separate Metadata access
+prerequisites are ready. It is not proof of bundle publication or registry
+access. Setup checks the live deployment profile before login. BYOC uses
+`--deployment byoc` and an explicit HTTPS private origin; its provisioning,
+network, and identity prerequisites remain the operator's work. An optional
+`--agent-token-file` can verify a separate Metadata credential for either
+route. OSS uses separate `MG_TOKENS` ingestion and `MG_AGENT_TOKENS` read
+credentials; `--deployment oss` verifies its Metadata route with a private
+agent token file and hands ingest configuration to the operator. It does not
+try hosted login or ingest bootstrap against OSS. Remote runtimes are handed
+off to a local machine, with no implicit tunnel or credential forwarding.
 
 If the project has no usable Metadata sign in, `setup` opens the deployment's
 browser sign in and workspace choice. `--signup` starts at hosted sign up;

@@ -146,7 +146,7 @@ const VERIFY_OPTIONS = [
   { name: "--timeout-ms", value: "N", summary: "Total verification deadline, 100 to 60000. Default 30000." },
   { name: "--poll-ms", value: "N", summary: "Poll interval, 100 to 10000. Default 1000." },
   { name: "--max-attempts", value: "N", summary: "Maximum Metadata queries, 1 to 60. Default 30." },
-  { name: "--open", value: null, summary: "Open only a verified workspace-bound server link. Current dashboard links cannot select a workspace, so opening is unsupported." },
+  { name: "--open", value: null, summary: "Open only a verified server link bound to the signed in workspace." },
   { name: "--no-browser", value: null, summary: "Never launch a browser." },
   { name: "--project", value: "DIR", summary: "Signed in project directory. Default current directory." },
   CONFIG_DIR_OPTION,
@@ -364,7 +364,14 @@ export function helpText(topic) {
     lines.push(`Usage: ${SETUP_USAGE}`, "", "Opens the service's browser sign in and workspace choice when needed.",
       "The browser approves an ingest-only key for the exact workspace. The CLI stores it in",
       "a private env file, confirms delivery, and installs the chosen client skill unless",
-      "--skip-skill is explicit. No application traffic is claimed until an exact trace is verified.");
+      "--skip-skill is explicit. Non-hosted setup requires an explicit origin, workspace and",
+      "operator prerequisite attestation; OSS remains an operator handoff. No application",
+      "traffic is claimed until an exact instrumented invocation is separately verified.",
+      "", "Options:");
+    for (const option of helpData(null).commands.find((entry) => entry.name === "setup").options) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
+    }
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
     lines.push(`Usage: ${login ? LOGIN_USAGE : LOGOUT_USAGE}`, "");
@@ -400,7 +407,7 @@ export function helpText(topic) {
   } else if (topic === "verify") {
     lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
       "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
-      "The current dashboard link does not select a workspace, so --open cannot launch it automatically.",
+      "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
     for (const option of VERIFY_OPTIONS) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
