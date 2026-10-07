@@ -1,7 +1,7 @@
 # metergraph-cli
 
-The Metergraph command line tool. This checkout is a **development preview**, version
-`0.2.0-preview.0`, which has not been published.
+The Metergraph command line tool. Version `0.2.0-preview.0` is published on the
+`next` npm tag. The `latest` tag remains on `0.1.0`.
 
 Install the released preview channel with npm or run it directly:
 
@@ -11,42 +11,37 @@ npx --yes metergraph-cli@next doctor --json
 npm install -g metergraph-cli@next
 ```
 
-The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact preview.
+The installed command is `metergraph`. Pin `metergraph-cli@0.2.0-preview.0`
+when you need this exact preview rather than whichever version `next` names later.
 
 **Availability:**
 
-- The published package, `metergraph-cli@0.1.0`, contains only `doctor` and
-  `skill install` / `skill update`. It has no sign in commands.
-- `login` and `logout`, described below, exist only in this checkout. They are an
-  upcoming preview: run them from a checkout or a locally packed tarball (see
-  [Development](#development)). Do not expect them from `npx metergraph-cli` until a
-  release that includes them is announced.
-- They also need a Metergraph service that offers Metadata-only CLI sign in and grant
+- `metergraph-cli@0.1.0` contains only `doctor` and `skill install` /
+  `skill update`. It has no sign in commands.
+- `metergraph-cli@0.2.0-preview.0` adds `login`, `logout`, `setup`, `verify`,
+  `status`, `context`, `capabilities`, `usage`, `routes` and `traces`.
+- Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
-- The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
-  also exist only in this checkout and are part of the same unpublished upcoming preview.
-  They need a project signed in with `login`.
-- `setup` also exists only in this checkout. It guides sign in and workspace choice,
-  then requires the deployment's separate ingest bootstrap API and browser approval
-  by a member of that workspace.
-- `verify` also exists only in this checkout. It checks one exact trace identity in an
-  explicit invocation window using Metadata access. It never sends application data.
+- The read commands need a project signed in with `login`. `setup` also needs the
+  deployment's ingest bootstrap API and browser approval by a workspace member.
+  `verify` checks one exact trace identity in an explicit invocation window using
+  Metadata access. It never sends application data.
 
-This checkout includes:
+The preview includes:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
   CLI into one coding agent's project skill directory.
-- `login` and `logout` (checkout only) sign a project in to one workspace through your
+- `login` and `logout` sign a project in to one workspace through your
   browser with a delegated, Metadata-only grant, and sign it out again.
-- The read commands (checkout only) use that grant to read bounded workspace Metadata:
+- The read commands use that grant to read bounded workspace Metadata:
   connection status, workspace context, capabilities, daily usage, routes and one page
   of trace metadata.
-- `setup` (checkout only) guides browser sign in and workspace choice, asks for
+- `setup` guides browser sign in and workspace choice, asks for
   ingest-only approval, writes a private project env file, confirms delivery, and
   installs the selected client skill.
-- `verify` (checkout only) polls for one exact processed trace in a bounded window.
+- `verify` polls for one exact processed trace in a bounded window.
   It does not infer application provenance from a Metadata match.
 
 It does not read retained content, replay traces, call model providers or send
@@ -205,7 +200,7 @@ does not match. It never downloads the skill or runs a remote script. A new skil
 revision ships only in a new CLI release; `skill update` then upgrades projects that
 hold an unchanged earlier revision.
 
-### login and logout (checkout only, unreleased)
+### login and logout
 
 `login` binds a project directory to one Metergraph workspace. Your browser does the
 sign in, sign up, invitation and workspace consent on the service's own pages and
@@ -296,7 +291,7 @@ revocation request. If it does not answer `200`, local sign out still happens an
 command exits 13 with `revocation: "unconfirmed"`. A project that is not signed in
 exits 0 without any request.
 
-### setup (checkout only, unreleased)
+### setup
 
 Run setup once from a project directory, choosing the coding client that will use
 the skill:
@@ -367,11 +362,11 @@ conflict leaves the delivered key in place and reports `credential_ready_skill_p
 resolve the skill file conflict and rerun setup without another approval.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
-verify one exact trace afterward. This checkout and the matching server slice
-are development work; neither their availability on a deployed service nor a
-published package has been established by these local tests.
+verify one exact trace afterward. The hosted service advertises the setup
+contract, but each non-hosted deployment must be checked at its own origin.
+Local protocol tests do not prove browser approval or real application traffic.
 
-### Read commands (checkout only, unreleased)
+### Read commands
 
 The read commands use the grant `login` saved for this project. They never open a
 browser, never sign in on their own and never request another scope. Each one:
@@ -512,8 +507,8 @@ before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
 
 ## Exit codes
 
-Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 exist only in
-this checkout.
+Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 were
+added in `0.2.0-preview.0` and are unavailable in `0.1.0`.
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
@@ -618,7 +613,7 @@ A successful `skill install`:
   `receipt_invalid`, `locked`, `invalid_project`, `client_not_supported`,
   `write_failed` or `bundled_skill_invalid`.
 
-A successful `login` (checkout only):
+A successful `login`:
 
 ```json
 {
@@ -768,10 +763,9 @@ Do not commit tarballs or other generated files.
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-The first preview uses the `next` npm tag. `0.1.0` is the only published version.
-This checkout's `0.2.0-preview.0` is not published and must not be published until
-the service side of sign in and the Metadata read endpoints are released. Subsequent releases must pass the checks
-below before publication.
+`0.2.0-preview.0` is published on the `next` npm tag; `latest` remains on
+`0.1.0`. The hosted service supports sign in, Metadata reads and ingest bootstrap.
+Subsequent releases must pass the checks below before publication.
 
 Releases are manual. The `Release CLI` workflow (`.github/workflows/release.yml`) runs
 only when a maintainer starts it from `main`. It does not run on tags, pushes or a
@@ -803,12 +797,12 @@ commit:
 - If `main` moves after you copy the SHA, the run fails. Start a new run with the new
   head. To release an older state, land it on `main` first.
 
-### First package bootstrap
+### First package bootstrap (completed for 0.1.0)
 
 npm trusted publishing is configured on a package that already exists, so the very
-first version cannot come from this workflow. Creating the package is a one time,
-human step that a Metergraph maintainer must approve and perform. Nothing in this
-repository automates it, and no npm token or secret is stored here.
+first version could not come from this workflow. The steps below describe the
+completed bootstrap of `0.1.0`; they are not part of subsequent releases. No npm
+token or secret is stored here.
 
 1. Confirm the intended npm maintainer accounts and that `metergraph-cli` is
    available. The first approved publish establishes package ownership.
@@ -837,15 +831,13 @@ Trusted publishing requires npm 11.5.1 or newer. The publish job checks this bef
 publishes. After the trusted publisher works, consider restricting the package to
 trusted publishing so that long lived tokens cannot publish it.
 
-### Remaining maintainer setup
+### Release configuration
 
-The source repository and license are settled. Before any automated release, a
-maintainer still has to:
+Before an automated publish, confirm the following settings are still in place:
 
-- complete the [first package bootstrap](#first-package-bootstrap);
-- configure the [trusted publisher](#trusted-publishing);
-- create the `npm-release` environment with required reviewers;
-- set the repository variable `METERGRAPH_CLI_PUBLISH_ENABLED` to `true`.
+- the [trusted publisher](#trusted-publishing) matches this repository and workflow;
+- the `npm-release` environment has required reviewers;
+- the repository variable `METERGRAPH_CLI_PUBLISH_ENABLED` is `true`.
 
 Until all of these are done, leave `publish` false.
 
