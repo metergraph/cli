@@ -169,6 +169,23 @@ test("a prior setup state upgrades in place and composes a skill without a new a
   } finally { await server.close(); }
 });
 
+test("reconnect cannot change a delivered family's workspace binding", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    const bindingFile = path.join(box.project, ".metergraph", "project.json");
+    const before = fs.readFileSync(bindingFile);
+    const logins = server.requestsTo("/v1/oauth/authorize").length;
+    const result = await setup(box, server, ["--reconnect", "--workspace",
+      "6f1e2d3c-4b5a-4968-8776-655443322110"]);
+    assert.equal(result.outcome, "conflict");
+    assert.equal(result.error.reason, "setup_binding_changed");
+    assert.ok(fs.readFileSync(bindingFile).equals(before));
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, logins);
+  } finally { await server.close(); }
+});
+
 test("hosted signup goes through the existing browser login before ingest approval", async () => {
   const server = await startOAuthServer({ setup: true, profile: "managed" });
   try {

@@ -37,9 +37,17 @@ export async function runSetup(options, progress = () => {}) {
   const stop = (outcome, reason, status = "not_ready") => fail(outcome, reason, status, receipt);
   try {
     const root = resolveProject(options.project);
+    const saved = readSetupState(root);
+    if (saved) receipt = setupReceipt(saved.value);
     const bound = readBinding(root)?.binding ?? null;
-    const intendedOrigin = options.originExplicit ? options.origin : bound?.origin ?? options.origin;
-    const intendedWorkspace = options.workspace;
+    const intendedOrigin = options.originExplicit ? options.origin : bound?.origin ?? saved?.value.origin ?? options.origin;
+    const intendedWorkspace = options.workspace ?? saved?.value.workspace_id ?? null;
+    // A family already tied to a workspace cannot be carried across a
+    // reconnect. Refuse before login changes the Metadata binding or the env.
+    if (saved && (saved.value.origin !== intendedOrigin || saved.value.workspace_id !== intendedWorkspace ||
+        (bound !== null && (bound.origin !== saved.value.origin || bound.workspace_id !== saved.value.workspace_id)))) {
+      return stop("conflict", "setup_binding_changed");
+    }
     const bindingDiffers = bound !== null && (bound.origin !== intendedOrigin ||
       (intendedWorkspace !== null && bound.workspace_id !== intendedWorkspace));
     if (bindingDiffers && !options.reconnect) return stop("conflict", "bound_to_other_workspace");

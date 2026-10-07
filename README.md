@@ -289,6 +289,8 @@ browser sign in and workspace choice. `--signup` starts at hosted sign up;
 `--workspace UUID` requires that exact workspace. An existing binding to a
 different origin or workspace requires explicit `--reconnect`. The selected
 deployment must advertise `metergraph.cli-setup/v1` on its own origin. Setup
+refuses reconnecting an existing ingest family to another workspace; its
+original workspace must be restored before that family can be reused. Setup
 checks the env file and Git state, then opens the deployment's consent page. An
 owner or member of the verified workspace approves an ingest-only key. The CLI
 redeems the single-use receipt, writes `METERGRAPH_APP_TOKEN` and
