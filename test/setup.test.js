@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 import { BROWSER, LOCAL_ENV, login, sandboxes } from "./auth-helpers.js";
 import { assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
 import { startOAuthServer } from "./fixtures/oauth-server.js";
+import { aclStatus } from "../src/setup-env-acl.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph setup test "));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -39,7 +40,8 @@ test("browser-approved setup writes a private env, acknowledges delivery and reu
     const env = fs.readFileSync(path.join(box.project, ".env"), "utf8");
     assert.match(env, /^METERGRAPH_APP_TOKEN=mg_[A-Za-z0-9_-]+/m);
     assert.ok(env.includes(`METERGRAPH_INGEST_URL=${server.origin}/v1/ingest`));
-    assert.equal(fs.statSync(path.join(box.project, ".env")).mode & 0o077, 0);
+    if (process.platform === "win32") assert.equal(aclStatus(path.join(box.project, ".env")), "private");
+    else assert.equal(fs.statSync(path.join(box.project, ".env")).mode & 0o077, 0);
     assert.ok(fs.readFileSync(path.join(box.project, ".gitignore"), "utf8").includes(".env"));
     const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
     assert.equal(state.phase, "delivered");

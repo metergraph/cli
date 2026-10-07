@@ -923,10 +923,10 @@ describe("verifyDeploymentRoute", { skip: isWindows }, () => {
   test("one deadline spans preflight, discovery and both verification requests", async () => {
     const server = await serve(
       routes("local", {
-        resource: delayed(120, oauth("protected_resource")),
-        server: delayed(120, oauth("authorization_server")),
-        workspace: delayed(120, json(200, workspaceDoc("local"))),
-        capabilities: delayed(120, json(200, capabilitiesDoc("local"))),
+        resource: delayed(40, oauth("protected_resource")),
+        server: delayed(40, oauth("authorization_server")),
+        workspace: delayed(40, json(200, workspaceDoc("local"))),
+        capabilities: delayed(350, json(200, capabilitiesDoc("local"))),
       }),
     );
     const cred = credential();

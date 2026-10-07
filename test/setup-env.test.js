@@ -9,6 +9,7 @@ import path from "node:path";
 import { after, afterEach, test } from "node:test";
 
 import { Stop } from "../src/auth-store.js";
+import { systemRoot } from "../src/auth-browser.js";
 import { aclStatus } from "../src/setup-env-acl.js";
 import {
   ENV_MESSAGES,
@@ -647,15 +648,17 @@ test("on Windows the env file gets a protected DACL for the current user, SYSTEM
 
   // An independent look at the DACL: protected, and only the allowed SIDs.
   const script = [
-    "$acl = Get-Acl -LiteralPath $env:SYNTHETIC_ACL_PATH",
+    "$acl = [IO.File]::GetAccessControl($env:SYNTHETIC_ACL_PATH)",
     "$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
-    "$sids = $acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }",
+    "$sids = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }",
     "[Console]::Out.Write(($acl.AreAccessRulesProtected, $me, ($sids -join ',')) -join ';')",
   ].join("\n");
-  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+  const powershell = path.win32.join(systemRoot(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const result = spawnSync(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
     encoding: "utf8",
     env: { ...process.env, SYNTHETIC_ACL_PATH: file },
   });
+  assert.equal(result.status, 0, "independent ACL inspection failed");
   const [isProtected, me, sids] = result.stdout.trim().split(";");
   assert.equal(isProtected, "True");
   const allowed = new Set([me, "S-1-5-18", "S-1-5-32-544"]);
