@@ -15,8 +15,19 @@ const boxFor = sandboxes(dir);
 
 async function setup(box, server, extra = []) {
   const clientSelection = extra.includes("--skip-skill") || extra.includes("--client") ? [] : ["--client", "codex"];
+  const deploymentChoice = extra.includes("--deployment")
+    ? extra[extra.indexOf("--deployment") + 1]
+    : server.behavior.profile === "managed" ? "managed" : "customer-local";
+  const deployment = extra.includes("--deployment") ? [] :
+    ["--deployment", deploymentChoice];
+  const prerequisites = deploymentChoice !== "managed" && !extra.includes("--confirm-prerequisites")
+    ? ["--confirm-prerequisites"] : [];
+  const origin = extra.includes("--url") ? [] : ["--url", server.origin];
+  const workspace = deploymentChoice !== "managed" && !extra.includes("--workspace")
+    ? ["--workspace", server.behavior.workspaceId] : [];
   const run = await runCli(["--json", "setup", "--runtime", "local", "--project", box.project,
-    "--config-dir", box.config, ...clientSelection, ...extra], { imports: [BROWSER],
+    "--config-dir", box.config, ...deployment, ...prerequisites, ...origin, ...workspace,
+    ...clientSelection, ...extra], { imports: [BROWSER],
     env: { ...LOCAL_ENV, METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
   assertNoLeak(assert, run.stdout, run.stderr);
   assert.equal(run.stderr, "");
@@ -148,6 +159,53 @@ test("a modified installed skill is reported pending on rerun", async () => {
     assert.deepEqual(rerun.data.receipt.completed_steps, ["login", "credential"]);
     assert.deepEqual(rerun.data.receipt.pending_steps, ["skill", "instrument", "verify", "view"]);
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("a saved receipt does not claim current completion after Metadata access is lost", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server)).outcome, "ok");
+    server.behavior.bearerStatus = 403;
+    const rerun = await setup(box, server);
+    assert.notEqual(rerun.outcome, "ok");
+    assert.deepEqual(rerun.data.receipt.completed_steps, []);
+    assert.deepEqual(rerun.data.receipt.pending_steps,
+      ["login", "credential", "skill", "instrument", "verify", "view"]);
+  } finally { await server.close(); }
+});
+
+test("managed setup refuses a customer-local service before ingest approval", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--deployment", "managed"]);
+    assert.equal(result.outcome, "unsupported");
+    assert.equal(result.error.reason, "deployment_profile_mismatch");
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 0);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});
+
+test("a concurrent client choice during browser approval is preserved and not redeemed", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    server.behavior.setupAuthorize = () => {
+      const file = path.join(box.project, ".metergraph", "setup.json");
+      const state = JSON.parse(fs.readFileSync(file, "utf8"));
+      state.selected_client = "claude";
+      fs.writeFileSync(file, `${JSON.stringify(state)}\n`);
+    };
+    const result = await setup(box, server);
+    assert.equal(result.outcome, "conflict");
+    assert.equal(result.error.reason, "setup_state_changed");
+    assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json"), "utf8"));
+    assert.equal(state.selected_client, "claude");
   } finally { await server.close(); }
 });
 

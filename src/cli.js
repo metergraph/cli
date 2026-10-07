@@ -89,7 +89,9 @@ async function run(argv, { stdout, stderr }) {
   }
 
   if (parsed.command === "setup") {
-    const routed = parsed.deployment === "managed" ? { proceed: true } : await preflightNonHostedSetup(parsed);
+    const routed = parsed.deployment === "managed"
+      ? { proceed: true, profile: "managed" }
+      : await preflightNonHostedSetup(parsed);
     const progress = parsed.json ? () => {} : (line) =>
       stderr.write(containsKnownCredential(line, routed) ? "Setup progress.\n" : `${line}\n`);
     const response = routed.proceed

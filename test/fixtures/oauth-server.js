@@ -51,6 +51,7 @@ export async function startOAuthServer(initial = {}) {
     readRaw: null,
     setup: false,
     setupMetadata: (doc) => doc,
+    setupAuthorize: () => {},
     setupRedeem: "issue", // issue, drop-before-issue, drop-after-issue, reject
     setupCredentialReject: false,
     ...initial,
@@ -141,6 +142,7 @@ export async function startOAuthServer(initial = {}) {
         code_challenge_methods_supported: ["S256"], credential_scope: "ingest", receipt_lifetime_seconds: 300 }));
     if (path === "/v1/cli/setup/authorize" && request.method === "GET") {
       const params = url.searchParams;
+      behavior.setupAuthorize(params);
       const family = state.setupFamilies.get(params.get("family_id"));
       const intent = params.get("intent");
       if (!state.clients.has(params.get("client_id")) || !["create", "replace_pending", "repair"].includes(intent) ||

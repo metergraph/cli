@@ -429,9 +429,10 @@ Bounds and honesty rules:
   printable characters. A page whose `limit` differs from the request, or rows that do
   not match `--status` or `--route`, exit 11. Free-text filter values are not printed
   back.
-- No trace links are printed. The service does not yet return a workspace-bound link,
-  so each trace has `link: null` and the page has
-  `link_status: "server_link_unavailable"`.
+- The `traces` listing prints no trace links; each row has `link: null` and the
+  page reports `link_status: "server_link_unavailable"`. Exact-trace
+  `verify --open` uses a server link only when it includes the verified
+  workspace binding.
 - `--environment`, `--workload`, `--since`, `--until`, `--sql`, `--query`, `--content`,
   `--include-content`, `--debug` and `--replay` are recognized and refused with exit 6
   before any request. The agent access contract has no environment selector or

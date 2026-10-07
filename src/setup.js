@@ -34,7 +34,19 @@ export async function runSetup(options, progress = () => {}) {
   if (options.json && options.noBrowser) return fail("unsupported", "no_browser_requires_terminal");
   const trap = trapSignals();
   let receipt = null;
-  const stop = (outcome, reason, status = "not_ready") => fail(outcome, reason, status, receipt);
+  let loginVerified = false;
+  let credentialVerified = false;
+  const stop = (outcome, reason, status = "not_ready") => {
+    let current = receipt;
+    if (current !== null && (!loginVerified || !credentialVerified)) {
+      const completed = loginVerified ? ["login"] : [];
+      current = { ...current, completed_steps: completed,
+        pending_steps: [
+          ...(!loginVerified ? ["login"] : []), "credential", "skill", "instrument", "verify", "view",
+        ] };
+    }
+    return fail(outcome, reason, status, current);
+  };
   try {
     const root = resolveProject(options.project);
     const saved = readSetupState(root);
@@ -67,6 +79,7 @@ export async function runSetup(options, progress = () => {}) {
     if (origin !== intendedOrigin || (intendedWorkspace !== null && workspaceId !== intendedWorkspace)) {
       return stop("verification_failed", "workspace_mismatch", "login_pending");
     }
+    loginVerified = true;
     const plan = preflightEnv({ project: root, envFile: options.envFile, signal: trap.signal });
     const existing = currentEnvValues(plan);
     let previous = readSetupState(root);
@@ -104,6 +117,7 @@ export async function runSetup(options, progress = () => {}) {
         }
         const ack = await acknowledge(origin, existing.token, previous.value, profile, checked.keyId, trap.signal);
         if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
+        credentialVerified = true;
         if (previous.value.phase !== "delivered" || previous.value.key_id === null) {
           writeSetupState(root, withSetupState(previous.value, { key_id: checked.keyId, phase: "delivered" }), previous);
         }
@@ -165,11 +179,10 @@ export async function runSetup(options, progress = () => {}) {
     // If the response is lost, a later run asks the browser to replace only
     // this family's pending key; it never replays the receipt.
     previous = readSetupState(root);
-    if (previous?.value.family_id !== state.family_id || previous.value.origin !== origin ||
-        previous.value.workspace_id !== workspaceId || previous.value.phase !== state.phase) {
+    if (previous === null || JSON.stringify(previous.value) !== JSON.stringify(state)) {
       return stop("conflict", "setup_state_changed");
     }
-    writeSetupState(root, withSetupState(state, { phase: "redeem_attempted" }), previous);
+    writeSetupState(root, withSetupState(previous.value, { phase: "redeem_attempted" }), previous);
     previous = readSetupState(root);
     const redeemed = await redeem(origin, { code: callback.code, client_id: clientId,
       redirect_uri: listener.redirectUri, code_verifier: pkce.verifier,
@@ -180,6 +193,7 @@ export async function runSetup(options, progress = () => {}) {
     if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
     const ack = await acknowledge(origin, redeemed.token, state, profile, redeemed.keyId, trap.signal);
     if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
+    credentialVerified = true;
     writeSetupState(root, withSetupState(previous.value, { key_id: redeemed.keyId, phase: "delivered" }), previous);
     return finishSkill(root, options, written.receipt.file);
   } catch (error) {
