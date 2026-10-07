@@ -472,6 +472,7 @@ export function helpText(topic) {
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
       "  metergraph setup [options]       Approve and write a private ingest key",
+      "  metergraph verify [options]      Find one exact processed trace",
       "  metergraph status [options]      Show configured, reachable and verified state",
       "  metergraph context [options]     Show the verified workspace",
       "  metergraph capabilities [opts]   Show the agent reads offered to this grant",
@@ -482,6 +483,7 @@ export function helpText(topic) {
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',
       'Run "metergraph help login" or "metergraph help logout" for sign in options.',
+      'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
     );
   }
