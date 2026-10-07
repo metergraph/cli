@@ -82,6 +82,46 @@ test("lost redemption response persists family and uses browser-approved pending
   } finally { await server.close(); }
 });
 
+test("a redemption request lost before issuance recovers with a server-resolved create", async () => {
+  const server = await startOAuthServer({ setup: true, setupRedeem: "drop-before-issue" });
+  try {
+    const box = boxFor();
+    assert.equal((await login(assert, box, server)).result.ok, true);
+    const first = await setup(box, server);
+    assert.equal(first.outcome, "connection_failed");
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    assert.equal(state.phase, "redeem_attempted");
+    assert.equal(server.state.setupFamilies.has(state.family_id), false);
+    server.behavior.setupRedeem = "issue";
+    const second = await setup(box, server);
+    assert.equal(second.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").at(-1).query.intent, "replace_pending");
+    assert.equal(server.state.setupFamilies.get(state.family_id).delivery, "acknowledged");
+  } finally { await server.close(); }
+});
+
+test("a failed credential check after env write can replace the family's pending key", async () => {
+  const server = await startOAuthServer({ setup: true, setupCredentialReject: true });
+  try {
+    const box = boxFor();
+    assert.equal((await login(assert, box, server)).result.ok, true);
+    const first = await setup(box, server);
+    assert.equal(first.outcome, "verification_failed");
+    assert.equal(first.data.status, "delivery_pending");
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    assert.equal(state.phase, "redeem_attempted");
+    assert.equal(state.key_id, null);
+    const family = server.state.setupFamilies.get(state.family_id);
+    const oldKey = family.keyId;
+    family.token = "mg_revoked_synthetic_00000000000000000000";
+    server.behavior.setupCredentialReject = false;
+    const second = await setup(box, server);
+    assert.equal(second.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").at(-1).query.intent, "replace_pending");
+    assert.notEqual(server.state.setupFamilies.get(state.family_id).keyId, oldKey);
+  } finally { await server.close(); }
+});
+
 test("tampered setup discovery stops before browser registration or file write", async () => {
   const server = await startOAuthServer({ setup: true,
     setupMetadata: (doc) => ({ ...doc, redemption_endpoint: "https://evil.example.com/redeem" }) });

@@ -51,7 +51,8 @@ export async function startOAuthServer(initial = {}) {
     readRaw: null,
     setup: false,
     setupMetadata: (doc) => doc,
-    setupRedeem: "issue", // issue, drop-after-issue, reject
+    setupRedeem: "issue", // issue, drop-before-issue, drop-after-issue, reject
+    setupCredentialReject: false,
     ...initial,
   };
 
@@ -144,12 +145,13 @@ export async function startOAuthServer(initial = {}) {
       const intent = params.get("intent");
       if (!state.clients.has(params.get("client_id")) || !["create", "replace_pending", "repair"].includes(intent) ||
           params.get("workspace_id") !== behavior.workspaceId || params.get("code_challenge_method") !== "S256" ||
-          (intent === "create" && family) || (intent === "replace_pending" && family?.delivery !== "pending") ||
+          (intent === "create" && family) || (intent === "replace_pending" && family && family.delivery !== "pending") ||
           (intent === "repair" && (family?.delivery !== "acknowledged" || family?.keyId !== params.get("expected_key_id")))) {
         return send(response, 409, { error: "setup_state_mismatch" });
       }
+      const resolvedIntent = intent === "replace_pending" && !family ? "create" : intent;
       const receipt = `mgbs_${randomBytes(32).toString("base64url")}`;
-      state.setupReceipts.set(receipt, { familyId: params.get("family_id"), intent, challenge: params.get("code_challenge"),
+      state.setupReceipts.set(receipt, { familyId: params.get("family_id"), intent: resolvedIntent, challenge: params.get("code_challenge"),
         clientId: params.get("client_id"), redirectUri: params.get("redirect_uri"), workspaceId: params.get("workspace_id") });
       const target = new URL(params.get("redirect_uri"));
       target.searchParams.set("code", receipt);
@@ -158,6 +160,7 @@ export async function startOAuthServer(initial = {}) {
       return response.end();
     }
     if (path === "/v1/cli/setup/redeem" && request.method === "POST") {
+      if (behavior.setupRedeem === "drop-before-issue") return response.socket.destroy();
       const form = new URLSearchParams(body);
       const receipt = state.setupReceipts.get(form.get("code"));
       state.setupReceipts.delete(form.get("code"));
@@ -177,6 +180,7 @@ export async function startOAuthServer(initial = {}) {
         family_id: receipt.familyId, key_id: keyId, deployment: { origin, profile: behavior.profile } });
     }
     if (path === "/v1/cli/setup/credential") {
+      if (behavior.setupCredentialReject) return send(response, 401, { error: "invalid_token" });
       const familyId = request.method === "GET" ? url.searchParams.get("family_id") : new URLSearchParams(body).get("family_id");
       const family = state.setupFamilies.get(familyId);
       if (!family || request.headers.authorization !== `Bearer ${family.token}`) return send(response, 401, { error: "invalid_token" });

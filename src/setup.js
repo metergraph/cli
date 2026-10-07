@@ -62,7 +62,7 @@ export async function runSetup(options, progress = () => {}) {
         return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation", application_traffic_verified: false, env: "unchanged" } };
       }
       if (!options.repair && previous.value.phase !== "redeem_attempted") return fail("verification_failed", "saved_key_unverified");
-      if (previous.value.key_id === null) return fail("conflict", "repair_key_unknown");
+      if (options.repair && previous.value.key_id === null) return fail("conflict", "repair_key_unknown");
     } else if (options.repair) {
       return fail("conflict", "repair_requires_saved_key");
     }

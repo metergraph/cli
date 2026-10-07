@@ -301,8 +301,9 @@ another browser approval.
 
 `.metergraph/setup.json` holds a family UUID, its current key ID and fixed state,
 but no credential. It is written before approval. If the redemption response is
-lost, a rerun asks for a new browser approval to replace only that family's
-pending key; the old receipt is not retried. If an acknowledged key no longer
+lost, a rerun asks for a new browser approval for that same family. The server
+resolves the request to creation if no key was issued or replacement of that
+family's pending key if one exists; the old receipt is not retried. If an acknowledged key no longer
 verifies, use `--repair` to explicitly approve replacement of that exact key.
 An unsafe or changed state file is refused. If the earlier approval never
 reached redemption, rerun the command; the `create` intent is still safe.
