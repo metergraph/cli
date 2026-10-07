@@ -338,6 +338,11 @@ page shows the workspace and the consequence of approval. A signed-in browser
 on another workspace must switch in Metergraph and rerun; the CLI does not
 switch it automatically.
 
+`METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
+appends `/v1/ingest` itself. A setup rerun with a verified
+key repairs the endpoint value written by the first preview without minting a
+new key.
+
 The env file must be a project-relative `.env`, `.env.<name>` or `<name>.env`
 (`--env-file` selects another). The writer refuses tracked files, links,
 ambiguous dotenv syntax and unsafe paths. It adds a project `.gitignore` rule
