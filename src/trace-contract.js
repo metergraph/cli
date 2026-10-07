@@ -88,19 +88,21 @@ export function traceReceipt(body, ctx, selected) {
   }
   if (!e.sources.includes("calls")) return fail("processed_trace_evidence_unavailable");
   const trace = { trace_id: row.trace_id, started_at: row.started_at, last_span_at: row.last_span_at, span_count: row.span_count, status: row.status };
-  const link = traceLink(row.metergraph_links?.trace ?? null, ctx.origin, trace);
+  const link = traceLink(row.metergraph_links?.trace ?? null, ctx.origin, trace, ctx.workspaceId);
   if (!link.ok) return link;
-  // The current canonical dashboard fragment selects a trace in the
-  // browser's selected workspace. Row provenance alone cannot guarantee the
-  // browser's workspace, so the URL is available for manual inspection but
-  // never authorized for automatic opening by this receipt.
-  return { ok: true, found: true, value: { ...base, trace, app_url: link.value, link_status: link.value === null ? "server_link_unavailable" : "workspace_binding_unavailable", readiness: { ...base.readiness, processed: true, metadata_available: true } } };
+  // Only a server link carrying the row's verified workspace can authorize
+  // opening. Older links remain available for manual inspection.
+  return { ok: true, found: true, value: { ...base, trace, app_url: link.value,
+    link_status: link.value === null ? "server_link_unavailable" :
+      link.workspaceBound ? "available" : "workspace_binding_unavailable",
+    link_workspace_bound: link.workspaceBound === true,
+    readiness: { ...base.readiness, processed: true, metadata_available: true } } };
 }
 
 // A server-authoritative link from the same provenance-bound row. The known
 // dashboard fragment must target precisely that row's trace and start time.
 // No URL is synthesized when the service omits its link.
-export function traceLink(raw, origin, trace) {
+export function traceLink(raw, origin, trace, workspaceId = null) {
   if (raw === null || raw === undefined) return { ok: true, value: null };
   if (typeof raw !== "string" || raw.length > 2048 || /[^\x21-\x7e]|\\/.test(raw)) return fail("unsafe_trace_link");
   // URLSearchParams tolerates malformed escapes. Reject them before either
@@ -110,7 +112,7 @@ export function traceLink(raw, origin, trace) {
   try { url = new URL(raw); } catch { return fail("unsafe_trace_link"); }
   if (url.origin !== origin || url.username || url.password || url.pathname !== "/" || url.search || !url.hash.startsWith("#traces?")) return fail("unsafe_trace_link");
   const query = new URLSearchParams(url.hash.slice(8));
-  const allowed = ["from", "to", "q", "trace", "env"];
+  const allowed = ["from", "to", "q", "trace", "workspace", "env"];
   const seen = new Set();
   for (const [key, value] of query) {
     if (!allowed.includes(key) || seen.has(key) || value.length > 256 || /[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(value)) return fail("unsafe_trace_link");
@@ -120,5 +122,8 @@ export function traceLink(raw, origin, trace) {
       !timestamp(query.get("from")) || !timestamp(query.get("to")) ||
       Date.parse(query.get("from")) !== Date.parse(trace.started_at) ||
       Date.parse(query.get("to")) !== Date.parse(trace.started_at) + 1) return fail("unsafe_trace_link");
-  return { ok: true, value: raw };
+  const workspace = query.get("workspace");
+  if (workspace !== null && (normalizeUuid(workspace) !== workspace ||
+      (workspaceId !== null && workspace !== workspaceId))) return fail("unsafe_trace_link");
+  return { ok: true, value: raw, workspaceBound: workspace !== null && workspaceId !== null };
 }

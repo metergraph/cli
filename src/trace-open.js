@@ -14,10 +14,10 @@ export async function openTrace(receipt, options = {}, launch = openBrowser) {
       receipt?.provenance?.deployment_profile !== receipt?.deployment_profile || !receipt?.trace) {
     return { outcome: "verification_failed", reason: "verified_trace_required", data: null };
   }
-  const link = traceLink(receipt.app_url, receipt.origin, receipt.trace);
+  const link = traceLink(receipt.app_url, receipt.origin, receipt.trace, receipt.workspace.id);
   if (!link.ok) return { outcome: link.outcome, reason: link.reason, data: null };
   if (link.value === null) return { outcome: "unsupported", reason: "server_link_unavailable", data: { ...receipt, browser: "not_requested" } };
-  if (receipt.link_workspace_bound !== true || receipt.link_status !== "available") {
+  if (link.workspaceBound !== true || receipt.link_workspace_bound !== true || receipt.link_status !== "available") {
     return { outcome: "unsupported", reason: "link_workspace_binding_unavailable", data: { ...receipt, browser: "not_requested" } };
   }
   if (options.json || options.noBrowser || !options.open) return { outcome: "ok", reason: null, data: { ...receipt, browser: "not_requested" } };

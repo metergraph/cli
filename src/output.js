@@ -127,6 +127,10 @@ const LOGIN_USAGE =
   "metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] " +
   "[--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
+const SETUP_USAGE = "metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) " +
+  "[--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] " +
+  "[--deployment managed|customer-local|byoc|oss] [--confirm-prerequisites] [--agent-token-file FILE] " +
+  "[--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]";
 const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
 const VERIFY_USAGE =
   "metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME " +
@@ -142,7 +146,7 @@ const VERIFY_OPTIONS = [
   { name: "--timeout-ms", value: "N", summary: "Total verification deadline, 100 to 60000. Default 30000." },
   { name: "--poll-ms", value: "N", summary: "Poll interval, 100 to 10000. Default 1000." },
   { name: "--max-attempts", value: "N", summary: "Maximum Metadata queries, 1 to 60. Default 30." },
-  { name: "--open", value: null, summary: "Open only a verified workspace-bound server link. Current dashboard links cannot select a workspace, so opening is unsupported." },
+  { name: "--open", value: null, summary: "Open only a verified server link bound to the signed in workspace." },
   { name: "--no-browser", value: null, summary: "Never launch a browser." },
   { name: "--project", value: "DIR", summary: "Signed in project directory. Default current directory." },
   CONFIG_DIR_OPTION,
@@ -254,6 +258,7 @@ export function helpData(topic) {
       ...SKILL_USAGE,
       LOGIN_USAGE,
       LOGOUT_USAGE,
+      SETUP_USAGE,
       VERIFY_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
     ],
@@ -289,6 +294,29 @@ export function helpData(topic) {
         summary:
           "Ask the service to revoke this project's grant, then remove the saved grant and the project binding.",
         options: LOGOUT_OPTIONS,
+      },
+      {
+        name: "setup",
+        summary: "Guide browser sign in and workspace choice, approve an ingest-only key, and install the selected client skill. Does not verify application traffic.",
+        options: [
+          { name: "--runtime", value: "RUNTIME", summary: "Required. local only; other runtimes get a handoff." },
+          { name: "--url", value: "ORIGIN", summary: "Deployment origin. Defaults to an existing project binding, else the hosted origin." },
+          { name: "--workspace", value: "UUID", summary: "Expected workspace; the browser must approve this exact workspace." },
+          { name: "--project", value: "DIR", summary: "Project directory. Default: current directory." },
+          CONFIG_DIR_OPTION,
+          { name: "--env-file", value: "FILE", summary: "Project-relative env file. Default: .env." },
+          { name: "--client", value: "CLIENT", summary: "Install the bundled skill for codex, claude or cursor." },
+          { name: "--skip-skill", value: null, summary: "Explicitly leave client skill installation pending." },
+          { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
+          { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
+          { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
+          { name: "--no-browser", value: null, summary: "Print approval URL on stderr; requires terminal output." },
+          { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
+          { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
+          { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },
+          { name: "--agent-token-file", value: "FILE", summary: "Optional separate Metadata token for local/BYOC; required for OSS handoff." },
+          JSON_OPTION,
+        ],
       },
       {
         name: "verify",
@@ -332,6 +360,18 @@ export function helpText(topic) {
       "A healthy, supported service that requires sign in exits with code 3.",
       "Doctor never sends credentials, so it never reports a connected workspace.",
     );
+  } else if (topic === "setup") {
+    lines.push(`Usage: ${SETUP_USAGE}`, "", "Opens the service's browser sign in and workspace choice when needed.",
+      "The browser approves an ingest-only key for the exact workspace. The CLI stores it in",
+      "a private env file, confirms delivery, and installs the chosen client skill unless",
+      "--skip-skill is explicit. Non-hosted setup requires an explicit origin, workspace and",
+      "operator prerequisite attestation; OSS remains an operator handoff. No application",
+      "traffic is claimed until an exact instrumented invocation is separately verified.",
+      "", "Options:");
+    for (const option of helpData(null).commands.find((entry) => entry.name === "setup").options) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
+    }
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
     lines.push(`Usage: ${login ? LOGIN_USAGE : LOGOUT_USAGE}`, "");
@@ -367,7 +407,7 @@ export function helpText(topic) {
   } else if (topic === "verify") {
     lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
       "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
-      "The current dashboard link does not select a workspace, so --open cannot launch it automatically.",
+      "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
     for (const option of VERIFY_OPTIONS) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
@@ -431,6 +471,7 @@ export function helpText(topic) {
       "  metergraph skill install|update  Install or update the agent skill in a project",
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
+      "  metergraph setup [options]       Approve and write a private ingest key",
       "  metergraph status [options]      Show configured, reachable and verified state",
       "  metergraph context [options]     Show the verified workspace",
       "  metergraph capabilities [opts]   Show the agent reads offered to this grant",
@@ -595,6 +636,8 @@ const AUTH_MESSAGES = {
   workspace_mismatch: "The browser granted a different workspace than --workspace. It was not kept.",
   workspace_context_mismatch: "The service reported a different workspace than the grant names. It was not kept.",
   profile_mismatch: "The service reported a different deployment profile than before sign in. It was not kept.",
+  deployment_profile_mismatch:
+    "The service or saved binding has a different deployment profile from the selected setup route. Nothing was changed.",
   workspace_response_invalid: "The service's workspace response is not usable. Nothing was saved.",
   capabilities_response_invalid: "The service's capabilities response is not usable. Nothing was saved.",
   content_access_granted:

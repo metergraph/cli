@@ -7,7 +7,7 @@ const MESSAGES = Object.freeze({
   ambiguous_trace_identity: "More than one trace matches this request ID. Supply an exact trace ID.",
   trace_outside_invocation_window: "The trace exists outside the stated invocation window.",
   workspace_context_mismatch: "The trace response does not belong to the signed in workspace.",
-  link_workspace_binding_unavailable: "The trace is verified, but the dashboard link cannot select its workspace automatically. Open it manually in the correct workspace.",
+  link_workspace_binding_unavailable: "The trace is verified, but this dashboard link cannot select its workspace automatically. Open it manually in the correct workspace.",
   server_link_unavailable: "The trace is verified, but the service did not provide a dashboard link.",
   identity_query_unavailable: "The service cannot query an exact trace identity through Metadata access.",
   capability_unavailable: "Trace Metadata access is unavailable for this workspace.",
@@ -28,7 +28,7 @@ export function verifyText(result) {
       `Processed: ${data.readiness.processed}`, `Metadata available: ${data.readiness.metadata_available}`,
       `Application traffic verified: ${data.application_traffic_verified}`);
     if (data.trace) lines.push(`Trace ID: ${data.trace.trace_id}`);
-    if (data.app_url) lines.push(`Dashboard link (select the correct workspace): ${data.app_url}`);
+    if (data.app_url) lines.push(`Dashboard link${data.link_workspace_bound ? " (workspace bound)" : " (select the correct workspace)"}: ${data.app_url}`);
     if (data.browser) lines.push(`Browser: ${data.browser}`);
   }
   if (result.error) lines.push(result.error.message);

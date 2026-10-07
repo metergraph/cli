@@ -25,14 +25,15 @@ import { parseOrigin } from "./origin.js";
 import { isCursor, isSafeFilter } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "verify", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "verify", ...READ_COMMANDS]);
+const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
+  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
@@ -74,6 +75,7 @@ const REFUSED_MESSAGES = {
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
+  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites"]),
   verify: new Set(["--open", "--no-browser"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -201,6 +203,7 @@ export function parseArgs(argv) {
   }
   if (command === "skill") return parseSkill(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);
+  if (command === "setup") return parseSetup(values, flags, json, fail);
   if (command === "verify") return parseVerify(values, flags, json, fail);
   if (READ_COMMANDS.includes(command)) return parseRead(command, values, json, fail);
   if (command === "logout") {
@@ -340,6 +343,61 @@ function parseLogin(values, flags, json, fail) {
     reconnect: flags.has("--reconnect"),
     json,
   };
+}
+
+function parseSetup(values, flags, json, fail) {
+  const runtime = values["--runtime"];
+  if (runtime === undefined) return fail("missing_runtime", "--runtime is required. Use local.");
+  if (!LOGIN_RUNTIMES.includes(runtime) && !HANDOFF_LOGIN_RUNTIMES.includes(runtime)) {
+    return fail("invalid_runtime", "--runtime must be local, cloud or cloud-no-shell.");
+  }
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const origin = parseUrlOption(values);
+  if (origin === null) return fail("invalid_url", INVALID_URL);
+  const deployment = values["--deployment"] ?? "managed";
+  if (!["managed", "customer-local", "byoc", "oss"].includes(deployment)) {
+    return fail("invalid_deployment", "--deployment must be managed, customer-local, byoc or oss.");
+  }
+  if (deployment === "managed" && (flags.has("--confirm-prerequisites") || values["--agent-token-file"] !== undefined)) {
+    return fail("managed_route_conflict", "Operator prerequisites and agent token files are only for non-hosted deployments.");
+  }
+  if (deployment !== "managed" && values["--url"] === undefined) {
+    return fail("non_hosted_origin_required", "Non-hosted setup requires an explicit --url for the installed service.");
+  }
+  const rawWorkspace = values["--workspace"];
+  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
+    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  if (deployment !== "managed" && rawWorkspace === undefined) {
+    return fail("non_hosted_workspace_required", "Non-hosted setup requires an explicit --workspace UUID.");
+  }
+  const agentTokenFile = values["--agent-token-file"] ?? null;
+  if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
+    return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
+  }
+  const client = values["--client"] ?? null;
+  if (client === null && !flags.has("--skip-skill")) {
+    return fail("client_required", "Choose --client codex, claude or cursor, or explicitly use --skip-skill.");
+  }
+  if (client !== null && !Object.hasOwn(SKILL_CLIENTS, client)) {
+    return fail("invalid_client", "--client must be codex, claude or cursor.");
+  }
+  if (client !== null && flags.has("--skip-skill")) {
+    return fail("client_conflict", "Use either --client or --skip-skill, not both.");
+  }
+  const envFile = values["--env-file"] ?? ".env";
+  if (envFile === "" || envFile.includes("\0")) return fail("invalid_env_file", "--env-file must name a project-relative env file.");
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs = rawTimeout === undefined ? LOGIN_DEFAULT_TIMEOUT_MS :
+    parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) return fail("invalid_timeout", `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`);
+  return { ok: true, command: "setup", runtime, origin, originExplicit: values["--url"] !== undefined,
+    deployment, confirmPrerequisites: flags.has("--confirm-prerequisites"), agentTokenFile,
+    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    project: paths.project, configDir: paths.configDir, envFile, client, skipSkill: flags.has("--skip-skill"),
+    timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"),
+    signup: flags.has("--signup"), reconnect: flags.has("--reconnect"), json };
 }
 
 // Read commands take the project and config directory, one total timeout and,

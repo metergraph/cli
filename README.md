@@ -27,10 +27,13 @@ The installed command is `metergraph`. Pin `metergraph-cli@0.1.0` for that exact
 - The read commands `status`, `context`, `capabilities`, `usage`, `routes` and `traces`
   also exist only in this checkout and are part of the same unpublished upcoming preview.
   They need a project signed in with `login`.
+- `setup` also exists only in this checkout. It guides sign in and workspace choice,
+  then requires the deployment's separate ingest bootstrap API and browser approval
+  by a member of that workspace.
 - `verify` also exists only in this checkout. It checks one exact trace identity in an
   explicit invocation window using Metadata access. It never sends application data.
 
-This checkout does five things:
+This checkout includes:
 
 - `doctor` checks whether a Metergraph service is reachable, healthy and supported.
 - `skill install` and `skill update` copy the Metergraph agent skill bundled with the
@@ -40,12 +43,14 @@ This checkout does five things:
 - The read commands (checkout only) use that grant to read bounded workspace Metadata:
   connection status, workspace context, capabilities, daily usage, routes and one page
   of trace metadata.
+- `setup` (checkout only) guides browser sign in and workspace choice, asks for
+  ingest-only approval, writes a private project env file, confirms delivery, and
+  installs the selected client skill.
 - `verify` (checkout only) polls for one exact processed trace in a bounded window.
   It does not infer application provenance from a Metadata match.
 
-It does not read retained content, replay traces, call model providers, create an
-application ingest key, change workspace data, or send application data. Hosted setup
-commands are planned as a separate follow-up release.
+It does not read retained content, replay traces, call model providers or send
+application data. Setup does not prove that the application sent a trace.
 
 ## Requirements
 
@@ -68,6 +73,7 @@ metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--jso
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
+metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [--deployment managed|customer-local|byoc|oss] [--url ORIGIN] [--workspace UUID] [--confirm-prerequisites] [--agent-token-file FILE] [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
@@ -78,7 +84,7 @@ metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [-
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login`, `logout`, `verify` and the read commands are not in the published `0.1.0`
+requests. `login`, `logout`, `setup`, `verify` and the read commands are not in the published `0.1.0`
 package.
 
 ### Exact trace verification
@@ -92,9 +98,10 @@ application instrumentation check supplies that evidence. A missing, ambiguous, 
 or wrong-workspace result fails closed. The command neither creates an ingest key nor
 sends a test event.
 
-The service's current trace links do not select a dashboard workspace. A verified
-link can be copied for manual inspection after selecting the correct workspace, but
-`--open` reports unsupported rather than opening it automatically.
+`--open` launches only a server-provided link carrying the exact trace and the
+verified workspace ID. The dashboard must check that ID against its signed-in
+workspace before displaying traces. Older links without a workspace remain a
+manual handoff; a conflicting workspace or unsafe link is refused.
 
 ### doctor
 
@@ -289,6 +296,81 @@ revocation request. If it does not answer `200`, local sign out still happens an
 command exits 13 with `revocation: "unconfirmed"`. A project that is not signed in
 exits 0 without any request.
 
+### setup (checkout only, unreleased)
+
+Run setup once from a project directory, choosing the coding client that will use
+the skill:
+
+```sh
+metergraph setup --runtime local --client codex --project /path/to/project
+```
+
+For a customer-local bundle, point setup at its installed origin and exact
+workspace:
+
+```sh
+metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --confirm-prerequisites --client codex
+```
+
+`--confirm-prerequisites` records the operator's attestation that the released
+signed bundle, registry invitation, local admin, and separate Metadata access
+prerequisites are ready. It is not proof of bundle publication or registry
+access. Setup checks the live deployment profile before login. BYOC uses
+`--deployment byoc` and an explicit HTTPS private origin; its provisioning,
+network, and identity prerequisites remain the operator's work. An optional
+`--agent-token-file` can verify a separate Metadata credential for either
+route. OSS uses separate `MG_TOKENS` ingestion and `MG_AGENT_TOKENS` read
+credentials; `--deployment oss` verifies its Metadata route with a private
+agent token file and hands ingest configuration to the operator. It does not
+try hosted login or ingest bootstrap against OSS. Remote runtimes are handed
+off to a local machine, with no implicit tunnel or credential forwarding.
+
+If the project has no usable Metadata sign in, `setup` opens the deployment's
+browser sign in and workspace choice. `--signup` starts at hosted sign up;
+`--workspace UUID` requires that exact workspace. An existing binding to a
+different origin or workspace requires explicit `--reconnect`. The selected
+deployment must advertise `metergraph.cli-setup/v1` on its own origin. Setup
+refuses reconnecting an existing ingest family to another workspace; its
+original workspace must be restored before that family can be reused. Setup
+checks the env file and Git state, then opens the deployment's consent page. An
+owner or member of the verified workspace approves an ingest-only key. The CLI
+redeems the single-use receipt, writes `METERGRAPH_APP_TOKEN` and
+`METERGRAPH_INGEST_URL` into `.env`, checks the new key with the service, and
+acknowledges delivery. It then installs the bundled skill for `codex`, `claude`
+or `cursor`. Use `--skip-skill` only if you intentionally want to install it
+later. Neither sign in nor setup requests Debug or Replay access. The browser
+page shows the workspace and the consequence of approval. A signed-in browser
+on another workspace must switch in Metergraph and rerun; the CLI does not
+switch it automatically.
+
+The env file must be a project-relative `.env`, `.env.<name>` or `<name>.env`
+(`--env-file` selects another). The writer refuses tracked files, links,
+ambiguous dotenv syntax and unsafe paths. It adds a project `.gitignore` rule
+when needed and makes the env file private; Windows uses a user-only ACL.
+The env token is never printed, read from argv or stdin, or copied to the
+project's setup state file. An already working key is checked and reused without
+another browser approval.
+
+`.metergraph/setup.json` holds a family UUID, its current key ID and fixed state,
+but no credential. It is written before approval. If the redemption response is
+lost, a rerun asks for a new browser approval for that same family. The server
+resolves the request to creation if no key was issued or replacement of that
+family's pending key if one exists; the old receipt is not retried. If an
+acknowledged key no longer verifies or its env file was lost, use `--repair`
+to explicitly approve replacement of that exact key.
+An unsafe or changed state file is refused. If the earlier approval never
+reached redemption, rerun the command; the `create` intent is still safe.
+
+The JSON result includes a secret-free `receipt` with the origin, workspace ID,
+deployment profile, selected client, and completed and pending steps. A skill
+conflict leaves the delivered key in place and reports `credential_ready_skill_pending`;
+resolve the skill file conflict and rerun setup without another approval.
+Success means the key was delivered and the project is ready to instrument.
+It does **not** mean application traffic has arrived. Run your application and
+verify one exact trace afterward. This checkout and the matching server slice
+are development work; neither their availability on a deployed service nor a
+published package has been established by these local tests.
+
 ### Read commands (checkout only, unreleased)
 
 The read commands use the grant `login` saved for this project. They never open a
@@ -347,9 +429,10 @@ Bounds and honesty rules:
   printable characters. A page whose `limit` differs from the request, or rows that do
   not match `--status` or `--route`, exit 11. Free-text filter values are not printed
   back.
-- No trace links are printed. The service does not yet return a workspace-bound link,
-  so each trace has `link: null` and the page has
-  `link_status: "server_link_unavailable"`.
+- The `traces` listing prints no trace links; each row has `link: null` and the
+  page reports `link_status: "server_link_unavailable"`. Exact-trace
+  `verify --open` uses a server link only when it includes the verified
+  workspace binding.
 - `--environment`, `--workload`, `--since`, `--until`, `--sql`, `--query`, `--content`,
   `--include-content`, `--debug` and `--replay` are recognized and refused with exit 6
   before any request. The agent access contract has no environment selector or

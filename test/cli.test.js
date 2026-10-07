@@ -56,6 +56,7 @@ test("help works offline in text and JSON form", async () => {
       "skill update",
       "login",
       "logout",
+      "setup",
       "verify",
       "status",
       "context",

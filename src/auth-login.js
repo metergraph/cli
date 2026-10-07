@@ -71,6 +71,12 @@ export async function runLogin(options, progress) {
     const configDir = resolveConfigDir(options.configDir);
     const existing = readBinding(root);
     const bound = existing?.binding ?? null;
+    // Setup pins a deployment model before sign in. A stale binding for a
+    // different profile must never be silently reused or reconnected.
+    if (options.expectedProfile && bound !== null && !options.reconnect &&
+        bound.deployment_profile !== options.expectedProfile) {
+      return end("conflict", "deployment_profile_mismatch");
+    }
     if (bound !== null && !options.reconnect) {
       if (bound.origin !== options.origin) return end("conflict", "bound_to_other_origin", RECONNECT);
       if (options.workspace !== null && options.workspace !== bound.workspace_id) {
@@ -164,6 +170,9 @@ async function authorize(options, ctx, cancel, progress) {
   if (cancel.aborted) return fail("authorization_failed", "cancelled");
   if (preflight.outcome !== "authentication_required") return fail(preflight.outcome, preflight.reason);
   ctx.profile = preflight.report.deployment_profile;
+  if (options.expectedProfile && ctx.profile !== options.expectedProfile) {
+    return fail("unsupported", "deployment_profile_mismatch");
+  }
   if (options.signup && ctx.profile !== "managed") return fail("unsupported", "signup_unsupported");
 
   let limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);

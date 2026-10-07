@@ -28,7 +28,7 @@ test("verify requires one exact identity and a bounded invocation window", () =>
 });
 
 test("verify help exposes exact identity and the workspace-safe open limit", () => {
-  assert.match(helpText("verify"), /workspace.*automatically/i);
+  assert.match(helpText("verify"), /verified workspace/i);
   assert.ok(helpData(null).commands.some((entry) => entry.name === "verify"));
 });
 
