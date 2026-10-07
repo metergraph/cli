@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { after, test } from "node:test";
 
-import { planNonHostedSetup, preflightNonHostedSetup } from "../src/setup-deployment.js";
-import { healthyRoutes, startServer } from "./helpers.js";
+import { containsKnownCredential, planNonHostedSetup, preflightNonHostedSetup } from "../src/setup-deployment.js";
+import { healthyRoutes, json, startServer } from "./helpers.js";
 
 const WORKSPACE = "00000000-0000-4000-8000-00000000000a";
 const servers = [];
-after(async () => { for (const server of servers) await server.close(); });
+const dirs = [];
+after(async () => {
+  for (const server of servers) await server.close();
+  for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 const serve = async (routes) => {
   const server = await startServer(routes);
   servers.push(server);
@@ -17,6 +24,27 @@ const input = (origin, overrides = {}) => ({
   workspace: WORKSPACE, confirmPrerequisites: true, agentTokenFile: null,
   timeoutMs: 3000, signup: false, ...overrides,
 });
+const oauthFixture = JSON.parse(fs.readFileSync(new URL("./fixtures/deployment-routing/oauth-metadata.json", import.meta.url), "utf8"));
+const doc = (origin, name) => JSON.parse(JSON.stringify(oauthFixture[name]).replaceAll("{origin}", origin));
+const agentDoc = (name, profile) => {
+  const value = JSON.parse(fs.readFileSync(new URL(`./fixtures/deployment-routing/${name}.json`, import.meta.url), "utf8")).body;
+  value.provenance.deployment_profile = profile;
+  if (name === "agent-capabilities") value.deployment_profile = profile;
+  return value;
+};
+const discoveryRoutes = () => ({
+  "/.well-known/oauth-protected-resource/v1/agent/mcp": (request, response) =>
+    json(200, doc(`http://${request.headers.host}`, "protected_resource"))(request, response),
+  "/.well-known/oauth-authorization-server/v1/oauth": (request, response) =>
+    json(200, doc(`http://${request.headers.host}`, "authorization_server"))(request, response),
+});
+function credentialFile(token) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph route "));
+  dirs.push(dir);
+  const file = path.join(dir, "agent-token");
+  fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
+  return fs.realpathSync(file);
+}
 
 test("non-hosted setup requires explicit origin, workspace and operator prerequisite confirmation", () => {
   const origin = "http://127.0.0.1:43210";
@@ -91,4 +119,39 @@ test("OSS with an absent Metadata discovery contract stops before reading its se
     "/v1/deployment", "/.well-known/oauth-protected-resource/v1/agent/mcp",
     "/.well-known/oauth-protected-resource",
   ]);
+});
+
+test("a Metadata failure cannot echo a private token coinciding with a fixed handoff status", { skip: process.platform === "win32" }, async () => {
+  const token = "operator_handoff";
+  const server = await serve(healthyRoutes("local", {
+    ...discoveryRoutes(),
+    "/v1/agent/workspace": json(401, { error: "invalid_token" }),
+  }));
+  const routed = await preflightNonHostedSetup(input(server.origin, { agentTokenFile: credentialFile(token) }));
+  assert.equal(routed.proceed, false);
+  assert.equal(routed.reason, "credential_echo");
+  assert.equal(routed.data, null);
+  assert.ok(!JSON.stringify(routed).includes(token));
+  assert.equal(containsKnownCredential({ origin: token }, routed), true);
+  assert.equal(Object.keys(routed).includes("knownCredentials"), false);
+  assert.deepEqual(server.requests.filter((request) => request.headers.authorization).map((request) => request.path),
+    ["/v1/agent/workspace"]);
+});
+
+test("successful local verification keeps the separate agent token guarded without printing it", { skip: process.platform === "win32" }, async () => {
+  const token = "operator_handoff";
+  const server = await serve(healthyRoutes("local", {
+    ...discoveryRoutes(),
+    "/v1/agent/workspace": json(200, agentDoc("agent-workspace", "local")),
+    "/v1/agent/capabilities": (request, response) => request.headers.authorization
+      ? json(200, agentDoc("agent-capabilities", "local"))(request, response)
+      : json(401, { error: "unauthorized" }, { "www-authenticate": "Bearer" })(request, response),
+  }));
+  const routed = await preflightNonHostedSetup(input(server.origin, { agentTokenFile: credentialFile(token) }));
+  assert.equal(routed.proceed, true);
+  assert.equal(routed.metadataAccess, "verified");
+  assert.ok(!JSON.stringify(routed).includes(token));
+  assert.equal(containsKnownCredential({ status: token }, routed), true);
+  assert.deepEqual(server.requests.filter((request) => request.headers.authorization).map((request) => request.path),
+    ["/v1/agent/workspace", "/v1/agent/capabilities"]);
 });

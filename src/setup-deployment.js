@@ -42,6 +42,24 @@ const handoff = (outcome, reason, nextAction = null, details = {}) => ({
   },
 });
 
+// The static agent token can be any printable string of at least 16 bytes.
+// Even a fixed status such as "operator_handoff" might equal that token. Keep
+// the verifier's non-enumerable knownCredentials on every later result and
+// drop all contextual fields if a coincidental value would echo it.
+function guardKnownCredentials(value, verified) {
+  const known = verified.knownCredentials;
+  if (!known) return value;
+  const safe = known.some((token) => JSON.stringify(value).includes(token))
+    ? { proceed: false, outcome: "unsupported", reason: "credential_echo", data: null }
+    : value;
+  Object.defineProperty(safe, "knownCredentials", { value: known, enumerable: false });
+  return safe;
+}
+
+export function containsKnownCredential(value, routed) {
+  return routed?.knownCredentials?.some((token) => JSON.stringify(value).includes(token)) ?? false;
+}
+
 export function planNonHostedSetup(options) {
   if (!Object.hasOwn(PREREQUISITES, options.deployment)) {
     return handoff("invalid_input", "deployment_invalid");
@@ -91,18 +109,18 @@ export async function preflightNonHostedSetup(options) {
       credentialFile: options.agentTokenFile, timeoutMs,
     });
     if (!verified.ok) {
-      return handoff(verified.outcome, verified.reason, verified.plan?.next_action ?? null, {
+      return guardKnownCredentials(handoff(verified.outcome, verified.reason, verified.plan?.next_action ?? null, {
         profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
         prerequisites: "operator_confirmed",
-      });
+      }), verified);
     }
     // The OSS operator provisions MG_TOKENS and MG_AGENT_TOKENS separately.
     // No released OSS server implements the purpose-bound ingest bootstrap,
     // and a Metadata agent token cannot issue a key. Keep this a handoff.
-    return handoff("unsupported", "oss_ingest_operator_handoff", "oss_operator_handoff", {
+    return guardKnownCredentials(handoff("unsupported", "oss_ingest_operator_handoff", "oss_operator_handoff", {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
       prerequisites: "operator_confirmed", metadataAccess: "verified",
-    });
+    }), verified);
   }
 
   // Every non-hosted route proves the service profile before any login, local
@@ -132,11 +150,16 @@ export async function preflightNonHostedSetup(options) {
       credentialFile: options.agentTokenFile, timeoutMs,
     });
     if (!verified.ok) {
-      return handoff(verified.outcome, verified.reason, verified.plan?.next_action ?? null, {
+      return guardKnownCredentials(handoff(verified.outcome, verified.reason, verified.plan?.next_action ?? null, {
         profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
         prerequisites: "operator_confirmed",
-      });
+      }), verified);
     }
+    return guardKnownCredentials({
+      proceed: true, profile: plan.deployment_profile, origin: plan.origin,
+      workspaceId: plan.workspace_id, prerequisites: "operator_confirmed",
+      metadataAccess: "verified",
+    }, verified);
   }
   return {
     proceed: true,
@@ -144,6 +167,6 @@ export async function preflightNonHostedSetup(options) {
     origin: plan.origin,
     workspaceId: plan.workspace_id,
     prerequisites: "operator_confirmed",
-    metadataAccess: options.agentTokenFile ? "verified" : "pending_login",
+    metadataAccess: "pending_login",
   };
 }
