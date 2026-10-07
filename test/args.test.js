@@ -161,6 +161,29 @@ test("setup requires a selected client or explicit skip and keeps login choices 
   ]) assert.equal(parseArgs(args).code, reason);
 });
 
+test("non-hosted setup requires an explicit origin and workspace and keeps operator inputs separate", () => {
+  const workspace = "00000000-0000-4000-8000-00000000000a";
+  const parsed = parseArgs(["setup", "--runtime", "local", "--deployment", "customer-local",
+    "--url", "http://127.0.0.1:43210", "--workspace", workspace,
+    "--confirm-prerequisites", "--agent-token-file", "/tmp/agent-token", "--skip-skill"]);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.deployment, "customer-local");
+  assert.equal(parsed.confirmPrerequisites, true);
+  assert.equal(parsed.agentTokenFile, "/tmp/agent-token");
+  assert.equal(parsed.originExplicit, true);
+  for (const [argv, reason] of [
+    [["setup", "--runtime", "local", "--deployment", "local", "--skip-skill"], "invalid_deployment"],
+    [["setup", "--runtime", "local", "--deployment", "byoc", "--skip-skill"], "non_hosted_origin_required"],
+    [["setup", "--runtime", "local", "--deployment", "oss", "--url", "https://example.com", "--skip-skill"], "non_hosted_workspace_required"],
+    [["setup", "--runtime", "local", "--confirm-prerequisites", "--skip-skill"], "managed_route_conflict"],
+    [["setup", "--runtime", "local", "--agent-token-file", "secret", "--skip-skill"], "managed_route_conflict"],
+  ]) {
+    const result = parseArgs(argv);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, reason);
+  }
+});
+
 test("rejects bad login and logout input without echoing it", () => {
   const cases = [
     [["login"], "missing_runtime"],

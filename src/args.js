@@ -33,7 +33,7 @@ const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
-  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms"]),
+  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
@@ -74,7 +74,7 @@ const REFUSED_MESSAGES = {
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
-  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill"]),
+  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -319,9 +319,26 @@ function parseSetup(values, flags, json, fail) {
   if (!paths.ok) return paths;
   const origin = parseUrlOption(values);
   if (origin === null) return fail("invalid_url", INVALID_URL);
+  const deployment = values["--deployment"] ?? "managed";
+  if (!["managed", "customer-local", "byoc", "oss"].includes(deployment)) {
+    return fail("invalid_deployment", "--deployment must be managed, customer-local, byoc or oss.");
+  }
+  if (deployment === "managed" && (flags.has("--confirm-prerequisites") || values["--agent-token-file"] !== undefined)) {
+    return fail("managed_route_conflict", "Operator prerequisites and agent token files are only for non-hosted deployments.");
+  }
+  if (deployment !== "managed" && values["--url"] === undefined) {
+    return fail("non_hosted_origin_required", "Non-hosted setup requires an explicit --url for the installed service.");
+  }
   const rawWorkspace = values["--workspace"];
   if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
     return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  if (deployment !== "managed" && rawWorkspace === undefined) {
+    return fail("non_hosted_workspace_required", "Non-hosted setup requires an explicit --workspace UUID.");
+  }
+  const agentTokenFile = values["--agent-token-file"] ?? null;
+  if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
+    return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
   }
   const client = values["--client"] ?? null;
   if (client === null && !flags.has("--skip-skill")) {
@@ -340,6 +357,7 @@ function parseSetup(values, flags, json, fail) {
     parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
   if (timeoutMs === null) return fail("invalid_timeout", `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`);
   return { ok: true, command: "setup", runtime, origin, originExplicit: values["--url"] !== undefined,
+    deployment, confirmPrerequisites: flags.has("--confirm-prerequisites"), agentTokenFile,
     workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
     project: paths.project, configDir: paths.configDir, envFile, client, skipSkill: flags.has("--skip-skill"),
     timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"),
