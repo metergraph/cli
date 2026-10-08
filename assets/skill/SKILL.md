@@ -22,7 +22,11 @@ Use the routing below with those four choices. Follow the matching credential an
 For a first application trace, check the installed CLI's version and help before
 using it. `metergraph-cli@0.1.0` supports `doctor` and project skill
 installation; later versions may also offer `login`, `setup` and `verify`.
-Use those commands only if the installed package lists them. Use the [first
+Use those commands only if the installed package lists them. Install this skill
+with whichever the installed CLI lists, `metergraph setup --client <client>` or
+`metergraph skill install --client <client> --runtime local`, not by copying this
+file into the project: the CLI never replaces a skill file it did not install. Pass `--skip-skill` to `setup` when the person chose not to
+install the skill. Use the [first
 trace guide](https://www.metergraph.dev/docs/start/first-trace/) for steps the
 package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
