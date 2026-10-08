@@ -82,6 +82,15 @@ Direct the human to the correct workspace's Keys page and private client configu
 
 Use https://www.metergraph.dev/docs/ for public product documentation and https://www.metergraph.dev/docs/guides/mcp-server/ for Agent Access tool details. Explain what the docs say about an edition, then use `metergraph_get_capabilities` to confirm what the connected workspace actually supports. Cite the public page you used and distinguish a missing capability from an empty workspace. Do not read retained content or run replay just to answer a documentation question.
 
+## Use the other Metergraph skills
+
+More Metergraph skills are at https://github.com/metergraph/skills. When the
+person wants to know whether a workload could use a cheaper or better model, or
+asks to run a model-swap analysis, use `metergraph-analyze` if it is installed.
+If it is not, offer to install it (`npx skills add metergraph/skills`, or in
+Claude Code and Claude Desktop the plugin marketplace `metergraph/skills`)
+rather than improvising the analysis steps.
+
 ## When already connected: bounded investigation
 
 1. Call `metergraph_get_workspace_context` and `metergraph_get_capabilities` first. Verify the intended workspace, deployment profile, available tools, required scopes and privacy classes. Stop on wrong workspace, unavailable capabilities or failed authorization.

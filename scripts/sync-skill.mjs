@@ -74,7 +74,7 @@ if (args[0] === "--check") {
   const git = (...rest) => execFileSync("git", ["-C", checkout, ...rest]);
   const commit = git("rev-parse", "--verify", `${commitArg}^{commit}`).toString().trim();
   const content = git("show", `${commit}:${source.path}`);
-  const oldHash = JSON.parse(read(COPIES[0].manifest)).sha256;
+  const { sha256: oldHash, size: oldSize } = JSON.parse(read(COPIES[0].manifest));
   const hash = sha256(content);
   for (const { skill, manifest } of COPIES) {
     writeFileSync(new URL(skill, root), content);
@@ -83,7 +83,9 @@ if (args[0] === "--check") {
     writeFileSync(new URL(manifest, root), `${JSON.stringify(parsed, null, 2)}\n`);
   }
   for (const path of PINS) {
-    const text = read(path).toString("utf8").replaceAll(oldHash, hash).replaceAll(revision(oldHash), revision(hash));
+    // Tests also pin the byte size, as `length, N)` and `size: N`.
+    const text = read(path).toString("utf8").replaceAll(oldHash, hash).replaceAll(revision(oldHash), revision(hash))
+      .replaceAll(`length, ${oldSize})`, `length, ${content.length})`).replaceAll(`size: ${oldSize},`, `size: ${content.length},`);
     writeFileSync(new URL(path, root), text);
   }
   writeFileSync(SOURCE_FILE, `${JSON.stringify({ ...source, commit }, null, 2)}\n`);
