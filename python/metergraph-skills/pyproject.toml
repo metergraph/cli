@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "metergraph-skills"
-version = "0.1.0"
+version = "0.1.1"
 description = "Installs the Metergraph agent skill into a project for Codex, Claude Code or Cursor"
 readme = "README.md"
 requires-python = ">=3.9"
