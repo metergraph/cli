@@ -8,6 +8,10 @@
 //     pinned hash and revision.
 //   node scripts/sync-skill.mjs --check
 //     Download the pinned file and fail if either bundle differs. CI runs this.
+//   node scripts/sync-skill.mjs --check-release
+//     --check, and also fail unless the skill served at www.metergraph.dev is
+//     the same file, so a release never ships a skill the website does not.
+//     Both release workflows run this.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -60,7 +64,7 @@ function checkLocal(expected) {
 const args = process.argv.slice(2);
 const source = JSON.parse(readFileSync(SOURCE_FILE, "utf8"));
 
-if (args[0] === "--check") {
+if (args[0] === "--check" || args[0] === "--check-release") {
   const url = `https://raw.githubusercontent.com/${source.repository}/${source.commit}/${source.path}`;
   const response = await fetch(url, { redirect: "error" });
   if (!response.ok) fail(`Could not download ${url}: HTTP ${response.status}`);
@@ -68,6 +72,17 @@ if (args[0] === "--check") {
   const problems = checkLocal(expected);
   if (problems.length) fail(`Bundled skill drifted from ${source.repository}@${source.commit}:\n- ${problems.join("\n- ")}\nRun scripts/sync-skill.mjs --from <skills checkout>.`);
   console.log(`Bundled skill matches ${source.repository}@${source.commit.slice(0, 12)} (${sha256(expected).slice(0, 12)}).`);
+  if (args[0] === "--check-release") {
+    const site = "https://www.metergraph.dev/SKILL.md";
+    const served = await fetch(site, { redirect: "error" });
+    if (!served.ok) fail(`Could not download ${site}: HTTP ${served.status}`);
+    const live = Buffer.from(await served.arrayBuffer());
+    if (!live.equals(expected)) {
+      fail(`${site} (${sha256(live).slice(0, 12)}) is not the pinned skill (${sha256(expected).slice(0, 12)}). ` +
+        "Release only after the website, npm and PyPI copies all come from the same metergraph/skills commit.");
+    }
+    console.log(`${site} matches the pinned skill.`);
+  }
 } else if (args[0] === "--from" && args[1]) {
   const checkout = args[1];
   const commitArg = args[2] === "--commit" ? args[3] : "HEAD";
@@ -93,5 +108,5 @@ if (args[0] === "--check") {
   if (problems.length) fail(`Sync incomplete:\n- ${problems.join("\n- ")}`);
   console.log(`Synced ${source.path} at ${commit.slice(0, 12)} (${hash.slice(0, 12)}${hash === oldHash ? ", unchanged" : `, was ${oldHash.slice(0, 12)}`}).`);
 } else {
-  fail("Usage: node scripts/sync-skill.mjs --from <skills checkout> [--commit SHA] | --check");
+  fail("Usage: node scripts/sync-skill.mjs --from <skills checkout> [--commit SHA] | --check | --check-release");
 }

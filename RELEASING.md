@@ -36,6 +36,16 @@ commit:
 - If `main` moves after you copy the SHA, the run fails. Start a new run with the new
   head. To release an older state, land it on `main` first.
 
+## Bundled skill rule
+
+The npm package and `metergraph-skills` bundle the setup skill from
+[metergraph/skills](https://github.com/metergraph/skills) at the commit in
+`skills-source.json`. The same file is served at https://www.metergraph.dev/SKILL.md.
+Release only when all three are the same file. Both release workflows run
+`node scripts/sync-skill.mjs --check-release`, which fails the release when either
+bundle differs from the pinned commit or the website serves a different file. When it
+fails, update the website (or this repository's pin) first; do not release around it.
+
 ## First package bootstrap (completed for 0.1.0)
 
 npm trusted publishing is configured on a package that already exists, so the very
