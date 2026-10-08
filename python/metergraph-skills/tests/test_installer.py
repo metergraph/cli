@@ -43,6 +43,28 @@ def run(*args, project=None):
     return result
 
 
+def run_raw(*args):
+    env = dict(os.environ)
+    if os.environ.get("METERGRAPH_SKILLS_TEST_INSTALLED") != "1":
+        env["PYTHONPATH"] = str(PACKAGE_ROOT / "src")
+    return subprocess.run([sys.executable, "-m", "metergraph_skills", *args], capture_output=True, env=env, check=False)
+
+
+# Bad arguments that both CLIs must reject with the same JSON envelope. The
+# token-like value checks that no argument value is ever echoed back.
+SECRET = "mg_live_do_not_echo_0123456789"
+USAGE_CASES = [
+    ["install", "--json"],
+    ["install", "--client", "codex", "--json"],
+    ["install", "--client", SECRET, "--runtime", "local", "--json"],
+    ["install", "--client", "codex", "--runtime", SECRET, "--json"],
+    ["install", "--client", "codex", "--runtime", "local", "--project", "", "--json"],
+    ["update", "--client", "codex", "--client", "claude", "--runtime", "local", "--json"],
+    ["update", "--client", "codex", "--runtime", "local", SECRET, "--json"],
+    ["install", "--client", "--json"],
+]
+
+
 def bundled_skill():
     env = dict(os.environ)
     if os.environ.get("METERGRAPH_SKILLS_TEST_INSTALLED") != "1":
@@ -204,6 +226,39 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(result["data"]["next_action"]["kind"], "connection_guide")
         self.assertEqual(list(self.project.iterdir()), [])
 
+    def test_usage_errors_return_json_and_never_echo_values(self):
+        for argv in USAGE_CASES:
+            with self.subTest(argv=argv):
+                completed = run_raw(*argv)
+                self.assertEqual(completed.returncode, 2)
+                result = json.loads(completed.stdout.decode("utf-8"))
+                self.assertEqual((result["outcome"], result["exit_code"], result["data"]), ("invalid_input", 2, None))
+                self.assertNotIn(SECRET.encode(), completed.stdout + completed.stderr)
+        self.assertEqual(list(self.project.iterdir()), [])
+
+    def test_empty_project_is_rejected(self):
+        completed = run_raw("install", "--client", "codex", "--runtime", "local", "--project", "", "--json")
+        self.assertEqual(json.loads(completed.stdout)["error"]["reason"], "invalid_project")
+        sys.path.insert(0, str(PACKAGE_ROOT / "src"))
+        try:
+            from metergraph_skills.installer import run_skill
+        finally:
+            sys.path.pop(0)
+        result = run_skill("install", "codex", "local", "")
+        self.assertEqual(result["reason"], "invalid_project")
+
+    @unittest.skipUnless(IS_WINDOWS, "directory junctions exist only on Windows")
+    def test_directory_junction_is_unsafe(self):
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside, True)
+        for name in (".claude", ".metergraph"):
+            link = self.project / name
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)], capture_output=True, check=True)
+            result = run("install", "--client", "claude", "--runtime", "local", project=self.project)
+            self.assertEqual(result["error"]["reason"], "unsafe_path")
+            self.assertEqual(list(outside.iterdir()), [])
+            os.rmdir(link)
+
     def test_missing_project(self):
         result = run("install", "--client", "codex", "--runtime", "local", project=self.project / "missing")
         self.assertEqual((result["outcome"], result["error"]["reason"]), ("invalid_input", "invalid_project"))
@@ -219,6 +274,18 @@ class NpmParityTest(unittest.TestCase):
     def test_pinned_hash_matches_npm_cli(self):
         npm_source = (REPO_ROOT / "src" / "skill-bundle.js").read_text(encoding="utf-8")
         self.assertIn('const PINNED_SHA256 = "{}";'.format(SHA256), npm_source)
+
+    @unittest.skipUnless(shutil.which("node") and NPM_BIN.is_file(), "node is not available")
+    def test_usage_errors_match_npm(self):
+        for argv in USAGE_CASES:
+            with self.subTest(argv=argv):
+                python = json.loads(run_raw(*argv).stdout)
+                node = subprocess.run(["node", str(NPM_BIN), "skill", *argv], capture_output=True, check=False)
+                expected = json.loads(node.stdout)
+                # The npm messages name "metergraph"; the reasons and shape match.
+                for result in (python, expected):
+                    result["error"].pop("message")
+                self.assertEqual(python, expected)
 
     @unittest.skipUnless(shutil.which("node") and NPM_BIN.is_file(), "node is not available")
     def test_installers_share_files_and_receipt(self):

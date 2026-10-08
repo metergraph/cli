@@ -45,6 +45,11 @@ MAX_RECEIPT_BYTES = 64 * 1024
 MAX_SKILL_BYTES = 1024 * 1024
 ENTRY_KEYS = ["client", "path", "revision", "runtimes", "sha256", "skill"]
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+# On Windows, lstat reports a directory junction as a plain directory. Its
+# reparse tag has the name-surrogate bit set, like a symbolic link's, so that
+# bit is what marks a path that points somewhere else. Other reparse points,
+# such as cloud placeholder files, are ordinary files and directories.
+NAME_SURROGATE_BIT = 0x20000000
 BINARY = getattr(os, "O_BINARY", 0)
 
 MESSAGES = {
@@ -171,6 +176,8 @@ def _target_for(client: str, name: str) -> Dict[str, Any]:
 
 
 def _resolve_project(project: Optional[str]) -> str:
+    if project is not None and (project == "" or "\0" in project):
+        raise Stop("invalid_input", "invalid_project")
     try:
         real = os.path.realpath(os.path.abspath(project if project is not None else os.getcwd()))
         if os.path.isdir(real):
@@ -333,6 +340,18 @@ def _is_record(value: Any, keys: List[str]) -> bool:
     return isinstance(value, dict) and sorted(value) == keys
 
 
+def _is_directory(info) -> bool:
+    return stat.S_ISDIR(info.st_mode) and not _is_name_surrogate(info)
+
+
+def _is_regular(info) -> bool:
+    return stat.S_ISREG(info.st_mode) and not _is_name_surrogate(info)
+
+
+def _is_name_surrogate(info) -> bool:
+    return bool(getattr(info, "st_reparse_tag", 0) & NAME_SURROGATE_BIT)
+
+
 def _lstat_or_none(file: str):
     try:
         return os.lstat(file)
@@ -349,7 +368,7 @@ def _check_dirs(root: str, dirs: List[str]) -> bool:
         info = _lstat_or_none(current)
         if info is None:
             return False
-        if not stat.S_ISDIR(info.st_mode):
+        if not _is_directory(info):
             raise Stop("conflict", "unsafe_path")
     return True
 
@@ -366,7 +385,7 @@ def _ensure_dirs(root: str, dirs: List[str]) -> List[str]:
                 os.mkdir(current)
                 created.append(current)
             except FileExistsError:
-                if not stat.S_ISDIR(os.lstat(current).st_mode):
+                if not _is_directory(os.lstat(current)):
                     raise Stop("conflict", "unsafe_path")
     except BaseException:
         _remove_dirs(created)
@@ -389,7 +408,7 @@ def _read_regular(file: str, max_bytes: int) -> Optional[Dict[str, Any]]:
     info = _lstat_or_none(file)
     if info is None:
         return None
-    if not stat.S_ISREG(info.st_mode):
+    if not _is_regular(info):
         raise Stop("conflict", "unsafe_path")
     try:
         fd = os.open(file, os.O_RDONLY | NOFOLLOW | BINARY)
