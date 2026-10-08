@@ -58,12 +58,13 @@ export async function runLogin(options, progress) {
   if (options.runtime !== "local") return end("unsupported", "runtime_not_supported", GUIDE);
   const remote = detectRemoteSession();
   if (remote !== null) return end("unsupported", remote, GUIDE);
-  if (options.json && options.noBrowser) {
-    return end("unsupported", "no_browser_requires_terminal", {
-      kind: "run_in_terminal",
-      message: "Run the same login command in a terminal without --json to see the sign in URL.",
-    });
-  }
+  // --json cannot show a person the --no-browser URL. A rerun with a saved,
+  // working grant needs no URL, so only refuse once approval is required.
+  const noBrowserHandoff = () => end("unsupported", "no_browser_requires_terminal", {
+    kind: "run_in_terminal",
+    message: "Run the same login command in a terminal without --json to see the sign in URL.",
+  });
+  const urlUnshowable = options.json && options.noBrowser;
 
   const trap = trapSignals();
   try {
@@ -71,6 +72,7 @@ export async function runLogin(options, progress) {
     const configDir = resolveConfigDir(options.configDir);
     const existing = readBinding(root);
     const bound = existing?.binding ?? null;
+    if (urlUnshowable && (bound === null || options.reconnect)) return noBrowserHandoff();
     // Setup pins a deployment model before sign in. A stale binding for a
     // different profile must never be silently reused or reconnected.
     if (options.expectedProfile && bound !== null && !options.reconnect &&
@@ -100,6 +102,7 @@ export async function runLogin(options, progress) {
       }
       if (session.outcome !== "login_required") return end(session.outcome, session.reason);
     }
+    if (urlUnshowable) return noBrowserHandoff();
 
     const flow = await authorize(options, ctx, trap.signal, progress);
     if (!flow.ok) return end(flow.outcome, flow.reason, flow.next ?? null);

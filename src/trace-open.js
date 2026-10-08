@@ -4,7 +4,8 @@ import { normalizeUuid } from "./auth-oauth.js";
 import { parseOrigin } from "./origin.js";
 
 // Operates only on an already verified, provenance-bound receipt. JSON and
-// no-browser mode return its URL without starting a launcher. "opened" means
+// no-browser mode return its URL without starting a launcher, and say which
+// one suppressed an --open request. "opened" means
 // the OS launcher started; it does not assert a browser rendered the page.
 export async function openTrace(receipt, options = {}, launch = openBrowser) {
   if (receipt?.readiness?.metadata_available !== true || receipt?.readiness?.processed !== true ||
@@ -20,7 +21,11 @@ export async function openTrace(receipt, options = {}, launch = openBrowser) {
   if (link.workspaceBound !== true || receipt.link_workspace_bound !== true || receipt.link_status !== "available") {
     return { outcome: "unsupported", reason: "link_workspace_binding_unavailable", data: { ...receipt, browser: "not_requested" } };
   }
-  if (options.json || options.noBrowser || !options.open) return { outcome: "ok", reason: null, data: { ...receipt, browser: "not_requested" } };
+  if (!options.open) return { outcome: "ok", reason: null, data: { ...receipt, browser: "not_requested" } };
+  if (options.json || options.noBrowser) {
+    const browser = options.json ? "suppressed_by_json" : "suppressed_by_no_browser";
+    return { outcome: "ok", reason: null, data: { ...receipt, browser } };
+  }
   if (options.signal?.aborted) return { outcome: "cancelled", reason: "cancelled", data: receipt };
   const launched = await launchWithinSignal(link.value, launch, options.signal);
   if (options.signal?.aborted) return { outcome: "cancelled", reason: "cancelled", data: receipt };

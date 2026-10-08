@@ -33,7 +33,10 @@ export async function runVerify(options, dependencies = {}) {
     if (holdsKnown(data, known)) return { outcome: "verification_failed", reason: "credential_in_metadata_response", data: null };
     return { outcome, reason, data: data === null ? null : { ...data, attempts } };
   };
-  const interrupted = () => limit.timedOut() ? end("connection_failed", "verification_timeout") : end("cancelled", "cancelled");
+  // Once the origin has answered with a valid pending receipt, a deadline
+  // means the trace is not visible yet, not that the origin is unreachable.
+  const interrupted = () => !limit.timedOut() ? end("cancelled", "cancelled")
+    : end(receipt === null ? "connection_failed" : "verification_failed", "verification_timeout");
   try {
     const sessionResult = await (dependencies.session ?? verifiedSession)({ project: options.project, configDir: options.configDir, cancel: limit.signal });
     if (limit.signal.aborted) return interrupted();

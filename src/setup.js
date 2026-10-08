@@ -31,7 +31,6 @@ const fail = (outcome, reason, status = "not_ready", receipt = null) => ({ outco
 // response can supply it. Every returned string is fixed and non-secret.
 export async function runSetup(options, progress = () => {}) {
   if (options.runtime !== "local" || detectRemoteSession() !== null) return fail("unsupported", "run_on_local_machine");
-  if (options.json && options.noBrowser) return fail("unsupported", "no_browser_requires_terminal");
   const trap = trapSignals();
   let receipt = null;
   let loginVerified = false;
@@ -138,6 +137,9 @@ export async function runSetup(options, progress = () => {}) {
       return stop("conflict", "repair_requires_saved_key");
     }
 
+    // A verified rerun returned above without approval. From here a person
+    // must open an approval URL, which --json cannot show with --no-browser.
+    if (options.json && options.noBrowser) return stop("unsupported", "no_browser_requires_terminal");
     const setup = await discoverSetup(origin, profile, trap.signal);
     if (!setup.ok) return stop(setup.outcome, setup.reason);
 

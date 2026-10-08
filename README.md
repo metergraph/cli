@@ -100,7 +100,16 @@ sends a test event.
 `--open` launches only a server-provided link carrying the exact trace and the
 verified workspace ID. The dashboard must check that ID against its signed-in
 workspace before displaying traces. Older links without a workspace remain a
-manual handoff; a conflicting workspace or unsafe link is refused.
+manual handoff; a conflicting workspace or unsafe link is refused. The result's
+`browser` field is `launcher_started`, `launcher_unavailable`, `not_requested`
+(no `--open`), or `suppressed_by_json` / `suppressed_by_no_browser` when `--open`
+was given but that flag returned the link instead of launching it.
+
+If `--timeout-ms` expires after the service has answered at least once with a
+pending result, `verify` exits 11 `verification_failed` with reason
+`verification_timeout`: the origin is reachable and the trace is not visible yet.
+Exit 4 `connection_failed` with that reason means no valid answer arrived before
+the deadline.
 
 ### doctor
 
@@ -225,7 +234,7 @@ metergraph logout
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
 | `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
-| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. Not with `--json`. |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits 6 `no_browser_requires_terminal`. |
 | `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 

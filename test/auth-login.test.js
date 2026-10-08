@@ -198,6 +198,29 @@ test("a rerun on a signed in project reuses the grant without a browser or new c
     assert.equal(text.run.code, 0);
     assert.match(text.run.stdout, /Status: already signed in/);
     assert.match(text.run.stdout, /Scopes: agent:metadata/);
+
+    // An agent's JSON rerun needs no URL, so --no-browser is not refused.
+    const quiet = await login(assert, box, server, ["--no-browser"]);
+    assert.equal(quiet.run.code, 0);
+    assert.equal(quiet.result.data.status, "reused");
+    const switched = await login(assert, box, server, ["--no-browser", "--reconnect"]);
+    assert.equal(switched.run.code, 6);
+    assertFailure(switched.result, "unsupported", "no_browser_requires_terminal");
+    assert.equal(browserLog(box).filter((entry) => entry.url).length, 1, "a browser was opened again");
+    assert.deepEqual(fs.readFileSync(path.join(box.project, BINDING)), binding);
+  });
+});
+
+test("JSON --no-browser is refused once a saved grant no longer works, without a browser", async () => {
+  await withServer({}, async (server) => {
+    const box = sandbox();
+    assert.equal((await login(assert, box, server)).run.code, 0);
+    for (const grant of [...server.state.refresh.values(), ...server.state.access.values()]) grant.revoked = true;
+    const { run, result } = await login(assert, box, server, ["--no-browser"]);
+    assert.equal(run.code, 6);
+    assertFailure(result, "unsupported", "no_browser_requires_terminal");
+    assert.equal(result.data.next_action.kind, "run_in_terminal");
+    assert.equal(browserLog(box).filter((entry) => entry.url).length, 1, "a browser was opened again");
   });
 });
 
