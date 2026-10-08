@@ -83,9 +83,10 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   npx --yes metergraph-cli@next skill install --client codex --runtime local
   ```
 
-  A Python equivalent, [`metergraph-skills`](https://github.com/metergraph/cli/blob/main/python/metergraph-skills/README.md), is
-  ready for its first PyPI release. Both write the same files and recognise each
-  other's installs.
+  Python users can run `pip install metergraph-skills` and
+  `metergraph-skills install --client codex --runtime local` instead
+  ([details](https://github.com/metergraph/cli/blob/main/python/metergraph-skills/README.md)).
+  Both write the same files and recognise each other's installs.
 - **Machine output.** Every command takes `--json` and then prints exactly one JSON
   line on stdout and nothing on stderr. All results share one envelope:
   `schema_version`, `command`, `ok`, `outcome`, `exit_code`, `data` and `error`.
