@@ -1,6 +1,6 @@
 # metergraph-cli
 
-The Metergraph command line tool. Version `0.2.0-preview.2` is published on the
+The Metergraph command line tool. Version `0.2.0-preview.3` is published on the
 `next` npm tag. The `latest` tag remains on `0.1.0`.
 
 Install the released preview channel with npm or run it directly:
@@ -11,7 +11,7 @@ npx --yes metergraph-cli@next doctor --json
 npm install -g metergraph-cli@next
 ```
 
-The installed command is `metergraph`. Pin `metergraph-cli@0.2.0-preview.2`
+The installed command is `metergraph`. Pin `metergraph-cli@0.2.0-preview.3`
 when you need this exact preview rather than whichever version `next` names later.
 
 **Availability:**
@@ -28,6 +28,11 @@ when you need this exact preview rather than whichever version `next` names late
   when its deadline expires after the service reported the trace as pending, lets
   `login` and `setup` reruns that need no approval succeed with `--json
   --no-browser`, and reports why `verify --open` did not launch a browser.
+- `metergraph-cli@0.2.0-preview.3` makes a `verify` deadline that expires after
+  the service reported the trace as pending return `trace_not_found_within_bounds`,
+  the same result as running out of attempts, instead of `verification_timeout`.
+  `setup --json --no-browser` now returns a `run_in_terminal` next action when
+  approval is needed.
 - Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
@@ -787,7 +792,7 @@ To try a packed artifact without publishing:
 
 ```sh
 npm pack --pack-destination "$(mktemp -d)"
-npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.2.tgz -- metergraph --version
+npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.3.tgz -- metergraph --version
 ```
 
 Do not commit tarballs or other generated files.
@@ -796,7 +801,7 @@ Do not commit tarballs or other generated files.
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-`0.2.0-preview.2` is published on the `next` npm tag; `latest` remains on
+`0.2.0-preview.3` is published on the `next` npm tag; `latest` remains on
 `0.1.0`. The hosted service supports sign in, Metadata reads and ingest bootstrap.
 Subsequent releases must pass the checks below before publication.
 
