@@ -112,7 +112,7 @@ const LOGIN_OPTIONS = [
     summary: `Time to wait for the browser, ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}. Default ${LOGIN_DEFAULT_TIMEOUT_MS}.`,
   },
   { name: "--signup", value: null, summary: "Start at the hosted sign up page. Managed service only." },
-  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. Not with --json." },
+  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. With --json, only a rerun that needs no sign in succeeds." },
   { name: "--reconnect", value: null, summary: "Allow switching a bound project to another origin or workspace." },
   { name: "--json", value: null, summary: "Print one JSON line on stdout." },
 ];
@@ -310,7 +310,7 @@ export function helpData(topic) {
           { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
           { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
           { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
-          { name: "--no-browser", value: null, summary: "Print approval URL on stderr; requires terminal output." },
+          { name: "--no-browser", value: null, summary: "Print approval URL on stderr. With --json, only a rerun that needs no approval succeeds." },
           { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
           { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
           { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },

@@ -423,6 +423,23 @@ test("an explicitly repaired family can recover after its private env file was l
   } finally { await server.close(); }
 });
 
+test("JSON --no-browser setup without a sign in returns a run_in_terminal next action", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    const refused = await setup(box, server, ["--no-browser"]);
+    assert.equal(refused.exit_code, 6);
+    assert.equal(refused.error.reason, "no_browser_requires_terminal");
+    assert.equal(refused.data.next_action.kind, "run_in_terminal");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+    assert.equal(fs.existsSync(path.join(box.project, ".metergraph", "project.json")), false);
+    const other = await setup(box, server, ["--repair"]);
+    assert.equal(other.ok, false);
+    assert.equal(other.data.next_action, null);
+  } finally { await server.close(); }
+});
+
 test("JSON --no-browser reruns a ready setup and refuses only when approval is needed", async () => {
   const server = await startOAuthServer({ setup: true });
   try {
@@ -432,6 +449,8 @@ test("JSON --no-browser reruns a ready setup and refuses only when approval is n
     assert.equal(refused.exit_code, 6);
     assert.equal(refused.outcome, "unsupported");
     assert.equal(refused.error.reason, "no_browser_requires_terminal");
+    assert.deepEqual(refused.data.next_action, { kind: "run_in_terminal",
+      message: "Run the same setup command in a terminal without --json to see the approval URL." });
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
     assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
     assert.equal((await setup(box, server)).outcome, "ok");
@@ -440,6 +459,7 @@ test("JSON --no-browser reruns a ready setup and refuses only when approval is n
     const rerun = await setup(box, server, ["--no-browser"]);
     assert.equal(rerun.outcome, "ok");
     assert.equal(rerun.data.env, "unchanged");
+    assert.equal(rerun.data.next_action, null);
     assert.equal(rerun.data.skill, "reused");
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, authorizeCount);
     assert.deepEqual(fs.readFileSync(path.join(box.project, ".env")), env);

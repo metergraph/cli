@@ -28,15 +28,19 @@ export async function runVerify(options, dependencies = {}) {
   const limit = deadline(timeoutMs, cancel);
   let known = [];
   let receipt = null;
+  let found = false;
   let attempts = 0;
   const end = (outcome, reason, data = receipt) => {
     if (holdsKnown(data, known)) return { outcome: "verification_failed", reason: "credential_in_metadata_response", data: null };
     return { outcome, reason, data: data === null ? null : { ...data, attempts } };
   };
   // Once the origin has answered with a valid pending receipt, a deadline
-  // means the trace is not visible yet, not that the origin is unreachable.
+  // means the trace is not visible yet, exactly as when attempts run out.
+  // Only a deadline with no valid answer is reported as a connection failure.
+  // A deadline while opening an already found trace keeps the timeout reason.
   const interrupted = () => !limit.timedOut() ? end("cancelled", "cancelled")
-    : end(receipt === null ? "connection_failed" : "verification_failed", "verification_timeout");
+    : receipt === null ? end("connection_failed", "verification_timeout")
+      : end("verification_failed", found ? "verification_timeout" : "trace_not_found_within_bounds");
   try {
     const sessionResult = await (dependencies.session ?? verifiedSession)({ project: options.project, configDir: options.configDir, cancel: limit.signal });
     if (limit.signal.aborted) return interrupted();
@@ -58,6 +62,7 @@ export async function runVerify(options, dependencies = {}) {
       receipt = checked.value;
       if (holdsKnown(receipt, known)) return end("verification_failed", "credential_in_metadata_response", null);
       if (checked.found) {
+        found = true;
         if (options.open) {
           const opened = await openTrace(receipt, { ...options, signal: limit.signal }, dependencies.launch);
           if (limit.signal.aborted) return interrupted();
