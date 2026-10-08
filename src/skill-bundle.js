@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // public skill at the manifest's source_url. The source has no version of its
 // own, so the revision is derived from the content hash. The hash is pinned
 // here as well as in the manifest, so editing either file alone is detected.
-const PINNED_SHA256 = "a8ab0638da04cc71908820f1899057e51f4c0ca07d2a359c634bb5510fff54fa";
+const PINNED_SHA256 = "c764eb57691e4fa1088a4cfe00a43608b1451bb075a04d03820c92b5148fc0bf";
 
 const ASSET_DIR = new URL("../assets/skill/", import.meta.url);
 const MANIFEST_KEYS = ["file", "manifest_version", "name", "revision", "sha256", "size", "source_url"];

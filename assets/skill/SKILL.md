@@ -32,6 +32,18 @@ package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
 application invocation, its time window and the intended workspace.
 
+Repository identity is optional for capture but keeps traces attributable when
+several repositories share a workspace. If the installed CLI's `setup` help lists
+`--repository`, setup records `owner/name` from the git remote in a committed
+`.metergraph/config.json` when none exists, reports a different existing value
+instead of changing it, and skips this with `--no-repository`. Otherwise, with the
+person's agreement, add `.metergraph/config.json` containing
+`{"version": 2, "repository": "owner/name"}`; it holds no secret, so show the diff
+and let them commit it. For several repositories, run setup once per repository,
+pass the same `--workspace` UUID each time, and give each repository its own
+identity. The SDK warning that repository identity is not configured does not
+stop capture.
+
 ## Route honestly
 
 | Client and runtime | Hosted | Customer-local bundle | Customer AWS | Open source self-hosted |
