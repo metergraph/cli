@@ -3,6 +3,12 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
+## 0.2.0-preview.4
+
+- The bundled agent skill tells the agent to use the ingest key that `setup` already
+  wrote to the project's env file, instead of asking for a separate ingest credential,
+  and to look up the documentation when it is stuck.
+
 ## 0.2.0-preview.3
 
 - A `verify` deadline that expires after the service reported the trace as pending now
