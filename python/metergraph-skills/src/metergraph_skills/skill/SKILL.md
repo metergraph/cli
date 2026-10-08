@@ -7,6 +7,10 @@ description: Route Metergraph setup by client, execution runtime and deployment,
 
 Public setup: https://www.metergraph.dev/docs/guides/agent-access/
 Connection and troubleshooting: https://www.metergraph.dev/docs/guides/agent-access/
+Documentation index, every public page with a one-line summary: https://www.metergraph.dev/llms.txt
+
+If a step fails or something is unclear, look it up in that index before
+improvising, asking for new credentials or stopping.
 
 ## Confirm setup before producing instructions
 
@@ -22,11 +26,27 @@ Use the routing below with those four choices. Follow the matching credential an
 For a first application trace, check the installed CLI's version and help before
 using it. `metergraph-cli@0.1.0` supports `doctor` and project skill
 installation; later versions may also offer `login`, `setup` and `verify`.
-Use those commands only if the installed package lists them. Use the [first
+Use those commands only if the installed package lists them. Install this skill
+with whichever the installed CLI lists, `metergraph setup --client <client>` or
+`metergraph skill install --client <client> --runtime local`, not by copying this
+file into the project: the CLI never replaces a skill file it did not install. Pass `--skip-skill` to `setup` when the person chose not to
+install the skill. Use the [first
 trace guide](https://www.metergraph.dev/docs/start/first-trace/) for steps the
 package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
 application invocation, its time window and the intended workspace.
+
+Repository identity is optional for capture but keeps traces attributable when
+several repositories share a workspace. If the installed CLI's `setup` help lists
+`--repository`, setup records `owner/name` from the git remote in a committed
+`.metergraph/config.json` when none exists, reports a different existing value
+instead of changing it, and skips this with `--no-repository`. Otherwise, with the
+person's agreement, add `.metergraph/config.json` containing
+`{"version": 2, "repository": "owner/name"}`; it holds no secret, so show the diff
+and let them commit it. For several repositories, run setup once per repository,
+pass the same `--workspace` UUID each time, and give each repository its own
+identity. The SDK warning that repository identity is not configured does not
+stop capture.
 
 ## Route honestly
 
@@ -70,4 +90,4 @@ Use https://www.metergraph.dev/docs/ for public product documentation and https:
 4. Explain the failure or anomaly using only returned evidence. Cite workspace, time window, provenance, trace/report IDs, completeness/coverage, warnings and working app links when returned. Do not fabricate links. Distinguish no data, incomplete evidence, unavailable capability, classification pending, stale/mismatched identity, failed analysis and missing report. An empty result alone does not prove absence of traffic.
 5. An optional approved replay must be eligible, bounded and non-persistent. Do not claim that it changed production telemetry or fixed the application. Refuse autonomous dashboard mutations or production configuration changes.
 
-For an empty workspace, use https://www.metergraph.dev/docs/agents/instrument-a-repo/ after confirming the ingestion destination and obtaining a separate ingest credential securely. Do not initiate provider calls or paid work merely to validate setup. Ingestion accepted, processed, retained content, classification readiness and analysis readiness are distinct states. Label synthetic/demo fixtures; they do not prove a first real application trace.
+For an empty workspace, use https://www.metergraph.dev/docs/agents/instrument-a-repo/. If `metergraph setup` already ran in this project, it delivered the ingest credential: the project's `.env` holds `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`. Use them; do not ask for or create another key, and never print their values. The SDK reads the process environment, not `.env`, so load it when you run the application (for example `set -a; . ./.env; set +a`, python-dotenv or `node --env-file=.env`). Otherwise confirm the ingestion destination and obtain a separate ingest credential securely. Ask before running anything that calls a paid model provider, and do not initiate provider calls or paid work merely to validate setup. Confirm the exact trace with `metergraph verify`; if the CLI is not installed, or `metergraph --version` lacks `verify`, use `npx --yes metergraph-cli@next verify`. Ingestion accepted, processed, retained content, classification readiness and analysis readiness are distinct states. Label synthetic/demo fixtures; they do not prove a first real application trace.
