@@ -9,6 +9,13 @@ Input: one classified workload and its `selection_reference` (from
 `metergraph-workloads`). Output: a run plan the person can approve in one
 reply.
 
+## 0. Confirm the connection
+
+If this conversation has not already confirmed the workspace, call
+`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
+anything else. Say which workspace you are connected to in one line, and plan
+only with the tools the capabilities advertise.
+
 ## 1. Which traces
 
 The server picks the sample and the capture window; an agent cannot set sample
@@ -56,6 +63,10 @@ workload's traces come from.
 | `max_cost_per_call_usd`, `max_latency_ms` | Without them the report ranks models but cannot say which pass. Suggest about half today's cost per call and today's p95 latency. | The person |
 | `provider_allow_list`, `model_allow_list`, `fixed_model` | Candidates outside these lists are excluded. | The person |
 
+When `residency_allow_list` is set, always name it in the run plan and list
+which selected candidates need a hosting-region check. Model readiness does not
+say where a model is served.
+
 Changing replay opt-out is a data decision: it lets Metergraph send this
 route's captured prompts to the candidate providers. Ask for it explicitly, for
 the routes in this workload only.
@@ -67,6 +78,7 @@ End with this, filled in, and ask for one decision:
 ```
 Workload: <display_name> (<n> samples, <environment>)
 Candidates: <models> — add <…>, remove <…> on the Opportunities page
-Route changes needed: <replay opt-out off for <route>> <limits> <residency check>
+Route changes needed: <replay opt-out off for <route>> <limits>
+Residency: <allowed regions> — check where <candidates> are served
 Blocked on: <the first unresolved item>
 ```

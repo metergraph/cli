@@ -10,6 +10,13 @@ are safe to switch to. The goal is a saved, versioned eval bound to the
 workload, or, when the key cannot write evals, a rubric the person can paste
 into the app in one go.
 
+## 0. Confirm the connection
+
+If this conversation has not already confirmed the workspace, call
+`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
+anything else. Say which workspace you are connected to in one line, and plan
+only with the tools the capabilities advertise.
+
 ## 1. Find out what you can do
 
 From `metergraph_get_capabilities`, note which of these are advertised. They
@@ -62,12 +69,21 @@ Name which starting point applies:
 
 ## 4. Test the checks before trusting them
 
+Read each tool's input schema from the connection before building a draft; the
+draft format is the server's, not one to guess. If a call rejects the draft,
+fix it from the returned errors instead of giving up.
+
 With `metergraph_preview_evaluation_draft`, run the deterministic checks on the
 good and bad cases. A check that fails good cases or passes bad ones is wrong;
 fix the check, not the model. Report the per-check pass counts in a short
 table. Then `metergraph_validate_evaluation_draft`, and, after the person
 agrees, `metergraph_save_evaluation_draft` and the assignment pair. Keep the
 returned revision and assignment IDs in the loop record.
+
+If the person already asked you to save and attach the eval after testing, and
+the preview passes the good cases and fails the bad ones, that is their
+agreement: validate, save, preview the assignment and apply it without asking
+again. Ask only if a check misbehaved.
 
 Saving a draft with identical content returns the same revision; changed
 content is a new revision. On an uncertain save response, list the library

@@ -8,6 +8,13 @@ description: Summarize a finished Metergraph analysis in a few lines with the li
 The coding agent gives the answer and the link. The app is where the person
 reads the full report and inspects case-level evidence.
 
+## 0. Confirm the connection
+
+If this conversation has not already confirmed the workspace, call
+`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
+anything else. Say which workspace you are connected to in one line, and plan
+only with the tools the capabilities advertise.
+
 ## 1. Read it
 
 1. `metergraph_get_analysis_run` with the run ID. Continue only when the status

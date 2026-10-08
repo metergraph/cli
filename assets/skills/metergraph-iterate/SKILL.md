@@ -8,6 +8,13 @@ description: Refine and rerun a Metergraph model-swap analysis after the person 
 A rerun is a new run with one deliberate change. The earlier run, report and
 eval revision stay as they are.
 
+## 0. Confirm the connection
+
+If this conversation has not already confirmed the workspace, call
+`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
+anything else. Say which workspace you are connected to in one line, and plan
+only with the tools the capabilities advertise.
+
 ## 1. Recover where the loop is
 
 1. Read the loop record (in the conversation or `.metergraph/model-swap.md`). If
@@ -38,7 +45,9 @@ If several must change, list them all in the confirmation.
 
 A rerun spends money and sends captured prompts to providers again. Get the
 same explicit confirmation as the first run (see `metergraph-analyze`), plus
-what changed. Then call `metergraph_start_analysis` with:
+what changed. If the request already names the change and approves a budget and
+time, that is the confirmation: restate it, make the change (for an eval fix,
+save the new revision first, as in `metergraph-evals`), then start. Then call `metergraph_start_analysis` with:
 
 - a **new** `request_key`, for example `rerun-<pattern_id>-<yyyymmdd>-<n>`;
 - the same `pinned_workload`, unless the workload itself changed;

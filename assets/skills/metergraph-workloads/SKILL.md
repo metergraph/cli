@@ -8,6 +8,13 @@ description: Choose which Metergraph workload to analyze - list classified workl
 The goal is one classified workload, its exact `selection_reference`, and a
 one-sentence reason it was chosen.
 
+## 0. Confirm the connection
+
+If this conversation has not already confirmed the workspace, call
+`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
+anything else. Say which workspace you are connected to in one line, and plan
+only with the tools the capabilities advertise.
+
 ## 1. Read what exists
 
 1. `metergraph_list_classified_workloads` with a small limit (10). Each item

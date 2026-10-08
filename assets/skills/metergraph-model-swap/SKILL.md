@@ -32,7 +32,8 @@ choose workload → choose traces and models → define or refine eval
    it is not the one the person means.
 2. Call `metergraph_list_analysis_runs` with a small limit. If a run already
    exists for this workload, the person is probably on stage 6: read its report
-   first instead of starting over.
+   first instead of starting over, and give the report link
+   (`<origin>/#analysis?report=<analysis_id>`, as in `metergraph-report`).
 3. Write down the tools that are advertised. Plan only with those. When a stage
    needs a tool that is not advertised, say which one, keep the selection you
    have, and hand that step to the app page named in the stage skill. Never
