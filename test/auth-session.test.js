@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 
 import { verifiedSession } from "../src/auth-session.js";
 import { openStore, readCredential, writeCredential } from "../src/auth-store.js";
-import { browserLog, credentialFiles, login, readBindingFile, sandboxes } from "./auth-helpers.js";
+import { browserLog, credentialFiles, login, logout, readBindingFile, sandboxes } from "./auth-helpers.js";
 import { WORKSPACE_A, WORKSPACE_B, startOAuthServer } from "./fixtures/oauth-server.js";
 
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph session test "));
@@ -250,5 +250,29 @@ test("a cancelled session check reports cancellation, not revocation", async () 
     controller.abort();
     assertStop(await project.session({ cancel: controller.signal }), "authorization_failed", "cancelled");
     assert.equal(project.record().refresh_pending, false);
+  });
+});
+
+test("a grant for a registered client keeps refreshing and revoking after the service offers a fixed client", async () => {
+  await withServer({}, async (server) => {
+    const project = await signedIn(server);
+    const old = project.record();
+    assert.match(old.client_id, /^mgc_/);
+    server.configureCliClient("metergraph-cli");
+    project.change({ expires_at: Date.now() - 1000 });
+
+    const result = await project.session();
+    assert.equal(result.ok, true);
+    assert.equal(refreshRequests(server).length, 1);
+    assert.equal(new URLSearchParams(refreshRequests(server)[0].body).get("client_id"), old.client_id);
+    // The saved record keeps the client it was issued to.
+    assert.equal(project.record().client_id, old.client_id);
+    assert.equal(server.requestsTo("/v1/oauth/register").length, 1);
+
+    const out = await logout(assert, project.box, server);
+    assert.equal(out.run.code, 0);
+    assert.equal(out.result.data.revocation, "accepted");
+    assert.equal(new URLSearchParams(server.requestsTo("/v1/oauth/revoke")[0].body).get("client_id"), old.client_id);
+    assert.ok([...server.state.refresh.values()].every((grant) => grant.revoked));
   });
 });

@@ -2,7 +2,7 @@ import { detectRemoteSession, openBrowser } from "./auth-browser.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { startCallbackListener } from "./auth-callback.js";
 import { runLogin } from "./auth-login.js";
-import { newPkce, register, endpointsFor } from "./auth-oauth.js";
+import { clientFor, endpointsFor, newPkce, offeredClientId } from "./auth-oauth.js";
 import { Stop } from "./auth-store.js";
 import { verifiedSession } from "./auth-session.js";
 import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
@@ -166,9 +166,10 @@ export async function runSetup(options, progress = () => {}) {
     let clientId;
     let pkce;
     try {
-      const registered = await register(endpointsFor(origin), listener.redirectUri, deadline(AUTH_HTTP_TIMEOUT_MS, trap.signal).signal);
-      if (!registered.ok) return stop(registered.outcome, registered.reason);
-      clientId = registered.clientId;
+      const client = await clientFor(endpointsFor(origin), setup.offeredClientId, listener.redirectUri,
+        deadline(AUTH_HTTP_TIMEOUT_MS, trap.signal).signal);
+      if (!client.ok) return stop(client.outcome, client.reason);
+      clientId = client.clientId;
       pkce = newPkce();
       const pending = listener.wait({ state: pkce.state, issuer: `${origin}/v1/oauth`, requireIss: false,
         timeoutMs: options.timeoutMs, cancel: trap.signal });
@@ -281,7 +282,9 @@ async function discoverSetup(origin, profile, cancel) {
     !Array.isArray(doc.code_challenge_methods_supported) || !doc.code_challenge_methods_supported.includes("S256")) {
     return { ok: false, outcome: "unsupported", reason: "setup_contract_mismatch" };
   }
-  return { ok: true };
+  const offered = offeredClientId(doc);
+  if (offered === undefined) return { ok: false, outcome: "unsupported", reason: "setup_contract_mismatch" };
+  return { ok: true, offeredClientId: offered };
 }
 
 async function redeem(origin, form, profile, cancel) {

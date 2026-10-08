@@ -23,6 +23,12 @@ const ACCESS_TOKEN = /^[\x21-\x7e]{16,8192}$/;
 const REFRESH_TOKEN = /^[\x21-\x7e]{16,4096}$/;
 const MAX_EXPIRES_IN = 366 * 24 * 60 * 60;
 
+// A deployment that configures the Metergraph CLI as a known OAuth client
+// names its client ID in this metadata field, in the authorization server
+// metadata and in the setup discovery document. Without it the CLI registers
+// a new public client for each sign in, as servers without the field expect.
+export const CLI_CLIENT_ID_FIELD = "metergraph_cli_client_id";
+
 // The access token claim that names the workspace the grant is for. The
 // claim is a sanity check only; the CLI does not verify token signatures.
 // The server-authoritative check is GET /v1/agent/workspace.
@@ -109,11 +115,31 @@ export async function discover(origin, signal) {
   ) {
     return stop("unsupported", "revocation_unsupported");
   }
+  const offered = offeredClientId(server);
+  if (offered === undefined) return stop("unsupported", "oauth_metadata_invalid");
   return {
     ok: true,
     endpoints: expected,
     requireIss: server.authorization_response_iss_parameter_supported === true,
+    offeredClientId: offered,
   };
+}
+
+// The client ID a metadata document offers for the CLI: the ID, null when the
+// field is absent or null, or undefined when the value is malformed. A
+// malformed value is refused rather than ignored, like any other bad field.
+export function offeredClientId(doc) {
+  const value = doc[CLI_CLIENT_ID_FIELD];
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" && CLIENT_ID.test(value) ? value : undefined;
+}
+
+// The client for one sign in: the pre-registered client the service offered,
+// or a newly registered one when it offered none. The offered client accepts
+// the loopback redirect on any port, so it needs no registration request.
+export async function clientFor(endpoints, offered, redirectUri, signal) {
+  if (offered !== null) return { ok: true, clientId: offered };
+  return register(endpoints, redirectUri, signal);
 }
 
 async function fetchMetadata(origin, paths, signal) {
