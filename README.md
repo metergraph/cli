@@ -24,12 +24,10 @@ when you need this exact preview rather than whichever version `next` names late
   `METERGRAPH_INGEST_URL` and repairs the full ingest endpoint that
   `0.2.0-preview.0` wrote, after checking the saved key. It also keeps validated,
   workspace-bound trace links in Metadata reads.
-- `metergraph-cli@0.2.0-preview.2` makes a `verify` deadline that expires after
-  the service reported the trace as pending exit 11 `verification_failed` with
-  `trace_not_found_within_bounds`, as running out of attempts does. It lets
+- `metergraph-cli@0.2.0-preview.2` makes `verify` exit 11 `verification_failed`
+  when its deadline expires after the service reported the trace as pending, lets
   `login` and `setup` reruns that need no approval succeed with `--json
-  --no-browser`, returns a `run_in_terminal` next action when approval is needed,
-  and reports why `verify --open` did not launch a browser.
+  --no-browser`, and reports why `verify --open` did not launch a browser.
 - Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
