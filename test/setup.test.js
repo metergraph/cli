@@ -385,6 +385,20 @@ test("a failed credential check after env write can replace the family's pending
   } finally { await server.close(); }
 });
 
+test("a null client ID in setup discovery falls back to registering a client for ingest approval", async () => {
+  const server = await startOAuthServer({ setup: true,
+    setupMetadata: (doc) => ({ ...doc, metergraph_cli_client_id: null }) });
+  try {
+    const box = boxFor();
+    assert.equal((await login(assert, box, server)).result.ok, true);
+    const registered = server.requestsTo("/v1/oauth/register").length;
+    const result = await setup(box, server);
+    assert.equal(result.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/oauth/register").length, registered + 1);
+    assert.match(server.requestsTo("/v1/cli/setup/authorize")[0].query.client_id, /^mgc_/);
+  } finally { await server.close(); }
+});
+
 test("tampered setup discovery stops before browser registration or file write", async () => {
   for (const tamper of [
     (doc) => ({ ...doc, redemption_endpoint: "https://evil.example.com/redeem" }),
