@@ -41,6 +41,7 @@ const EXPECTED_FILES = [
   "src/read-contract.js",
   "src/read-output.js",
   "src/read.js",
+  "src/repository-identity.js",
   "src/setup-deployment.js",
   "src/setup-env-acl.js",
   "src/setup-env-git.js",

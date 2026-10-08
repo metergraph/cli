@@ -415,6 +415,46 @@ verify one exact trace afterward. The hosted service advertises the setup
 contract, but each non-hosted deployment must be checked at its own origin.
 Local protocol tests do not prove browser approval or real application traffic.
 
+#### Repository identity
+
+After the key is ready, setup records which repository the project belongs to,
+so traces from several repositories in one workspace stay apart. The SDKs read
+`METERGRAPH_REPOSITORY`, then the nearest `.metergraph/config.json`:
+
+```json
+{
+  "version": 2,
+  "repository": "example-org/example-app"
+}
+```
+
+Setup takes `owner/name` from `--repository`, or else from the git `origin`
+remote (or the only remote). It writes `.metergraph/config.json` in the project
+directory only when no identity exists yet. The file holds no secret; review
+and commit it. An identity already set in `METERGRAPH_REPOSITORY` in the env
+file, or in a `.metergraph/config.json` in the project or a parent directory, is
+kept. If it differs from the remote or `--repository`, setup reports a mismatch
+and changes nothing. Setup never rewrites a config file the SDKs cannot use.
+Remotes with nested groups are not guessed; pass `--repository OWNER/NAME`.
+`--no-repository` records nothing.
+
+The JSON result reports the outcome in `data.repository`: `status` is
+`written`, `existing`, `mismatch`, `invalid_config`, `not_inferred`,
+`write_failed` or `skipped`, with the `repository`, its `source`
+(`git_remote`, `flag`, `config` or `env_file`), the config `path`, and, for a
+mismatch, the `expected` value. Only `owner/name` is reported, never a remote
+URL. Recording an identity never fails setup.
+
+With an identity configured, the SDKs exchange the ingest key for a
+repository-scoped session before sending traces. Without one they keep the
+older ingestion path and log that the identity is not configured; capture
+continues either way.
+
+Several repositories can send to one workspace. Run `setup` once in each
+repository, so each has its own project binding and private `.env`; pass the
+same `--workspace UUID` each time to pin the workspace; and give each
+repository its own identity.
+
 ### Read commands
 
 The read commands use the grant `login` saved for this project. They never open a

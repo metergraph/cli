@@ -1,3 +1,4 @@
+import { parseRepository } from "./repository-identity.js";
 import {
   DEFAULT_ORIGIN,
   DEFAULT_TIMEOUT_MS,
@@ -33,7 +34,7 @@ const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
-  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file"]),
+  setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file", "--repository"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
@@ -75,7 +76,7 @@ const REFUSED_MESSAGES = {
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
-  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites"]),
+  setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites", "--no-repository"]),
   verify: new Set(["--open", "--no-browser"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -388,6 +389,14 @@ function parseSetup(values, flags, json, fail) {
   }
   const envFile = values["--env-file"] ?? ".env";
   if (envFile === "" || envFile.includes("\0")) return fail("invalid_env_file", "--env-file must name a project-relative env file.");
+  const rawRepository = values["--repository"];
+  const repository = rawRepository === undefined ? null : parseRepository(rawRepository);
+  if (rawRepository !== undefined && repository === null) {
+    return fail("invalid_repository", "--repository must be owner/name, for example example-org/example-app.");
+  }
+  if (repository !== null && flags.has("--no-repository")) {
+    return fail("repository_conflict", "Use either --repository or --no-repository, not both.");
+  }
   const rawTimeout = values["--timeout-ms"];
   const timeoutMs = rawTimeout === undefined ? LOGIN_DEFAULT_TIMEOUT_MS :
     parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
@@ -397,7 +406,8 @@ function parseSetup(values, flags, json, fail) {
     workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
     project: paths.project, configDir: paths.configDir, envFile, client, skipSkill: flags.has("--skip-skill"),
     timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"),
-    signup: flags.has("--signup"), reconnect: flags.has("--reconnect"), json };
+    signup: flags.has("--signup"), reconnect: flags.has("--reconnect"),
+    repository, skipRepository: flags.has("--no-repository"), json };
 }
 
 // Read commands take the project and config directory, one total timeout and,
