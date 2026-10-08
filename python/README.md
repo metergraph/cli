@@ -27,7 +27,7 @@ Run the tests with `python -m unittest discover -s python/metergraph-skills/test
 Releases are manual. The `Release Python package` workflow
 (`.github/workflows/release-pypi.yml`) runs only when a maintainer starts it
 from `main` and picks one package. It follows the same
-[exact revision rule](../README.md#exact-revision-rule) as the npm release. It:
+[exact revision rule](../RELEASING.md#exact-revision-rule) as the npm release. It:
 
 1. checks that `commit_sha` equals the commit the run started from, that it is on
    `main`, and that `version` equals the package's `pyproject.toml`;

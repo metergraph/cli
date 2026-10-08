@@ -1,0 +1,38 @@
+# Changelog
+
+`metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
+`latest` stays on the last stable version, currently `0.1.0`.
+
+## 0.2.0-preview.3
+
+- A `verify` deadline that expires after the service reported the trace as pending now
+  returns `trace_not_found_within_bounds`, the same result as running out of attempts,
+  instead of `verification_timeout`.
+- `setup --json --no-browser` returns a `run_in_terminal` next action when approval is
+  needed.
+- `login` and `setup` use a pre-registered CLI client when the service names one in
+  `metergraph_cli_client_id`, instead of registering a new client, and still register
+  one on services that do not.
+
+## 0.2.0-preview.2
+
+- `verify` exits 11 `verification_failed` when its deadline expires after the service
+  reported the trace as pending.
+- `login` and `setup` reruns that need no approval succeed with `--json --no-browser`.
+- `verify --open` reports why it did not launch a browser.
+
+## 0.2.0-preview.1
+
+- `setup` writes the SDK service root as `METERGRAPH_INGEST_URL` and, after checking
+  the saved key, repairs the full ingest endpoint that `0.2.0-preview.0` wrote.
+- Metadata reads keep validated, workspace-bound trace links.
+
+## 0.2.0-preview.0
+
+- Adds `login`, `logout`, `setup`, `verify`, `status`, `context`, `capabilities`,
+  `usage`, `routes` and `traces`.
+- Adds exit codes 10 to 17.
+
+## 0.1.0
+
+- First release: `doctor`, `skill install` and `skill update`. No sign in commands.
