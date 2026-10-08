@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-PINNED_SHA256 = "0a80fb6effed5fada241f2a672f0390d278ccacf9988265f94824dc5e54d8b6c"
+PINNED_SHA256 = "92f7955f6f8761a20a1886ad81f22dfcee239afddf8e9f1e761c35eb8e70f218"
 SOURCE_URL = "https://www.metergraph.dev/SKILL.md"
 
 ASSET_DIR = Path(__file__).resolve().parent / "skill"

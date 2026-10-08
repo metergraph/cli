@@ -5,10 +5,17 @@
 
 ## Unreleased
 
+- New `skills install`, `skills update` and `skills list` commands install the
+  Metergraph workflow skills bundled with the CLI: the model-swap loop
+  (`metergraph-model-swap`, `-workloads`, `-candidates`, `-evals`, `-analyze`,
+  `-report`, `-iterate`) plus `metergraph-investigate` and `metergraph-onboarding`.
+  Each skill gets its own ownership receipt in `.metergraph/skills/`, with the same
+  ownership rules as `skill install`. No network access. `--client claude-desktop`
+  writes nothing and points to the `metergraph/skills` plugin marketplace.
 - The bundled agent skill now comes from
   [metergraph/skills](https://github.com/metergraph/skills) at a pinned commit, and CI
   fails if the npm or Python copy drifts from it. The skill points agents to the other
-  Metergraph skills, and to `metergraph-analyze` for model-swap questions.
+  Metergraph skills, and to `metergraph-model-swap` for model-swap questions.
 
 ## 0.2.0-preview.4
 

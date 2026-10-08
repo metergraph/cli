@@ -20,6 +20,16 @@ const EXPECTED_FILES = [
   "README.md",
   "assets/skill/SKILL.md",
   "assets/skill/manifest.json",
+  "assets/skills/manifest.json",
+  "assets/skills/metergraph-analyze/SKILL.md",
+  "assets/skills/metergraph-candidates/SKILL.md",
+  "assets/skills/metergraph-evals/SKILL.md",
+  "assets/skills/metergraph-investigate/SKILL.md",
+  "assets/skills/metergraph-iterate/SKILL.md",
+  "assets/skills/metergraph-model-swap/SKILL.md",
+  "assets/skills/metergraph-onboarding/SKILL.md",
+  "assets/skills/metergraph-report/SKILL.md",
+  "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
   "package.json",
   "src/args.js",
@@ -57,7 +67,7 @@ const EXPECTED_FILES = [
   "src/verify-output.js",
   "src/verify.js",
 ];
-const SKILL_SHA256 = "0a80fb6effed5fada241f2a672f0390d278ccacf9988265f94824dc5e54d8b6c";
+const SKILL_SHA256 = "92f7955f6f8761a20a1886ad81f22dfcee239afddf8e9f1e761c35eb8e70f218";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;
@@ -225,6 +235,24 @@ test("the installed CLI installs the skill offline into a project with spaces", 
 
   const rerun = check(await run(process.execPath, args, { cwd: workDir }), "packed skill rerun");
   assert.equal(parseJsonLine(rerun.stdout).data.status, "reused");
+});
+
+test("the installed CLI installs the workflow skills offline from the packed pack", async () => {
+  const target = path.join(workDir, "skills project");
+  mkdirSync(target, { recursive: true });
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const args = ["--import", pathToFileURL(NO_NETWORK).href, bin, "skills", "install",
+    "--client", "codex", "--runtime", "local", "--project", target, "--json"];
+  const result = check(await run(process.execPath, args, { cwd: workDir }), "packed skills install");
+  const parsed = parseJsonLine(result.stdout);
+  const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "assets", "skills", "manifest.json"), "utf8"));
+  assert.deepEqual(parsed.data.skills.map((skill) => skill.name), manifest.skills.map((skill) => skill.name));
+  for (const skill of parsed.data.skills) {
+    assert.equal(skill.status, "installed");
+    const installed = readFileSync(path.join(target, ".agents", "skills", skill.name, "SKILL.md"));
+    const pinned = manifest.skills.find((entry) => entry.name === skill.name).sha256;
+    assert.equal(createHash("sha256").update(installed).digest("hex"), pinned);
+  }
 });
 
 test("the installed CLI hands a cloud sign in off offline and writes nothing", async () => {

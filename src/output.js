@@ -84,6 +84,28 @@ const SKILL_USAGE = [
   "metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
 ];
 
+const SKILLS_USAGE = [
+  "metergraph skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+  "metergraph skills update --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+  "metergraph skills list [--project DIR] [--json]",
+];
+
+const SKILLS_LIST_OPTIONS = [
+  { name: "--project", value: "DIR", summary: "Existing project directory. Default: the current directory." },
+  { name: "--json", value: null, summary: "Print one JSON line on stdout." },
+];
+
+const SKILLS_STATE_LABELS = {
+  not_installed: "not installed",
+  installed: "installed",
+  outdated: "older revision; run skills update",
+  modified: "changed since install; left alone",
+  missing: "receipt only; run skills install",
+  not_owned: "not installed by this CLI; left alone",
+  receipt_invalid: "receipt not valid",
+  unsafe_path: "unsafe path",
+};
+
 const CONFIG_DIR_OPTION = {
   name: "--config-dir",
   value: "DIR",
@@ -257,6 +279,7 @@ export function helpData(topic) {
       "metergraph --version [--json]",
       "metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
       ...SKILL_USAGE,
+      ...SKILLS_USAGE,
       LOGIN_USAGE,
       LOGOUT_USAGE,
       SETUP_USAGE,
@@ -282,6 +305,25 @@ export function helpData(topic) {
         summary:
           "Replace a skill this CLI installed, and that is unchanged since, with the bundled revision.",
         options: SKILL_OPTIONS,
+      },
+      {
+        name: "skills install",
+        summary:
+          "Copy the Metergraph workflow skills bundled with this CLI, such as the model-swap loop, into one " +
+          "client's project skill directory. Never replaces a skill it did not install. No network requests, no sign in.",
+        options: SKILL_OPTIONS,
+      },
+      {
+        name: "skills update",
+        summary:
+          "Replace workflow skills this CLI installed, and that are unchanged since, with the bundled revisions, " +
+          "and install skills added since.",
+        options: SKILL_OPTIONS,
+      },
+      {
+        name: "skills list",
+        summary: "List the bundled workflow skills and whether each is installed for each client. Writes nothing.",
+        options: SKILLS_LIST_OPTIONS,
       },
       {
         name: "login",
@@ -463,6 +505,40 @@ export function helpText(topic) {
       "",
       "Discovery stays pending until the client itself loads the skill.",
     );
+  } else if (topic === "skills") {
+    lines.push(
+      "Usage:",
+      ...SKILLS_USAGE.map((usage) => `  ${usage}`),
+      "",
+      "Copies the Metergraph workflow skills bundled with this CLI into one client's project",
+      "skill directory, one folder per skill, and records ownership of each in",
+      ".metergraph/skills/NAME.json. The skills come from https://github.com/metergraph/skills",
+      "at the commit this release pins. They cover investigation and the model-swap loop:",
+      "choose a workload, choose traces and models, define the eval, run the analysis,",
+      "summarize the report and rerun. The setup skill is installed by \"metergraph skill\".",
+      "",
+      "Writes nothing else. Makes no network requests, does not sign in and does not",
+      "configure MCP, client settings, AGENTS.md or CLAUDE.md.",
+      "",
+      "Options:",
+    );
+    for (const option of SKILL_OPTIONS) {
+      const flag = option.value ? `${option.name} ${option.value}` : option.name;
+      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
+    }
+    lines.push(
+      "",
+      "install never replaces an existing skill. update replaces only skills this CLI",
+      "installed and that are unchanged since, and installs skills added since. A conflict",
+      "on one skill leaves the others in place. There is no force option.",
+      "list takes only --project and reports every client. It never writes.",
+      "",
+      "Claude Desktop (--client claude-desktop) cannot load project skill files. It exits",
+      "with code 6, writes nothing and points to the metergraph/skills plugin marketplace.",
+      "ChatGPT and cloud runtimes without a shell get the connection guide instead.",
+      "",
+      "Discovery stays pending until the client itself loads the skills.",
+    );
   } else {
     lines.push(
       `metergraph ${VERSION} (preview)`,
@@ -472,6 +548,7 @@ export function helpText(topic) {
       "  metergraph --version [--json]    Show the CLI version",
       "  metergraph doctor [options]      Check a Metergraph service, read only",
       "  metergraph skill install|update  Install or update the agent skill in a project",
+      "  metergraph skills install|update|list  Workflow skills, such as the model-swap loop",
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
       "  metergraph setup [options]       Approve and write a private ingest key",
@@ -485,6 +562,7 @@ export function helpText(topic) {
       "",
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',
+      'Run "metergraph help skills" for workflow skill options.',
       'Run "metergraph help login" or "metergraph help logout" for sign in options.',
       'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
@@ -517,6 +595,46 @@ export function skillText(result, message) {
     if (report.next_action?.kind === "connection_guide") {
       lines.push(`Connection guide: ${report.next_action.url}`);
     }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function skillsText(result, message) {
+  const report = result.data;
+  const lines = [];
+  if (result.command === "skills list") {
+    lines.push("Metergraph skills bundled with this CLI");
+    if (report.source) lines.push(`Source: ${report.source.repository} at ${report.source.commit.slice(0, 12)}`);
+    if (!result.ok) {
+      lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
+      return `${lines.join("\n")}\n`;
+    }
+    for (const skill of report.skills) {
+      lines.push("", `${skill.name} (${skill.revision})`);
+      for (const [client, state] of Object.entries(skill.installs)) {
+        lines.push(`  ${SKILL_CLIENTS[client].label.padEnd(12)}${SKILLS_STATE_LABELS[state] ?? state}`);
+      }
+    }
+    return `${lines.join("\n")}\n`;
+  }
+  const label = SKILL_CLIENTS[report.client]?.label ?? HANDOFF_SKILL_CLIENTS[report.client] ?? report.client;
+  lines.push(`Metergraph ${result.command}: ${label}, ${report.runtime} runtime`);
+  if (report.source) lines.push(`Source: ${report.source.repository} at ${report.source.commit.slice(0, 12)}`);
+  for (const skill of report.skills) {
+    const status = skill.status === "failed" ? `failed (${skill.reason})` : skill.status;
+    lines.push(`  ${skill.name.padEnd(24)}${status.padEnd(12)}${skill.path}`);
+  }
+  if (result.ok) {
+    lines.push(
+      `Discovery: pending until ${label} loads the skills`,
+      "Authenticated: no",
+      "",
+      `Next: ${report.next_action.message}`,
+    );
+  } else {
+    lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
+    if (report.next_action?.kind === "plugin_marketplace") lines.push(`Next: ${report.next_action.message}`);
+    if (report.next_action?.kind === "connection_guide") lines.push(`Connection guide: ${report.next_action.url}`);
   }
   return `${lines.join("\n")}\n`;
 }

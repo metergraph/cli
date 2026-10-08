@@ -39,6 +39,10 @@ export const SKILL_CLIENTS = Object.freeze({
 });
 export const SKILL_RUNTIMES = Object.freeze(["local", "cloud"]);
 
+// Where every Metergraph skill is published. Claude Desktop installs the
+// skills from here as a plugin marketplace instead of from project files.
+export const SKILLS_REPOSITORY_URL = "https://github.com/metergraph/skills";
+
 // Recognized values that cannot load project skill files. They get a pointer
 // to the connection guide instead of a usage error, and nothing is written.
 export const HANDOFF_SKILL_CLIENTS = Object.freeze({
