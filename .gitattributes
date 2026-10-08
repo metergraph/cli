@@ -4,3 +4,4 @@ assets/skill/SKILL.md -text
 assets/skill/manifest.json -text
 python/metergraph-skills/src/metergraph_skills/skill/SKILL.md -text
 python/metergraph-skills/src/metergraph_skills/skill/manifest.json -text
+assets/skills/** -text
