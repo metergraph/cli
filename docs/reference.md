@@ -170,8 +170,14 @@ instructions for the agent; it holds no credentials and does not connect a works
 
 #### Bundled skill source
 
-`assets/skill/SKILL.md` is a byte-for-byte copy of the public skill at
-<https://www.metergraph.dev/SKILL.md>. The source has no version number of its own, so
+`assets/skill/SKILL.md` is a byte-for-byte copy of `skills/metergraph/SKILL.md` in
+[metergraph/skills](https://github.com/metergraph/skills), the source of every
+Metergraph skill, at the commit pinned in `skills-source.json`. The same file is
+published at <https://www.metergraph.dev/SKILL.md>. To take a new revision, run
+`node scripts/sync-skill.mjs --from <skills checkout> [--commit SHA]`; it updates both
+bundles, both manifests, every pinned hash and the pin. CI runs
+`node scripts/sync-skill.mjs --check` and fails if the bundles differ from the pinned
+file. The source has no version number of its own, so
 `assets/skill/manifest.json` records its source URL, size and SHA-256, and a revision
 derived from that hash (`sha256-` followed by the first 12 hex digits). The package
 version is not the skill version. At runtime the CLI checks the bundled file against a
@@ -185,8 +191,8 @@ hold an unchanged earlier revision.
 The same installer is published for Python as
 [`metergraph-skills`](../python/metergraph-skills/README.md). It bundles the same
 `SKILL.md` and writes the same paths and receipt, so either installer recognises and
-updates what the other wrote. When `assets/skill/` changes, update the Python copy
-too; CI fails while they differ.
+updates what the other wrote. `scripts/sync-skill.mjs` updates both copies together;
+CI fails while they differ.
 
 ### login and logout
 
@@ -615,8 +621,8 @@ A successful `skill install`:
     "status": "installed",
     "source": {
       "name": "metergraph",
-      "revision": "sha256-8b81eb27b615",
-      "sha256": "8b81eb27b6159c4447a5c300409c4c64917238b7797f5ee37a35248cba50fcae"
+      "revision": "sha256-0a80fb6effed",
+      "sha256": "0a80fb6effed5fada241f2a672f0390d278ccacf9988265f94824dc5e54d8b6c"
     },
     "discovery": "pending",
     "authenticated": false,

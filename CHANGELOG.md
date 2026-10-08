@@ -3,6 +3,13 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
+## Unreleased
+
+- The bundled agent skill now comes from
+  [metergraph/skills](https://github.com/metergraph/skills) at a pinned commit, and CI
+  fails if the npm or Python copy drifts from it. The skill points agents to the other
+  Metergraph skills, and to `metergraph-analyze` for model-swap questions.
+
 ## 0.2.0-preview.4
 
 - The bundled agent skill tells the agent to use the ingest key that `setup` already
