@@ -3,4 +3,4 @@
 The skill files are bundled in this package. Nothing is downloaded.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
