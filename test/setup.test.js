@@ -459,6 +459,7 @@ test("JSON --no-browser reruns a ready setup and refuses only when approval is n
     const rerun = await setup(box, server, ["--no-browser"]);
     assert.equal(rerun.outcome, "ok");
     assert.equal(rerun.data.env, "unchanged");
+    assert.equal(rerun.data.next_action, null);
     assert.equal(rerun.data.skill, "reused");
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, authorizeCount);
     assert.deepEqual(fs.readFileSync(path.join(box.project, ".env")), env);

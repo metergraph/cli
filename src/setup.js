@@ -232,7 +232,8 @@ function finishSkill(root, options, envStatus) {
       previous = readSetupState(root);
     }
     return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
-      application_traffic_verified: false, env: envStatus, skill: "skipped", receipt: setupReceipt(previous.value) } };
+      application_traffic_verified: false, env: envStatus, skill: "skipped", receipt: setupReceipt(previous.value),
+      next_action: null } };
   }
   let skill = runSkill({ action: "install", client: options.client, runtime: "local", project: root });
   if (skill.reason === "update_required") {
@@ -259,7 +260,7 @@ function finishSkill(root, options, envStatus) {
   }
   return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
     application_traffic_verified: false, env: envStatus, skill: skill.data.status,
-    receipt: setupReceipt(previous.value) } };
+    receipt: setupReceipt(previous.value), next_action: null } };
 }
 
 async function discoverSetup(origin, profile, cancel) {

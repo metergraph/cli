@@ -392,8 +392,9 @@ browser. Under `--json` it cannot show that URL, so a rerun that needs no approv
 (a working saved key) still succeeds, and one that needs approval exits 6
 `no_browser_requires_terminal` before any approval request or env write, with
 `data.next_action` set to `{"kind": "run_in_terminal", "message": "..."}`. The
-message is fixed text and holds no URL or credential. On other failures
-`next_action` is `null`.
+message is fixed text and holds no URL or credential. Non-hosted operator
+handoffs carry their own deployment `next_action`; every other setup result has
+`next_action: null`.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
 verify one exact trace afterward. The hosted service advertises the setup
