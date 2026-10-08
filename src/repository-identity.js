@@ -17,6 +17,7 @@ const CONFIG_VERSION = 2;
 const MAX_CONFIG_BYTES = 16384;
 const MAX_WALK_UP = 64;
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+const NONBLOCK = fs.constants.O_NONBLOCK ?? 0;
 // One owner and one name, each a plain path segment. Hosts that nest groups
 // (owner/group/name) are not guessed at; pass --repository instead.
 const SEGMENT = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
@@ -48,7 +49,7 @@ export function repositoryFromRemote(url) {
     if (scp === null) return null;
     pathname = scp[1];
   }
-  const trimmed = pathname.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+  const trimmed = pathname.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "");
   return parseRepository(trimmed);
 }
 
@@ -70,32 +71,42 @@ function git(root, args) {
     cwd: root, env: gitEnv(), shell: false, windowsHide: true, timeout: 15000,
     maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "ignore"],
   });
-  if (result.error || result.status !== 0) return null;
-  return result.stdout.toString("utf8").trim();
+  if (result.error?.code === "ENOENT") return { missing: true, out: null };
+  if (result.error || result.status !== 0) return { missing: false, out: null };
+  return { missing: false, out: result.stdout.toString("utf8").trim() };
 }
 
 // The origin remote, or the only remote when there is exactly one. Returns
 // { repository, reason } and never the URL itself.
 export function inferFromGit(root) {
-  if (git(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
-    return { repository: null, reason: "not_a_git_repository" };
-  }
-  let url = git(root, ["config", "--get", "remote.origin.url"]);
+  const inside = git(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (inside.missing) return { repository: null, reason: "git_unavailable" };
+  if (inside.out !== "true") return { repository: null, reason: "not_a_git_repository" };
+  let url = git(root, ["config", "--get", "remote.origin.url"]).out;
   if (url === null) {
-    const remotes = (git(root, ["remote"]) ?? "").split("\n").filter(Boolean);
+    const remotes = (git(root, ["remote"]).out ?? "").split("\n").filter(Boolean);
     if (remotes.length !== 1) return { repository: null, reason: remotes.length ? "remote_ambiguous" : "no_remote" };
-    url = git(root, ["config", "--get", `remote.${remotes[0]}.url`]);
+    url = git(root, ["config", "--get", `remote.${remotes[0]}.url`]).out;
   }
   const repository = repositoryFromRemote(url);
   return repository ? { repository, reason: null } : { repository: null, reason: "remote_unrecognized" };
 }
 
 function readConfig(file) {
-  let fd;
+  // Check the type before opening: opening a FIFO for reading would block.
+  let stat;
   try {
-    fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
+    stat = fs.statSync(file);
   } catch (error) {
     if (error.code === "ENOENT" || error.code === "ENOTDIR") return { exists: false };
+    return { exists: true, invalid: true };
+  }
+  if (!stat.isFile()) return { exists: true, invalid: true };
+  let fd;
+  try {
+    // O_NONBLOCK also covers a file swapped for a FIFO after the check.
+    fd = fs.openSync(file, fs.constants.O_RDONLY | NONBLOCK);
+  } catch {
     return { exists: true, invalid: true };
   }
   try {
@@ -127,14 +138,27 @@ function nearestConfig(root) {
   return null;
 }
 
+// Writes a temporary file, then links it into place: link never replaces an
+// existing entry, so a config that appeared meanwhile is kept, and a failed
+// write never leaves a partial config.json behind.
 function writeNewConfig(root, repository) {
   const dir = path.join(root, ".metergraph");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  try {
+    if (!fs.lstatSync(dir).isDirectory()) throw new Error("unsafe_path");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    fs.mkdirSync(dir, { mode: 0o755 });
+  }
   const dest = path.join(dir, "config.json");
+  const temp = path.join(dir, `.config.json.${process.pid}.${Date.now()}.tmp`);
   const content = `${JSON.stringify({ version: CONFIG_VERSION, repository }, null, 2)}\n`;
-  // "wx" never replaces a file that appeared since it was read.
-  const fd = fs.openSync(dest, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW, 0o644);
-  try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  try {
+    const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW, 0o644);
+    try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.linkSync(temp, dest);
+  } finally {
+    try { fs.unlinkSync(temp); } catch { /* already gone */ }
+  }
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -156,7 +180,7 @@ export function envRepository(root, envFile) {
     const match = /^\s*(?:export\s+)?METERGRAPH_REPOSITORY\s*=\s*(.*?)\s*$/.exec(line);
     if (match === null) continue;
     let raw = match[1];
-    const quoted = /^(["'])(.*)\1$/.exec(raw);
+    const quoted = /^(["'])(.*?)\1(?:\s+#.*)?$/.exec(raw);
     raw = quoted ? quoted[2] : raw.replace(/\s+#.*$/, "");
     value = raw.trim() || null;
   }
@@ -166,27 +190,41 @@ export function envRepository(root, envFile) {
 // Ensures the project has a repository identity and returns the setup result
 // field. requested is a validated --repository value or null; envValue is
 // METERGRAPH_REPOSITORY from the project env file, or null.
-export function ensureRepositoryIdentity(root, { requested = null, skip = false, envValue = null } = {}) {
+export function ensureRepositoryIdentity(root, { requested = null, skip = false, envValue = null, retried = false } = {}) {
   if (skip) return { status: "skipped", repository: null, source: null, path: null, reason: null };
   const inferred = requested === null ? inferFromGit(root) : { repository: requested, reason: null };
   const expected = inferred.repository;
   const expectedSource = requested === null ? "git_remote" : "flag";
 
-  const envRepository = typeof envValue === "string" && envValue.includes("/") ? envValue.trim() : null;
-  if (envRepository !== null) {
-    const mismatch = expected !== null && !same(envRepository, expected);
-    return { status: mismatch ? "mismatch" : "existing", repository: envRepository, source: "env_file",
+  // The SDK uses any env value containing "/". Respect it, but report only a
+  // parsed owner/name: the env file also holds secrets, so a raw value is
+  // never echoed.
+  if (typeof envValue === "string" && envValue.includes("/")) {
+    const current = parseRepository(envValue);
+    if (current === null) {
+      return { status: "existing", repository: null, source: "env_file", path: null,
+        reason: "env_value_unrecognized" };
+    }
+    const mismatch = expected !== null && !same(current, expected);
+    return { status: mismatch ? "mismatch" : "existing", repository: current, source: "env_file",
       path: null, reason: mismatch ? `${expectedSource}_differs` : null, ...(mismatch ? { expected } : {}) };
   }
 
   const found = nearestConfig(root);
   if (found !== null) {
-    const current = found.invalid ? null : parseRepository(found.doc.repository);
-    const supported = !found.invalid && (found.doc.version === undefined || found.doc.version === CONFIG_VERSION);
-    if (current === null || !supported) {
-      // Never rewrite a file the SDK would reject; the person fixes it.
+    const raw = found.invalid ? null : found.doc.repository;
+    const usable = !found.invalid && (found.doc.version === undefined || found.doc.version === CONFIG_VERSION) &&
+      typeof raw === "string" && raw.includes("/");
+    if (!usable) {
+      // Never rewrite an existing config; the person fixes it.
       return { status: "invalid_config", repository: null, source: "config", path: found.rel,
         reason: "config_unusable", ...(expected !== null ? { expected } : {}) };
+    }
+    // The SDK accepts any value containing "/"; report it only as owner/name.
+    const current = parseRepository(raw);
+    if (current === null) {
+      return { status: "existing", repository: null, source: "config", path: found.rel,
+        reason: "config_value_unrecognized" };
     }
     const mismatch = expected !== null && !same(current, expected);
     return { status: mismatch ? "mismatch" : "existing", repository: current, source: "config", path: found.rel,
@@ -198,7 +236,9 @@ export function ensureRepositoryIdentity(root, { requested = null, skip = false,
   }
   try {
     writeNewConfig(root, expected);
-  } catch {
+  } catch (error) {
+    // Another setup created it first: report what is there now.
+    if (error.code === "EEXIST" && !retried) return ensureRepositoryIdentity(root, { requested, envValue, retried: true });
     return { status: "write_failed", repository: null, source: expectedSource, path: CONFIG_PATH,
       reason: "config_not_written", expected };
   }

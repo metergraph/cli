@@ -12,8 +12,12 @@ import { startOAuthServer } from "./fixtures/oauth-server.js";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph setup repository test "));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 const boxFor = sandboxes(dir);
+process.env.GIT_CEILING_DIRECTORIES = dir;
 const SECRET = "remote-credential-value";
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1" };
+// An empty global config: Git for Windows cannot read os.devNull as one.
+const GIT_CONFIG = path.join(dir, "gitconfig");
+fs.writeFileSync(GIT_CONFIG, "");
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: GIT_CONFIG, GIT_CONFIG_NOSYSTEM: "1" };
 
 function gitProject(box, remote) {
   for (const args of [["init", "-q"], ...(remote ? [["remote", "add", "origin", remote]] : [])]) {
@@ -26,7 +30,8 @@ async function setup(box, server, extra = [], { json = true } = {}) {
   const run = await runCli([...(json ? ["--json"] : []), "setup", "--runtime", "local", "--project", box.project,
     "--config-dir", box.config, "--deployment", "customer-local", "--confirm-prerequisites",
     "--url", server.origin, "--workspace", server.behavior.workspaceId, "--skip-skill", ...extra],
-  { imports: [BROWSER], env: { ...LOCAL_ENV, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1",
+  { imports: [BROWSER], env: { ...LOCAL_ENV, GIT_CONFIG_GLOBAL: GIT_CONFIG, GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CEILING_DIRECTORIES: dir,
     METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
   assertNoLeak(assert, run.stdout, run.stderr);
   for (const secret of [...server.issued, SECRET]) {

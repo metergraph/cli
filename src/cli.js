@@ -173,7 +173,8 @@ function repositoryLine(repository) {
   const where = repository.path ? ` in ${repository.path}` : repository.source === "env_file" ? " in the env file" : "";
   switch (repository.status) {
     case "written": return `Repository: ${repository.repository} (recorded${where}; commit it)\n`;
-    case "existing": return `Repository: ${repository.repository} (already set${where})\n`;
+    case "existing": return repository.repository === null
+      ? `Repository: already set${where}\n` : `Repository: ${repository.repository} (already set${where})\n`;
     case "mismatch": return `Repository: ${repository.repository} (already set${where}; differs from ${repository.expected}, left unchanged)\n`;
     case "invalid_config": return `Repository: not recorded (${repository.path} is not a usable config; left unchanged)\n`;
     case "skipped": return "Repository: not recorded (--no-repository)\n";

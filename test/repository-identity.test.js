@@ -15,9 +15,14 @@ import {
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph repository identity test "));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
+// Stop git and the walk from seeing a repository that holds the temp dir.
+process.env.GIT_CEILING_DIRECTORIES = dir;
 let count = 0;
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1" };
+// An empty global config: Git for Windows cannot read os.devNull as one.
+const GIT_CONFIG = path.join(dir, "gitconfig");
+fs.writeFileSync(GIT_CONFIG, "");
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: GIT_CONFIG, GIT_CONFIG_NOSYSTEM: "1" };
 function git(cwd, ...args) {
   const result = spawnSync("git", args, { cwd, env: GIT_ENV, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
@@ -43,6 +48,7 @@ test("owner/name is parsed from https, ssh and scp-style remotes", () => {
     "ssh://git@example.com:2222/example-org/example-app.git",
     "git@example.com:example-org/example-app.git",
     "git://example.com/example-org/example-app.git",
+    "https://example.com/example-org/example-app.GIT",
   ]) {
     assert.equal(repositoryFromRemote(url), "example-org/example-app", url);
   }
@@ -179,4 +185,49 @@ test("--no-repository changes nothing", () => {
   const root = repo({ origin: "https://example.com/example-org/example-app.git" });
   assert.equal(ensureRepositoryIdentity(root, { skip: true }).status, "skipped");
   assert.ok(!fs.existsSync(path.join(root, ".metergraph")));
+});
+
+
+test("a FIFO named config.json is never opened", { skip: process.platform === "win32" }, () => {
+  const parent = path.join(dir, "fifo-parent");
+  fs.mkdirSync(path.join(parent, ".metergraph"), { recursive: true });
+  const made = spawnSync("mkfifo", [path.join(parent, CONFIG_PATH)]);
+  if (made.status !== 0) return;
+  const project = path.join(parent, "project");
+  fs.mkdirSync(project);
+  const result = ensureRepositoryIdentity(project, { requested: "example-org/example-app" });
+  assert.equal(result.status, "invalid_config");
+});
+
+test("an env value is never echoed unless it is a plain owner/name", () => {
+  const root = repo();
+  fs.writeFileSync(path.join(root, ".env"),
+    "METERGRAPH_REPOSITORY=https://user:tok123@example.com/o/r\x1b[31m\n");
+  const value = envRepository(root, ".env");
+  const result = ensureRepositoryIdentity(root, { envValue: value });
+  assert.equal(result.status, "existing");
+  assert.equal(result.repository, null);
+  assert.equal(result.reason, "env_value_unrecognized");
+  assert.ok(!JSON.stringify(result).includes("tok123"));
+  assert.ok(!fs.existsSync(path.join(root, CONFIG_PATH)));
+  fs.writeFileSync(path.join(root, ".env"), 'METERGRAPH_REPOSITORY="example-org/example-app" # note\n');
+  assert.equal(envRepository(root, ".env"), "example-org/example-app");
+});
+
+test("a config value the SDK accepts is kept even when it is not owner/name", () => {
+  const root = repo({ origin: "https://example.com/example-org/example-app.git" });
+  fs.mkdirSync(path.join(root, ".metergraph"));
+  fs.writeFileSync(path.join(root, CONFIG_PATH), JSON.stringify({ repository: "group/sub/app" }));
+  const result = ensureRepositoryIdentity(root);
+  assert.equal(result.status, "existing");
+  assert.equal(result.repository, null);
+  assert.equal(result.reason, "config_value_unrecognized");
+});
+
+test("a failed write leaves no partial config and no temporary file", () => {
+  const root = repo({ origin: "https://example.com/example-org/example-app.git" });
+  fs.writeFileSync(path.join(root, ".metergraph"), "not a directory");
+  const result = ensureRepositoryIdentity(root);
+  assert.equal(result.status, "write_failed");
+  assert.equal(fs.readFileSync(path.join(root, ".metergraph"), "utf8"), "not a directory");
 });
