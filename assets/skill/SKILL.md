@@ -86,8 +86,9 @@ Use https://www.metergraph.dev/docs/ for public product documentation and https:
 
 More Metergraph skills are at https://github.com/metergraph/skills. When the
 person wants to know whether a workload could use a cheaper or better model, or
-asks to run a model-swap analysis, use `metergraph-analyze` if it is installed.
-If it is not, offer to install it (`npx skills add metergraph/skills`, or in
+asks to run a model-swap analysis, use `metergraph-model-swap` if it is
+installed; it walks the whole loop and hands each stage to its own skill. If it
+is not, offer to install the skills (`npx skills add metergraph/skills`, or in
 Claude Code and Claude Desktop the plugin marketplace `metergraph/skills`)
 rather than improvising the analysis steps.
 
