@@ -24,10 +24,12 @@ when you need this exact preview rather than whichever version `next` names late
   `METERGRAPH_INGEST_URL` and repairs the full ingest endpoint that
   `0.2.0-preview.0` wrote, after checking the saved key. It also keeps validated,
   workspace-bound trace links in Metadata reads.
-- `metergraph-cli@0.2.0-preview.2` makes `verify` exit 11 `verification_failed`
-  when its deadline expires after the service reported the trace as pending, lets
+- `metergraph-cli@0.2.0-preview.2` makes a `verify` deadline that expires after
+  the service reported the trace as pending exit 11 `verification_failed` with
+  `trace_not_found_within_bounds`, as running out of attempts does. It lets
   `login` and `setup` reruns that need no approval succeed with `--json
-  --no-browser`, and reports why `verify --open` did not launch a browser.
+  --no-browser`, returns a `run_in_terminal` next action when approval is needed,
+  and reports why `verify --open` did not launch a browser.
 - Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
@@ -111,9 +113,12 @@ was given but that flag returned the link instead of launching it.
 
 If `--timeout-ms` expires after the service has answered at least once with a
 pending result, `verify` exits 11 `verification_failed` with reason
-`verification_timeout`: the origin is reachable and the trace is not visible yet.
-Exit 4 `connection_failed` with that reason means no valid answer arrived before
-the deadline.
+`trace_not_found_within_bounds`, the same result as running out of
+`--max-attempts`: the origin is reachable and the trace is not visible yet. Exit 4
+`connection_failed` is kept for transport failures. Its reason is
+`verification_timeout` when no valid answer arrived before the deadline. A deadline
+while `--open` launches a trace that was already found exits 11 with
+`verification_timeout`.
 
 ### doctor
 
@@ -238,7 +243,7 @@ metergraph logout
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
 | `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
-| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits 6 `no_browser_requires_terminal`. |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits 6 `no_browser_requires_terminal` with a `run_in_terminal` next action. |
 | `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
@@ -382,6 +387,13 @@ The JSON result includes a secret-free `receipt` with the origin, workspace ID,
 deployment profile, selected client, and completed and pending steps. A skill
 conflict leaves the delivered key in place and reports `credential_ready_skill_pending`;
 resolve the skill file conflict and rerun setup without another approval.
+With `--no-browser`, setup prints the approval URL on stderr instead of opening a
+browser. Under `--json` it cannot show that URL, so a rerun that needs no approval
+(a working saved key) still succeeds, and one that needs approval exits 6
+`no_browser_requires_terminal` before any approval request or env write, with
+`data.next_action` set to `{"kind": "run_in_terminal", "message": "..."}`. The
+message is fixed text and holds no URL or credential. On other failures
+`next_action` is `null`.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
 verify one exact trace afterward. The hosted service advertises the setup
@@ -538,14 +550,14 @@ added in `0.2.0-preview.0` and are unavailable in `0.1.0`.
 | 1 | `internal_error` | Unexpected failure inside the CLI. |
 | 2 | `invalid_input` | Unknown command or argument, or an invalid option value. No request was made. |
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |
-| 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. |
+| 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. For `verify`, the deadline expired before any valid answer arrived. A trace that is still pending is exit 11, not 4. |
 | 5 | `unhealthy` | The service answered but reported that it is not healthy, or answered with a server error. |
-| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment. Nothing was written. |
+| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment, or `--json --no-browser` needs a browser approval it cannot show (`no_browser_requires_terminal`). Nothing was written. |
 | 7 | `redirect_rejected` | The service answered with a redirect. Redirects are never followed. |
 | 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update, or the project is bound to a different origin or workspace. Nothing was changed. |
 | 9 | `filesystem_error` | Project or credential files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
 | 10 | `authorization_failed` | Browser authorization did not finish: it was denied, cancelled, timed out or returned an invalid callback. Nothing was saved. |
-| 11 | `verification_failed` | The service issued a grant that does not match the requested origin, workspace, client, resource or Metadata scope. Nothing was saved. |
+| 11 | `verification_failed` | The service issued a grant that does not match the requested origin, workspace, client, resource or Metadata scope. Nothing was saved. For `verify`, the exact trace was not confirmed: for example `trace_not_found_within_bounds` when the service kept answering but the trace was not visible before attempts or the deadline ran out. |
 | 12 | `login_required` | No usable sign in for this project: none was saved, it expired, was revoked, lost access or could not be refreshed safely. Run login again. |
 | 13 | `revocation_unconfirmed` | Local credentials were removed, but the service did not confirm that the grant was revoked. |
 | 14 | `capability_unavailable` | The service does not make this read available to the project's Metadata grant. No data was read. |

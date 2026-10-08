@@ -23,8 +23,15 @@ const PURPOSE = "ingest-bootstrap-v1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RECEIPT = /^mgbs_[A-Za-z0-9_-]{32,256}$/;
 const KEY = (value) => typeof value === "string" && UUID.test(value);
+// --json cannot show a person the --no-browser approval URL. The refusal names
+// a fixed, secret-free next step instead of only a reason token.
+const RUN_IN_TERMINAL = Object.freeze({
+  kind: "run_in_terminal",
+  message: "Run the same setup command in a terminal without --json to see the approval URL.",
+});
 const fail = (outcome, reason, status = "not_ready", receipt = null) => ({ outcome, reason,
-  data: { status, application_traffic_verified: false, receipt } });
+  data: { status, application_traffic_verified: false, receipt,
+    next_action: reason === "no_browser_requires_terminal" ? RUN_IN_TERMINAL : null } });
 
 // This command never receives an ingest key from argv, stdin, an environment
 // variable or a Metadata OAuth grant. Only the purpose-bound redemption

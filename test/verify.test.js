@@ -4,6 +4,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { runVerify } from "../src/verify.js";
 import { openTrace } from "../src/trace-open.js";
 import { traceReceipt } from "../src/trace-contract.js";
+import { send as realSend } from "../src/transport.js";
 import { context, selection, startTraceServer, traceDocument, capabilities, REQUEST_ID } from "./fixtures/trace-server.js";
 
 function options(extra = {}) {
@@ -68,13 +69,37 @@ test("one total deadline bounds a hanging response and releases signal listeners
   assert.equal(process.listenerCount("SIGINT"), before);
 });
 
-test("a deadline after the origin answered pending fails verification, not the connection", async () => {
+test("a deadline after the origin answered pending matches attempt exhaustion", async () => {
   const opts = options({ timeoutMs: 300, pollIntervalMs: 1000, maxAttempts: 5 });
   await withServer((r, n, origin) => ({ document: documentFor(origin, opts, { found: false }) }), async (server) => {
     const result = await runVerify(opts, { session: server.session });
-    assert.equal(result.outcome, "verification_failed"); assert.equal(result.reason, "verification_timeout");
+    assert.equal(result.outcome, "verification_failed"); assert.equal(result.reason, "trace_not_found_within_bounds");
     assert.equal(result.data.attempts, 1); assert.equal(result.data.readiness.processed, false);
     assert.equal(server.requests.length, 1);
+  });
+});
+
+test("a deadline during a later poll that hangs still reports the trace as not yet visible", async () => {
+  const opts = options({ timeoutMs: 400, pollIntervalMs: 100, maxAttempts: 5 });
+  await withServer((r, n, origin) => n === 1 ? { document: documentFor(origin, opts, { found: false }) } : { hang: true }, async (server) => {
+    const result = await runVerify(opts, { session: server.session });
+    assert.equal(result.outcome, "verification_failed"); assert.equal(result.reason, "trace_not_found_within_bounds");
+    assert.equal(result.data.attempts, 2); assert.equal(server.requests.length, 2);
+  });
+});
+
+test("a transport failure after a pending answer is still a connection failure", async () => {
+  const opts = options({ timeoutMs: 5000, pollIntervalMs: 100, maxAttempts: 5 });
+  await withServer((r, n, origin) => ({ document: documentFor(origin, opts, { found: false }) }), async (server) => {
+    let calls = 0;
+    const send = async (...args) => {
+      calls += 1;
+      if (calls === 1) return realSend(...args);
+      return { kind: "error", reason: "network_error" };
+    };
+    const result = await runVerify(opts, { session: server.session, send });
+    assert.equal(result.outcome, "connection_failed"); assert.equal(result.reason, "network_error");
+    assert.equal(result.data.attempts, 2); assert.equal(server.requests.length, 1);
   });
 });
 
@@ -171,6 +196,15 @@ test("browser launch honors cancellation of a trusted workspace-bound receipt", 
     const result = await openTrace(receipt, { open: true, signal: controller.signal }, () => new Promise(() => {}));
     assert.equal(result.outcome, "cancelled");
   } finally { clearTimeout(timer); }
+});
+
+test("a deadline while launching a found trace is never reported as not found", async () => {
+  const opts = options({ open: true, timeoutMs: 200 });
+  await withServer((r, n, origin) => ({ document: documentFor(origin, opts, { link: true, workspace: true }) }), async (server) => {
+    const result = await runVerify(opts, { session: server.session, launch: () => new Promise(() => {}) });
+    assert.equal(result.outcome, "verification_failed"); assert.equal(result.reason, "verification_timeout");
+    assert.equal(result.data.readiness.processed, true);
+  });
 });
 
 test("verified workspace-bound server link opens only the exact trace", async () => {
