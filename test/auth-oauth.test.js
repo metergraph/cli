@@ -9,6 +9,7 @@ import {
   authorizationUrl,
   checkCapabilities,
   checkWorkspace,
+  clientFor,
   discover,
   endpointsFor,
   newPkce,
@@ -43,6 +44,7 @@ test("discovery accepts exact same-origin metadata that offers Metadata, S256 an
     assert.equal(result.ok, true);
     assert.deepEqual(result.endpoints, endpointsFor(server.origin));
     assert.equal(result.requireIss, true);
+    assert.equal(result.offeredClientId, null);
     assert.deepEqual(
       server.requests.map((request) => request.path),
       ["/.well-known/oauth-protected-resource/v1/agent/mcp", "/.well-known/oauth-authorization-server/v1/oauth"],
@@ -75,6 +77,42 @@ test("tampered, off-origin or legacy metadata is unsupported and never falls bac
       assert.deepEqual(result, { ok: false, outcome: "unsupported", reason }, reason);
     });
   }
+});
+
+test("discovery returns the pre-registered client ID a server offers, and refuses a malformed one", async () => {
+  await withServer({ cliClientId: "metergraph-cli" }, async (server) => {
+    const result = await discover(server.origin, AbortSignal.timeout(5000));
+    assert.equal(result.ok, true);
+    assert.equal(result.offeredClientId, "metergraph-cli");
+  });
+  await withServer({ asm: (doc) => ({ ...doc, metergraph_cli_client_id: null }) }, async (server) => {
+    const result = await discover(server.origin, AbortSignal.timeout(5000));
+    assert.equal(result.ok, true);
+    assert.equal(result.offeredClientId, null);
+  });
+  for (const value of ["", "has space", 42, ["metergraph-cli"], "x".repeat(257)]) {
+    await withServer({ asm: (doc) => ({ ...doc, metergraph_cli_client_id: value }) }, async (server) => {
+      const result = await discover(server.origin, AbortSignal.timeout(5000));
+      assert.deepEqual(result, { ok: false, outcome: "unsupported", reason: "oauth_metadata_invalid" }, String(value));
+    });
+  }
+});
+
+test("an offered client ID is used without registration, and none offered registers a client", async () => {
+  const redirectUri = "http://127.0.0.1:43210/callback";
+  await withServer({}, async (server) => {
+    const endpoints = endpointsFor(server.origin);
+    assert.deepEqual(await clientFor(endpoints, "metergraph-cli", redirectUri, AbortSignal.timeout(5000)), {
+      ok: true,
+      clientId: "metergraph-cli",
+    });
+    assert.equal(server.requests.length, 0);
+
+    const registered = await clientFor(endpoints, null, redirectUri, AbortSignal.timeout(5000));
+    assert.equal(registered.ok, true);
+    assert.match(registered.clientId, /^mgc_/);
+    assert.equal(server.requestsTo("/v1/oauth/register").length, 1);
+  });
 });
 
 test("a server without OAuth metadata is unsupported, and a redirect is never followed", async () => {

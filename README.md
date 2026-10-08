@@ -33,6 +33,9 @@ when you need this exact preview rather than whichever version `next` names late
   the same result as running out of attempts, instead of `verification_timeout`.
   `setup --json --no-browser` now returns a `run_in_terminal` next action when
   approval is needed.
+  `login` and `setup` use a pre-registered CLI client when the service names one
+  in `metergraph_cli_client_id`, instead of registering a new client, and still
+  register one on services that do not.
 - Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
@@ -261,10 +264,14 @@ What `login` does, in order:
 3. Runs the same checks as `doctor`, then reads the service's OAuth metadata from the
    same origin. Every endpoint must be a fixed path on that origin, and the service must
    offer `agent:metadata`, PKCE with `S256`, public clients and revocation.
-4. Registers a public client named `Metergraph CLI` for one loopback redirect,
-   `http://127.0.0.1:PORT/callback` on an ephemeral port, creates a random state and
-   PKCE verifier, and arms the callback listener and its timeout before the browser
-   opens.
+4. Chooses the OAuth client for a loopback redirect, `http://127.0.0.1:PORT/callback`
+   on an ephemeral port. When the service's OAuth metadata names a pre-registered
+   Metergraph CLI client in `metergraph_cli_client_id`, the CLI uses that client and
+   registers nothing; the service accepts the loopback redirect on any port (RFC 8252
+   section 7.3). Otherwise it registers a new public client named `Metergraph CLI` for
+   that one redirect, as servers without the field expect. A malformed value stops
+   sign in. The CLI then creates a random state and PKCE verifier, and arms the callback
+   listener and its timeout before the browser opens.
 5. Opens the authorization URL with the operating system's launcher (no shell). The
    listener accepts one `GET` with the exact host, path and state. Other requests get a
    fixed page and do not end the wait.
@@ -276,7 +283,9 @@ What `login` does, in order:
    the deployment profile must match step 3, the access scopes must be exactly
    `agent:metadata`, and content, evidence and replay capabilities must be unavailable.
    Nothing else is read.
-8. Saves the grant in the config directory and writes `.metergraph/project.json`.
+8. Saves the grant in the config directory and writes `.metergraph/project.json`. The
+   saved grant keeps the client ID it was issued to, so a grant from a registered client
+   still refreshes and revokes after the service starts offering a pre-registered one.
 
 Once the token response has been validated and holds a usable refresh token, a grant
 the CLI decides not to keep (a workspace other than the one expected or bound, failed
@@ -349,7 +358,9 @@ If the project has no usable Metadata sign in, `setup` opens the deployment's
 browser sign in and workspace choice. `--signup` starts at hosted sign up;
 `--workspace UUID` requires that exact workspace. An existing binding to a
 different origin or workspace requires explicit `--reconnect`. The selected
-deployment must advertise `metergraph.cli-setup/v1` on its own origin. Setup
+deployment must advertise `metergraph.cli-setup/v1` on its own origin. Its setup
+metadata may name a pre-registered CLI client in `metergraph_cli_client_id`, which
+setup then uses for ingest approval instead of registering a new client. Setup
 refuses reconnecting an existing ingest family to another workspace; its
 original workspace must be restored before that family can be reused. Setup
 checks the env file and Git state, then opens the deployment's consent page. An

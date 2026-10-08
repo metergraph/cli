@@ -103,6 +103,23 @@ test("one setup command signs in an unbound project, chooses the verified worksp
   } finally { await server.close(); }
 });
 
+test("setup uses the offered pre-registered client for sign in and ingest approval without registration", async () => {
+  const server = await startOAuthServer({ setup: true, cliClientId: "metergraph-cli" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "ok");
+    assert.deepEqual(result.data.receipt.completed_steps, ["login", "credential", "skill"]);
+    assert.equal(server.requestsTo("/v1/oauth/register").length, 0);
+    assert.equal(server.requestsTo("/v1/oauth/authorize")[0].query.client_id, "metergraph-cli");
+    const approval = server.requestsTo("/v1/cli/setup/authorize")[0].query;
+    assert.equal(approval.client_id, "metergraph-cli");
+    assert.match(approval.redirect_uri, /^http:\/\/127\.0\.0\.1:[0-9]+\/callback$/);
+    const redeem = new URLSearchParams(server.requestsTo("/v1/cli/setup/redeem")[0].body);
+    assert.equal(redeem.get("client_id"), "metergraph-cli");
+  } finally { await server.close(); }
+});
+
 test("an expected workspace mismatch stops before ingest approval", async () => {
   const server = await startOAuthServer({ setup: true });
   try {
@@ -369,18 +386,23 @@ test("a failed credential check after env write can replace the family's pending
 });
 
 test("tampered setup discovery stops before browser registration or file write", async () => {
-  const server = await startOAuthServer({ setup: true,
-    setupMetadata: (doc) => ({ ...doc, redemption_endpoint: "https://evil.example.com/redeem" }) });
-  try {
-    const box = boxFor();
-    assert.equal((await login(assert, box, server)).result.ok, true);
-    const registered = server.requestsTo("/v1/oauth/register").length;
-    const result = await setup(box, server);
-    assert.equal(result.outcome, "unsupported");
-    assert.equal(result.error.reason, "setup_contract_mismatch");
-    assert.equal(server.requestsTo("/v1/oauth/register").length, registered);
-    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
-  } finally { await server.close(); }
+  for (const tamper of [
+    (doc) => ({ ...doc, redemption_endpoint: "https://evil.example.com/redeem" }),
+    (doc) => ({ ...doc, metergraph_cli_client_id: "has space" }),
+  ]) {
+    const server = await startOAuthServer({ setup: true, setupMetadata: tamper });
+    try {
+      const box = boxFor();
+      assert.equal((await login(assert, box, server)).result.ok, true);
+      const registered = server.requestsTo("/v1/oauth/register").length;
+      const result = await setup(box, server);
+      assert.equal(result.outcome, "unsupported");
+      assert.equal(result.error.reason, "setup_contract_mismatch");
+      assert.equal(server.requestsTo("/v1/oauth/register").length, registered);
+      assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+      assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+    } finally { await server.close(); }
+  }
 });
 
 test("an acknowledged key is replaced only with explicit repair bound to its key ID", async () => {

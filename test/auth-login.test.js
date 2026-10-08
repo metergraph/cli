@@ -26,6 +26,7 @@ import {
   sandboxes,
   startCli,
 } from "./auth-helpers.js";
+import { openStore, readCredential } from "../src/auth-store.js";
 import { runCli } from "./helpers.js";
 import { WORKSPACE_A, WORKSPACE_B, startOAuthServer } from "./fixtures/oauth-server.js";
 
@@ -171,8 +172,51 @@ test("a fresh login binds the verified workspace with a Metadata-only grant", as
     assert.equal(sha256url(form.get("code_verifier")), params.code_challenge);
     assert.equal(form.get("redirect_uri"), params.redirect_uri);
     assert.equal(form.get("client_id"), params.client_id);
+    assert.match(params.client_id, /^mgc_/, "a service that offers no client ID gets a registered one");
     assert.equal(form.get("resource"), server.resource);
     assert.ok(!opened.url.includes(form.get("code_verifier")));
+  });
+});
+
+test("a service that offers the pre-registered CLI client is signed in without registration", async () => {
+  await withServer({ cliClientId: "metergraph-cli" }, async (server) => {
+    const box = sandbox();
+    const { run, result } = await login(assert, box, server);
+    assert.equal(run.code, 0, run.stdout);
+    assert.equal(result.data.status, "signed_in");
+    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A });
+    assert.deepEqual(
+      server.requests.map((request) => `${request.method} ${request.path}`),
+      [
+        "GET /healthz",
+        "GET /v1/deployment",
+        "GET /v1/agent/capabilities",
+        "GET /.well-known/oauth-protected-resource/v1/agent/mcp",
+        "GET /.well-known/oauth-authorization-server/v1/oauth",
+        "GET /v1/oauth/authorize",
+        "POST /v1/oauth/token",
+        "GET /v1/agent/workspace",
+        "GET /v1/agent/capabilities",
+      ],
+    );
+
+    // The fixed ID with the listener's own ephemeral port, the same ID on the
+    // code exchange, and the same ID saved for refresh and revocation.
+    const params = Object.fromEntries(new URL(browserLog(box)[0].url).searchParams);
+    assert.equal(params.client_id, "metergraph-cli");
+    assert.match(params.redirect_uri, /^http:\/\/127\.0\.0\.1:[0-9]+\/callback$/);
+    const form = new URLSearchParams(server.requestsTo("/v1/oauth/token")[0].body);
+    assert.equal(form.get("client_id"), "metergraph-cli");
+    assert.equal(form.get("redirect_uri"), params.redirect_uri);
+    const slot = readBindingFile(box).credential_slot;
+    const store = openStore(box.config, { create: false });
+    assert.equal(readCredential(store, slot).client_id, "metergraph-cli");
+
+    const out = await logout(assert, box, server);
+    assert.equal(out.run.code, 0);
+    assert.equal(out.result.data.revocation, "accepted");
+    assert.equal(new URLSearchParams(server.requestsTo("/v1/oauth/revoke")[0].body).get("client_id"), "metergraph-cli");
+    assert.ok([...server.state.refresh.values()].every((grant) => grant.revoked));
   });
 });
 

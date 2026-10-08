@@ -54,6 +54,9 @@ export async function startOAuthServer(initial = {}) {
     setupAuthorize: () => {},
     setupRedeem: "issue", // issue, drop-before-issue, drop-after-issue, reject
     setupCredentialReject: false,
+    // A pre-registered CLI client ID that both metadata documents offer, or
+    // null for a service that only supports dynamic registration.
+    cliClientId: null,
     ...initial,
   };
 
@@ -95,6 +98,13 @@ export async function startOAuthServer(initial = {}) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const issuer = `${origin}/v1/oauth`;
   const resource = `${origin}/v1/agent/mcp`;
+  // Configures a pre-registered CLI client and offers its ID, as a service
+  // does once an operator adds it. Its loopback redirect matches any port.
+  function configureCliClient(clientId) {
+    behavior.cliClientId = clientId;
+    state.clients.set(clientId, { redirectUri: "http://127.0.0.1/callback", anyPort: true });
+  }
+  if (behavior.cliClientId !== null) configureCliClient(behavior.cliClientId);
 
   function route(request, response, url, body) {
     const path = url.pathname;
@@ -139,7 +149,8 @@ export async function startOAuthServer(initial = {}) {
         credential_endpoint: `${base}/credential`, registration_endpoint: `${origin}/v1/oauth/register`,
         deployment_profile: behavior.profile, profiles_supported: ["local", "managed", "byoc-core"],
         purpose: "ingest-bootstrap-v1", intents_supported: ["create", "replace_pending", "repair"],
-        code_challenge_methods_supported: ["S256"], credential_scope: "ingest", receipt_lifetime_seconds: 300 }));
+        code_challenge_methods_supported: ["S256"], credential_scope: "ingest", receipt_lifetime_seconds: 300,
+        ...offered() }));
     if (path === "/v1/cli/setup/authorize" && request.method === "GET") {
       const params = url.searchParams;
       behavior.setupAuthorize(params);
@@ -218,7 +229,23 @@ export async function startOAuthServer(initial = {}) {
       token_endpoint_auth_methods_supported: ["none"],
       revocation_endpoint_auth_methods_supported: ["none"],
       authorization_response_iss_parameter_supported: true,
+      ...offered(),
     };
+  }
+
+  function offered() {
+    return behavior.cliClientId === null ? {} : { metergraph_cli_client_id: behavior.cliClientId };
+  }
+
+  // Exact match, or any port on the registered loopback redirect for the
+  // pre-registered client (RFC 8252 section 7.3).
+  function redirectMatches(client, requested) {
+    if (requested === client.redirectUri) return true;
+    if (!client.anyPort || requested === null) return false;
+    const want = new URL(client.redirectUri);
+    const got = URL.canParse(requested) ? new URL(requested) : null;
+    return got !== null && got.protocol === "http:" && got.hostname === want.hostname &&
+      got.pathname === want.pathname && got.search === "" && got.hash === "";
   }
 
   function registerClient(response, body) {
@@ -228,7 +255,8 @@ export async function startOAuthServer(initial = {}) {
     } catch {
       return send(response, 400, { error: "invalid_client_metadata" });
     }
-    const clientId = `client-${randomBytes(8).toString("hex")}`;
+    // The service's prefix for dynamically registered clients.
+    const clientId = `mgc_${randomBytes(8).toString("hex")}`;
     state.clients.set(clientId, { redirectUri: request.redirect_uris?.[0] });
     return send(
       response,
@@ -248,7 +276,7 @@ export async function startOAuthServer(initial = {}) {
     const client = state.clients.get(params.get("client_id"));
     const valid =
       client !== undefined &&
-      params.get("redirect_uri") === client.redirectUri &&
+      redirectMatches(client, params.get("redirect_uri")) &&
       params.get("response_type") === "code" &&
       params.get("scope") === "agent:metadata" &&
       params.get("code_challenge_method") === "S256" &&
@@ -259,7 +287,8 @@ export async function startOAuthServer(initial = {}) {
       return send(response, 400, { error: "invalid_request", detail: "SYNTHETIC_BODY_MARKER" });
     }
     if (behavior.authorize === "ignore") return send(response, 200, { waiting: true });
-    const target = new URL(client.redirectUri);
+    const redirectUri = params.get("redirect_uri");
+    const target = new URL(redirectUri);
     target.searchParams.set("state", params.get("state"));
     if (behavior.includeIss) target.searchParams.set("iss", issuer);
     if (behavior.authorize === "deny") {
@@ -270,7 +299,7 @@ export async function startOAuthServer(initial = {}) {
       state.issued.push(code);
       state.codes.set(code, {
         clientId: params.get("client_id"),
-        redirectUri: client.redirectUri,
+        redirectUri,
         challenge: params.get("code_challenge"),
         workspaceId: behavior.workspaceId,
       });
@@ -400,6 +429,7 @@ export async function startOAuthServer(initial = {}) {
     requests: state.requests,
     issued: state.issued,
     requestsTo: (path) => state.requests.filter((entry) => entry.path === path),
+    configureCliClient,
     async close() {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));

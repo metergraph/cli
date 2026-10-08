@@ -10,11 +10,11 @@ import {
 } from "./auth-binding.js";
 import {
   authorizationUrl,
+  clientFor,
   discover,
   endpointsFor,
   exchangeCode,
   newPkce,
-  register,
   revoke,
   verifyContext,
 } from "./auth-oauth.js";
@@ -164,10 +164,11 @@ export async function runLogin(options, progress) {
   }
 }
 
-// Preflight, discovery, registration, the browser round trip, the code
-// exchange and server-side verification. Nothing is written here. A validated
-// grant that is not accepted is sent for revocation before returning; that is
-// best effort, and a token response that fails validation cannot be revoked.
+// Preflight, discovery, the client (offered or newly registered), the browser
+// round trip, the code exchange and server-side verification. Nothing is
+// written here. A validated grant that is not accepted is sent for revocation
+// before returning; that is best effort, and a token response that fails
+// validation cannot be revoked.
 async function authorize(options, ctx, cancel, progress) {
   const preflight = await runDoctor({ origin: ctx.origin, timeoutMs: AUTH_HTTP_TIMEOUT_MS });
   if (cancel.aborted) return fail("authorization_failed", "cancelled");
@@ -181,7 +182,7 @@ async function authorize(options, ctx, cancel, progress) {
   let limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
   const discovered = await discover(ctx.origin, limit.signal);
   if (!discovered.ok) return httpFailure(discovered, cancel);
-  const { endpoints, requireIss } = discovered;
+  const { endpoints, requireIss, offeredClientId } = discovered;
 
   const listener = await startCallbackListener();
   let callback;
@@ -189,9 +190,9 @@ async function authorize(options, ctx, cancel, progress) {
   let verifier;
   try {
     limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
-    const registered = await register(endpoints, listener.redirectUri, limit.signal);
-    if (!registered.ok) return httpFailure(registered, cancel);
-    clientId = registered.clientId;
+    const client = await clientFor(endpoints, offeredClientId, listener.redirectUri, limit.signal);
+    if (!client.ok) return httpFailure(client, cancel);
+    clientId = client.clientId;
 
     const pkce = newPkce();
     verifier = pkce.verifier;
