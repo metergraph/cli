@@ -8,7 +8,7 @@
 # publish job runs only when "publish" is true, waits for approval on the
 # protected "npm-release" environment, and refuses to run until a maintainer
 # sets the repository variable METERGRAPH_CLI_PUBLISH_ENABLED to "true" after
-# npm trusted publishing is configured. See "Releasing" in README.md.
+# npm trusted publishing is configured. See RELEASING.md.
 
 name: Release CLI
 
@@ -170,7 +170,7 @@ jobs:
           PUBLISH_ENABLED: ${{ vars.METERGRAPH_CLI_PUBLISH_ENABLED }}
         run: |
           if [ "$PUBLISH_ENABLED" != "true" ]; then
-            echo "::error::Publishing is not enabled for this repository. See Releasing in README.md."
+            echo "::error::Publishing is not enabled for this repository. See RELEASING.md."
             exit 1
           fi
 
