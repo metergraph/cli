@@ -62,10 +62,20 @@ test("one total deadline bounds a hanging response and releases signal listeners
   await withServer(() => ({ hang: true }), async (server) => {
     const start = Date.now();
     const result = await runVerify(options({ timeoutMs: 100 }), { session: server.session });
-    assert.equal(result.reason, "verification_timeout");
+    assert.equal(result.outcome, "connection_failed"); assert.equal(result.reason, "verification_timeout");
     assert.ok(Date.now() - start < 1000);
   });
   assert.equal(process.listenerCount("SIGINT"), before);
+});
+
+test("a deadline after the origin answered pending fails verification, not the connection", async () => {
+  const opts = options({ timeoutMs: 300, pollIntervalMs: 1000, maxAttempts: 5 });
+  await withServer((r, n, origin) => ({ document: documentFor(origin, opts, { found: false }) }), async (server) => {
+    const result = await runVerify(opts, { session: server.session });
+    assert.equal(result.outcome, "verification_failed"); assert.equal(result.reason, "verification_timeout");
+    assert.equal(result.data.attempts, 1); assert.equal(result.data.readiness.processed, false);
+    assert.equal(server.requests.length, 1);
+  });
 });
 
 test("deadline covers session and credential lock waits before any read", async () => {
@@ -133,9 +143,11 @@ test("JSON and no-browser modes return the server URL without a launcher", async
   doc.traces[0].metergraph_links.trace += "&workspace=" + doc.provenance.workspace_id;
   const receipt = traceReceipt(doc, context(), selection()).value;
   assert.equal(receipt.link_workspace_bound, true);
-  for (const extra of [{ json: true }, { noBrowser: true }, { open: false }]) {
+  for (const [extra, browser] of [[{ json: true }, "suppressed_by_json"], [{ json: true, noBrowser: true }, "suppressed_by_json"],
+    [{ noBrowser: true }, "suppressed_by_no_browser"], [{ open: false }, "not_requested"]]) {
     const result = await openTrace(receipt, { open: true, ...extra }, async () => { assert.fail("launcher should not run"); });
     assert.equal(result.outcome, "ok"); assert.equal(result.data.app_url, receipt.app_url);
+    assert.equal(result.data.browser, browser);
   }
   const opened = await openTrace(receipt, { open: true }, async (url) => { assert.equal(url, receipt.app_url); return true; });
   assert.equal(opened.data.browser, "launcher_started");

@@ -422,3 +422,26 @@ test("an explicitly repaired family can recover after its private env file was l
     assert.equal(authorize.query.expected_key_id, state.key_id);
   } finally { await server.close(); }
 });
+
+test("JSON --no-browser reruns a ready setup and refuses only when approval is needed", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await login(assert, box, server)).result.ok, true);
+    const refused = await setup(box, server, ["--no-browser"]);
+    assert.equal(refused.exit_code, 6);
+    assert.equal(refused.outcome, "unsupported");
+    assert.equal(refused.error.reason, "no_browser_requires_terminal");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+    assert.equal((await setup(box, server)).outcome, "ok");
+    const env = fs.readFileSync(path.join(box.project, ".env"));
+    const authorizeCount = server.requestsTo("/v1/cli/setup/authorize").length;
+    const rerun = await setup(box, server, ["--no-browser"]);
+    assert.equal(rerun.outcome, "ok");
+    assert.equal(rerun.data.env, "unchanged");
+    assert.equal(rerun.data.skill, "reused");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, authorizeCount);
+    assert.deepEqual(fs.readFileSync(path.join(box.project, ".env")), env);
+  } finally { await server.close(); }
+});

@@ -599,8 +599,8 @@ const AUTH_MESSAGES = {
   ci_environment:
     "This is a CI environment, where no person can approve sign in in a browser. Nothing was written.",
   no_browser_requires_terminal:
-    "--no-browser prints the sign in URL for a person to open, which --json cannot do. " +
-    "Run login without --json in a terminal. Nothing was done.",
+    "Approval is needed, and --no-browser prints its URL for a person to open, which --json cannot do. " +
+    "Run the same command without --json in a terminal. Nothing was done.",
   bound_to_other_origin:
     "This project is bound to a different origin. Nothing was changed. Use --reconnect to switch it.",
   bound_to_other_workspace:
