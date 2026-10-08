@@ -42,12 +42,16 @@ boundaries it is designed to keep:
 ### Skill installer
 
 `skill install` and `skill update` write files inside a project directory you name.
-They are designed to keep these boundaries:
+`skills install` and `skills update` apply the same boundaries to each workflow skill
+they install, with one receipt per skill in `.metergraph/skills/`; the pack's
+manifest hash is pinned in the code and pins each skill's hash. `skills list` only
+reads. They are designed to keep these boundaries:
 
 - **No network and no remote code.** The skill is copied from this package. It is
   checked against a SHA-256 pinned in the code and in `assets/skill/manifest.json`
   before anything is written, and a mismatch stops the command.
-- **Two files only.** The client's `SKILL.md` and `.metergraph/skill-installations.json`.
+- **Two files per skill only.** The client's `SKILL.md` and `.metergraph/skill-installations.json`
+  (for the pack, `.metergraph/skills/<name>.json`).
   Client settings, MCP configuration, `AGENTS.md`, `CLAUDE.md` and unrelated files are
   never written.
 - **Secret-free receipt.** The receipt holds relative paths, the skill name, revision,

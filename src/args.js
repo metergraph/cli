@@ -26,13 +26,15 @@ import { parseOrigin } from "./origin.js";
 import { isCursor, isSafeFilter } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
+const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
+const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
+  skills: new Set(["--client", "--runtime", "--project"]),
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
   setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file", "--repository"]),
   logout: new Set(["--project", "--config-dir"]),
@@ -86,6 +88,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 //   { ok: true, command: "version", json }
 //   { ok: true, command: "doctor", origin, timeoutMs, json }
 //   { ok: true, command: "skill", action, client, runtime, project, json }
+//   { ok: true, command: "skills", action, client, runtime, project, json }
+//     (client and runtime are null for list)
 //   { ok: true, command: "login", runtime, origin, workspace, project,
 //     configDir, timeoutMs, signup, noBrowser, reconnect, json }
 //   { ok: true, command: "logout", project, configDir, json }
@@ -113,7 +117,9 @@ export function parseArgs(argv) {
 
   const fail = (code, message, outcome = "invalid_input") => ({
     ok: false,
-    command: command === "skill" && action !== null ? `skill ${action}` : command ?? (version ? "version" : null),
+    command: (command === "skill" || command === "skills") && action !== null
+      ? `${command} ${action}`
+      : command ?? (version ? "version" : null),
     json,
     code,
     message,
@@ -139,6 +145,10 @@ export function parseArgs(argv) {
       continue;
     }
     if (command === "skill" && action === null && SKILL_ACTIONS.has(arg)) {
+      action = arg;
+      continue;
+    }
+    if (command === "skills" && action === null && SKILLS_ACTIONS.has(arg)) {
       action = arg;
       continue;
     }
@@ -192,6 +202,12 @@ export function parseArgs(argv) {
         `Unknown skill subcommand at argument ${position}. Use install or update.`,
       );
     }
+    if (command === "skills" && action === null && !arg.startsWith("-")) {
+      return fail(
+        "unknown_subcommand",
+        `Unknown skills subcommand at argument ${position}. Use install, update or list.`,
+      );
+    }
     return fail(
       "unknown_argument",
       `Unrecognized argument at position ${position}. Run "metergraph --help" for usage.`,
@@ -203,6 +219,7 @@ export function parseArgs(argv) {
     return { ok: true, command: "help", topic, json };
   }
   if (command === "skill") return parseSkill(action, values, json, fail);
+  if (command === "skills") return parseSkills(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);
   if (command === "setup") return parseSetup(values, flags, json, fail);
   if (command === "verify") return parseVerify(values, flags, json, fail);
@@ -291,6 +308,29 @@ function parseSkill(action, values, json, fail) {
     return fail("invalid_project", "--project must name an existing directory.");
   }
   return { ok: true, command: "skill", action, client, runtime, project: project ?? null, json };
+}
+
+// skills install and update take the same options as skill. list is read
+// only and takes just --project.
+function parseSkills(action, values, json, fail) {
+  if (action === null) {
+    return fail(
+      "missing_subcommand",
+      'skills requires a subcommand: install, update or list. Run "metergraph help skills" for usage.',
+    );
+  }
+  if (action === "list") {
+    if (values["--client"] !== undefined || values["--runtime"] !== undefined) {
+      return fail("unexpected_option", "skills list takes only --project. It reports every client.");
+    }
+    const project = values["--project"];
+    if (project !== undefined && (project === "" || project.includes("\0"))) {
+      return fail("invalid_project", "--project must name an existing directory.");
+    }
+    return { ok: true, command: "skills", action, client: null, runtime: null, project: project ?? null, json };
+  }
+  const parsed = parseSkill(action, values, json, fail);
+  return parsed.ok ? { ...parsed, command: "skills" } : parsed;
 }
 
 const INVALID_URL =

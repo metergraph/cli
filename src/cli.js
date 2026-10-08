@@ -10,12 +10,13 @@ import {
   helpData,
   helpText,
   skillText,
+  skillsText,
   toJsonLine,
   versionData,
 } from "./output.js";
 import { runRead } from "./read.js";
 import { readMessage, readText } from "./read-output.js";
-import { runSkill } from "./skill.js";
+import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
 import { containsKnownCredential, preflightNonHostedSetup } from "./setup-deployment.js";
 import { VERSION } from "./constants.js";
@@ -148,6 +149,20 @@ async function run(argv, { stdout, stderr }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : skillText(result, message));
+    return result;
+  }
+
+  if (parsed.command === "skills") {
+    const { outcome, reason, message, data } =
+      parsed.action === "list" ? listSkillPack(parsed) : runSkillPack(parsed);
+    const result = envelope({
+      command: `skills ${parsed.action}`,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : skillsText(result, message));
     return result;
   }
 

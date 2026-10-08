@@ -51,3 +51,70 @@ export function loadBundledSkill() {
   if (!content.toString("utf8").startsWith(`---\nname: ${manifest.name}\ndescription: `)) return null;
   return { name: manifest.name, revision: manifest.revision, sha256, content };
 }
+
+// The workflow skills that "skills install" writes, vendored from the public
+// skills repository at one commit. The manifest's own hash is pinned here, and
+// the manifest pins each skill's hash, so changing any file alone is detected.
+const PINNED_PACK_SHA256 = "054088afcf0beaec91b3d398400b06453e2489e9c758f170896217ad260401be";
+
+const PACK_DIR = new URL("../assets/skills/", import.meta.url);
+const PACK_KEYS = ["commit", "manifest_version", "repository", "skills"];
+const PACK_ENTRY_KEYS = ["name", "revision", "sha256", "size"];
+
+// Returns { repository, commit, skills: [{ name, revision, sha256, content }] }
+// sorted by name, or null when the manifest or any skill file is missing,
+// malformed or does not match its pinned hash. Never downloads anything.
+export function loadBundledPack() {
+  let manifestBytes;
+  let manifest;
+  try {
+    manifestBytes = readFileSync(new URL("manifest.json", PACK_DIR));
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (
+    sha256Hex(manifestBytes) !== PINNED_PACK_SHA256 ||
+    manifest === null ||
+    typeof manifest !== "object" ||
+    Array.isArray(manifest) ||
+    Object.keys(manifest).sort().join() !== PACK_KEYS.join() ||
+    manifest.manifest_version !== 1 ||
+    manifest.repository !== "metergraph/skills" ||
+    typeof manifest.commit !== "string" ||
+    !/^[0-9a-f]{40}$/.test(manifest.commit) ||
+    !Array.isArray(manifest.skills) ||
+    manifest.skills.length === 0
+  ) {
+    return null;
+  }
+  const skills = [];
+  const seen = new Set();
+  for (const entry of manifest.skills) {
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      Object.keys(entry).sort().join() !== PACK_ENTRY_KEYS.join() ||
+      typeof entry.name !== "string" ||
+      !/^[a-z0-9-]{1,64}$/.test(entry.name) ||
+      entry.name === "metergraph" ||
+      seen.has(entry.name) ||
+      typeof entry.sha256 !== "string" ||
+      entry.revision !== revisionFor(entry.sha256)
+    ) {
+      return null;
+    }
+    seen.add(entry.name);
+    let content;
+    try {
+      content = readFileSync(new URL(`${entry.name}/SKILL.md`, PACK_DIR));
+    } catch {
+      return null;
+    }
+    if (content.length !== entry.size || sha256Hex(content) !== entry.sha256) return null;
+    if (!content.toString("utf8").startsWith(`---\nname: ${entry.name}\ndescription: `)) return null;
+    skills.push({ name: entry.name, revision: entry.revision, sha256: entry.sha256, content });
+  }
+  skills.sort((a, b) => (a.name < b.name ? -1 : 1));
+  return { repository: manifest.repository, commit: manifest.commit, skills };
+}

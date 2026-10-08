@@ -2,11 +2,19 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { CONNECTION_GUIDE_URL, SKILL_CLIENTS, SKILL_RUNTIMES } from "./constants.js";
-import { loadBundledSkill, revisionFor, sha256Hex } from "./skill-bundle.js";
+import {
+  CONNECTION_GUIDE_URL,
+  SKILLS_REPOSITORY_URL,
+  SKILL_CLIENTS,
+  SKILL_RUNTIMES,
+} from "./constants.js";
+import { loadBundledPack, loadBundledSkill, revisionFor, sha256Hex } from "./skill-bundle.js";
 
-// Project-scoped skill installer. It writes exactly two things inside the
-// project: the client's SKILL.md and a secret-free ownership receipt. It never
+// Project-scoped skill installer. For each skill it writes exactly two things
+// inside the project: the client's SKILL.md and a secret-free ownership
+// receipt. "skill" installs the setup skill with the receipt below; "skills"
+// installs each skill of the workflow pack with its own receipt in
+// .metergraph/skills/. It never
 // touches client settings, AGENTS.md, CLAUDE.md or any other file, never
 // follows a symbolic link below the resolved project directory and makes no
 // network request. All file work is synchronous, so a signal cannot run
@@ -15,6 +23,8 @@ import { loadBundledSkill, revisionFor, sha256Hex } from "./skill-bundle.js";
 const RECEIPT_DIR = ".metergraph";
 const RECEIPT_FILE = "skill-installations.json";
 const LOCK_FILE = "skill-installations.lock";
+const PACK_RECEIPT_DIRS = [RECEIPT_DIR, "skills"];
+const CORE_RECEIPT = Object.freeze({ dirs: [RECEIPT_DIR], file: RECEIPT_FILE, lock: LOCK_FILE });
 const MAX_RECEIPT_BYTES = 64 * 1024;
 const MAX_SKILL_BYTES = 1024 * 1024;
 const ENTRY_KEYS = ["client", "path", "revision", "runtimes", "sha256", "skill"];
@@ -57,7 +67,7 @@ class Stop extends Error {
 // Returns { outcome, reason, message, data }. Every string comes from this
 // package. Paths in data are relative to the project.
 export function runSkill({ action, client, runtime, project }) {
-  const context = { action, client, runtime, target: null, bundle: null };
+  const context = { action, client, runtime, target: null, bundle: null, receipt: CORE_RECEIPT };
   if (!Object.hasOwn(SKILL_CLIENTS, client)) {
     return handoff(context, "client_not_supported");
   }
@@ -73,20 +83,25 @@ export function runSkill({ action, client, runtime, project }) {
 }
 
 function execute(context, project) {
-  const { action, client, runtime } = context;
   context.bundle = loadBundledSkill();
   if (context.bundle === null) throw new Stop("internal_error", "bundled_skill_invalid");
-  context.target = targetFor(client, context.bundle.name);
+  context.target = targetFor(context.client, context.bundle.name);
   const root = resolveProject(project);
+  return success(context, apply(root, context));
+}
+
+// Installs or updates one skill and returns its status, or throws a Stop.
+function apply(root, context) {
+  const { action, runtime, receipt } = context;
 
   // Decide from a read-only look first, so a matching rerun writes nothing.
   let state = inspect(root, context);
   let plan = decide(action, runtime, state, context.bundle);
-  if (plan.noop) return success(context, plan.status);
+  if (plan.noop) return plan.status;
 
   return deferSignals(() => {
-    const createdMeta = ensureDirs(root, [RECEIPT_DIR]);
-    const lockPath = path.join(root, RECEIPT_DIR, LOCK_FILE);
+    const createdMeta = ensureDirs(root, receipt.dirs);
+    const lockPath = path.join(root, ...receipt.dirs, receipt.lock);
     let done = false;
     try {
       acquireLock(lockPath);
@@ -96,7 +111,7 @@ function execute(context, project) {
         plan = decide(action, runtime, state, context.bundle);
         if (!plan.noop) commit(root, context, state, plan);
         done = true;
-        return success(context, plan.status);
+        return plan.status;
       } finally {
         try {
           fs.unlinkSync(lockPath);
@@ -129,8 +144,8 @@ function resolveProject(project) {
 // non-regular entry on either path stops the run.
 function inspect(root, context) {
   try {
-    checkDirs(root, [RECEIPT_DIR]);
-    const receiptFile = readRegular(path.join(root, RECEIPT_DIR, RECEIPT_FILE), MAX_RECEIPT_BYTES);
+    checkDirs(root, context.receipt.dirs);
+    const receiptFile = readRegular(path.join(root, ...context.receipt.dirs, context.receipt.file), MAX_RECEIPT_BYTES);
     let receipt = null;
     if (receiptFile !== null) {
       receipt = receiptFile.content === null ? null : parseReceipt(receiptFile.content, context.bundle.name);
@@ -181,7 +196,7 @@ function decide(action, runtime, state, bundle) {
 function commit(root, context, state, plan) {
   const { bundle, target } = context;
   const skillPath = path.join(root, ...target.dirs, "SKILL.md");
-  const receiptPath = path.join(root, RECEIPT_DIR, RECEIPT_FILE);
+  const receiptPath = path.join(root, ...context.receipt.dirs, context.receipt.file);
   const receipt = nextReceipt(state.receipt, context, target.relative);
   let createdDirs = [];
   let skillWritten = false;
@@ -446,4 +461,150 @@ function handoff(context, reason) {
 
 function failure(context, outcome, reason) {
   return { outcome, reason, message: MESSAGES[reason], data: data(context) };
+}
+
+// ---------------------------------------------------------------------------
+// The workflow skill pack ("metergraph skills"). Each skill runs through the
+// same engine as the setup skill, with its own receipt and lock in
+// .metergraph/skills/, so one skill's conflict never blocks or rolls back
+// another, and the setup skill's receipt is never touched.
+
+const PACK_HANDOFF_MESSAGE =
+  "In Claude Desktop, open Customize → Plugins → Add marketplace and enter metergraph/skills, " +
+  "or upload a skill zip from https://github.com/metergraph/skills/releases/latest under Customize → Skills.";
+
+function packReceipt(name) {
+  return { dirs: PACK_RECEIPT_DIRS, file: `${name}.json`, lock: `${name}.lock` };
+}
+
+function packMessage(name, reason) {
+  const receipt = `${PACK_RECEIPT_DIRS.join("/")}/${name}.json`;
+  const lock = `${PACK_RECEIPT_DIRS.join("/")}/${name}.lock`;
+  if (reason === "receipt_invalid") return `The receipt ${receipt} is not valid. Nothing was changed.`;
+  if (reason === "locked") return `Another skill install may be running. If none is, delete ${lock} and retry.`;
+  if (reason === "rollback_failed") {
+    return `The skill could not be written and the rollback did not finish. Check the skill path and ${receipt}.`;
+  }
+  return MESSAGES[reason];
+}
+
+// Returns { outcome, reason, message, data } like runSkill. data.skills has
+// one entry per bundled skill, in name order.
+export function runSkillPack({ action, client, runtime, project }) {
+  const base = { client, runtime, source: null, skills: [], discovery: null, authenticated: false, next_action: null };
+  if (client === "claude-desktop") {
+    return {
+      outcome: "unsupported",
+      reason: "client_not_supported",
+      message:
+        "Claude Desktop loads Metergraph skills from the plugin marketplace or an uploaded zip, not from project files. Nothing was written.",
+      data: { ...base, next_action: { kind: "plugin_marketplace", message: PACK_HANDOFF_MESSAGE, url: SKILLS_REPOSITORY_URL } },
+    };
+  }
+  if (!Object.hasOwn(SKILL_CLIENTS, client)) {
+    return { outcome: "unsupported", reason: "client_not_supported", message: MESSAGES.client_not_supported,
+      data: { ...base, next_action: { kind: "connection_guide", url: CONNECTION_GUIDE_URL } } };
+  }
+  if (!SKILL_RUNTIMES.includes(runtime)) {
+    return { outcome: "unsupported", reason: "runtime_not_supported", message: MESSAGES.runtime_not_supported,
+      data: { ...base, next_action: { kind: "connection_guide", url: CONNECTION_GUIDE_URL } } };
+  }
+  const pack = loadBundledPack();
+  if (pack === null) {
+    return { outcome: "internal_error", reason: "bundled_skill_invalid", message: MESSAGES.bundled_skill_invalid, data: base };
+  }
+  base.source = { repository: pack.repository, commit: pack.commit };
+  let root;
+  try {
+    root = resolveProject(project);
+  } catch (error) {
+    return { outcome: error.outcome, reason: error.reason, message: MESSAGES[error.reason], data: base };
+  }
+
+  let failed = null;
+  for (const bundle of pack.skills) {
+    const context = {
+      action,
+      client,
+      runtime,
+      bundle,
+      receipt: packReceipt(bundle.name),
+      target: targetFor(client, bundle.name),
+    };
+    const entry = { name: bundle.name, path: context.target.relative, status: null, revision: bundle.revision, reason: null };
+    try {
+      try {
+        entry.status = apply(root, context);
+      } catch (error) {
+        // A skill added to the pack since the last install is installed by update.
+        if (!(error instanceof Stop) || error.reason !== "not_installed") throw error;
+        entry.status = apply(root, { ...context, action: "install" });
+      }
+    } catch (error) {
+      const stop = error instanceof Stop ? error : new Stop("filesystem_error", "write_failed");
+      entry.status = "failed";
+      entry.reason = stop.reason;
+      failed ??= { outcome: stop.outcome, reason: stop.reason, message: packMessage(bundle.name, stop.reason) };
+    }
+    base.skills.push(entry);
+  }
+
+  const label = SKILL_CLIENTS[client].label;
+  if (failed !== null) {
+    return { ...failed, data: { ...base, discovery: "pending", next_action: null } };
+  }
+  const message =
+    runtime === "local"
+      ? `Start or restart ${label} in this project, then confirm that it lists the Metergraph skills.`
+      : `Make sure the cloud checkout includes ${SKILL_CLIENTS[client].dir}/skills (commit it if you installed it elsewhere), ` +
+        `then start a new ${label} cloud session and confirm that it lists the Metergraph skills.`;
+  return {
+    outcome: "ok",
+    reason: null,
+    message:
+      `Skills ready. Discovery is pending until ${label} loads them. ` +
+      "This does not sign in, connect a workspace or configure MCP.",
+    data: { ...base, discovery: "pending", next_action: { kind: "reload_client", message } },
+  };
+}
+
+// Read-only: what the pack bundles, and its state for every client in the
+// project. Never writes, never takes a lock.
+export function listSkillPack({ project }) {
+  const pack = loadBundledPack();
+  const data = { source: null, skills: [], clients: Object.keys(SKILL_CLIENTS) };
+  if (pack === null) {
+    return { outcome: "internal_error", reason: "bundled_skill_invalid", message: MESSAGES.bundled_skill_invalid, data };
+  }
+  data.source = { repository: pack.repository, commit: pack.commit };
+  let root;
+  try {
+    root = resolveProject(project);
+  } catch (error) {
+    return { outcome: error.outcome, reason: error.reason, message: MESSAGES[error.reason], data };
+  }
+  for (const bundle of pack.skills) {
+    const installs = {};
+    for (const client of Object.keys(SKILL_CLIENTS)) {
+      installs[client] = packState(root, { client, bundle, receipt: packReceipt(bundle.name), target: targetFor(client, bundle.name) });
+    }
+    data.skills.push({ name: bundle.name, revision: bundle.revision, sha256: bundle.sha256, installs });
+  }
+  return { outcome: "ok", reason: null, message: null, data };
+}
+
+// One of not_installed, installed, outdated, modified, missing, not_owned,
+// receipt_invalid or unsafe_path.
+function packState(root, context) {
+  let state;
+  try {
+    state = inspect(root, context);
+  } catch (error) {
+    return error instanceof Stop && error.reason === "receipt_invalid" ? "receipt_invalid" : "unsafe_path";
+  }
+  const { entry, file, skillDirExists } = state;
+  if (entry === null) return file !== null || skillDirExists ? "not_owned" : "not_installed";
+  if (file === null) return "missing";
+  if (file.content === null || sha256Hex(file.content) !== entry.sha256) return "modified";
+  return entry.revision === context.bundle.revision ? "installed" : "outdated";
 }

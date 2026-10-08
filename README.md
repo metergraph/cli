@@ -87,6 +87,16 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   `metergraph-skills install --client codex --runtime local` instead
   ([details](https://github.com/metergraph/cli/blob/main/python/metergraph-skills/README.md)).
   Both write the same files and recognise each other's installs.
+- **Model-swap skills.** `skills install` adds the workflow skills from
+  [metergraph/skills](https://github.com/metergraph/skills): choose a workload, choose
+  traces and models, define the eval, run the analysis, read the report and rerun,
+  all from the agent. Start with `metergraph-model-swap`. In Claude Desktop, add
+  the `metergraph/skills` plugin marketplace instead.
+
+  ```sh
+  npx --yes metergraph-cli@next skills install --client claude --runtime local
+  ```
+
 - **Machine output.** Every command takes `--json` and then prints exactly one JSON
   line on stdout and nothing on stderr. All results share one envelope:
   `schema_version`, `command`, `ok`, `outcome`, `exit_code`, `data` and `error`.
@@ -123,6 +133,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `login`, `logout` | Sign a project in or out without the rest of `setup` | Yes |
 | `doctor` | Check that a service is reachable, healthy and supported, without credentials | Yes |
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |
+| `skills install`, `skills update`, `skills list` | Install, update or list the workflow skills, such as the model-swap loop | No |
 
 `metergraph help COMMAND` lists a command's options. The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and

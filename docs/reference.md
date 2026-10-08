@@ -14,6 +14,7 @@ by a workspace member.
 - [Command summary](#command-summary)
 - [doctor](#doctor)
 - [skill install and skill update](#skill-install-and-skill-update)
+- [skills install, update and list](#skills-install-update-and-list)
 - [login and logout](#login-and-logout)
 - [setup](#setup)
 - [Read commands](#read-commands)
@@ -33,6 +34,10 @@ metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]
 metergraph help skill [--json]
 metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
 metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph help skills [--json]
+metergraph skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skills update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skills list [--project DIR] [--json]
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
@@ -193,6 +198,46 @@ The same installer is published for Python as
 `SKILL.md` and writes the same paths and receipt, so either installer recognises and
 updates what the other wrote. `scripts/sync-skill.mjs` updates both copies together;
 CI fails while they differ.
+
+### skills install, update and list
+
+`skills install` copies the Metergraph workflow skills bundled with this CLI into one
+client's project skill directory, one folder per skill. They come from
+[metergraph/skills](https://github.com/metergraph/skills) at the commit pinned in
+`skills-source.json`, and cover investigation and the model-swap loop: choose a
+workload, choose traces and models, define the eval, run the analysis, summarize the
+report and rerun. Start with the `metergraph-model-swap` skill. The setup skill,
+`metergraph`, is not part of the pack; `skill install` installs it.
+
+`--client`, `--runtime` and `--project` work as for `skill install`. For each bundled
+skill it writes, and nothing else:
+
+1. `<client dir>/skills/<name>/SKILL.md`, for example
+   `.claude/skills/metergraph-model-swap/SKILL.md`.
+2. `.metergraph/skills/<name>.json`, that skill's ownership receipt, in the same shape
+   as `.metergraph/skill-installations.json`. The lock is
+   `.metergraph/skills/<name>.lock`.
+
+Each skill follows the ownership rules of `skill install` on its own: an unowned or
+edited skill is never replaced, and a conflict on one skill does not stop or roll
+back the others. The command exits with the first failure's code, and
+`data.skills[].status` says what happened to each skill (`installed`, `updated`,
+`reused` or `failed` with a `reason`). `update` replaces older revisions this CLI
+installed and also installs skills added to the pack since.
+
+`skills list` takes only `--project`. It reports each bundled skill's revision and,
+for each client, whether it is `installed`, `outdated`, `modified`, `missing`,
+`not_owned` or `not_installed`. It never writes and takes no lock.
+
+`--client claude-desktop` exits 6 with `client_not_supported` and writes nothing. Its
+`next_action` has `kind: "plugin_marketplace"`: in Claude Desktop, open Customize →
+Plugins → Add marketplace and enter `metergraph/skills`, or upload a skill zip from the
+repository's latest release under Customize → Skills. `--client chatgpt` and
+`--runtime cloud-no-shell` get the connection guide, as for `skill install`.
+
+The skills are verified before anything is written: `assets/skills/manifest.json`
+lists each skill's SHA-256, and the manifest's own hash is pinned in the code. A
+mismatch exits 1 with `bundled_skill_invalid`.
 
 ### login and logout
 
