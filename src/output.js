@@ -130,6 +130,7 @@ const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--js
 const SETUP_USAGE = "metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) " +
   "[--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] " +
   "[--deployment managed|customer-local|byoc|oss] [--confirm-prerequisites] [--agent-token-file FILE] " +
+  "[--repository OWNER/NAME | --no-repository] " +
   "[--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]";
 const JSON_OPTION = { name: "--json", value: null, summary: "Print one JSON line on stdout." };
 const VERIFY_USAGE =
@@ -315,6 +316,8 @@ export function helpData(topic) {
           { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
           { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },
           { name: "--agent-token-file", value: "FILE", summary: "Optional separate Metadata token for local/BYOC; required for OSS handoff." },
+          { name: "--repository", value: "OWNER/NAME", summary: "Repository identity to record in .metergraph/config.json when none exists. Default: inferred from the git remote." },
+          { name: "--no-repository", value: null, summary: "Leave the repository identity unrecorded." },
           JSON_OPTION,
         ],
       },

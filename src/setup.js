@@ -9,6 +9,7 @@ import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
 import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-env.js";
 import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
 import { runSkill } from "./skill.js";
+import { ensureRepositoryIdentity, envRepository } from "./repository-identity.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 
@@ -234,7 +235,7 @@ function finishSkill(root, options, envStatus) {
     }
     return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
       application_traffic_verified: false, env: envStatus, skill: "skipped", receipt: setupReceipt(previous.value),
-      next_action: null } };
+      repository: repositoryIdentity(root, options), next_action: null } };
   }
   let skill = runSkill({ action: "install", client: options.client, runtime: "local", project: root });
   if (skill.reason === "update_required") {
@@ -261,7 +262,18 @@ function finishSkill(root, options, envStatus) {
   }
   return { outcome: "ok", reason: null, data: { status: "ready_for_instrumentation",
     application_traffic_verified: false, env: envStatus, skill: skill.data.status,
-    receipt: setupReceipt(previous.value), next_action: null } };
+    receipt: setupReceipt(previous.value), repository: repositoryIdentity(root, options), next_action: null } };
+}
+
+// Records the repository identity the SDKs read, after the credential is
+// ready. It never fails setup and never changes an existing identity; the
+// returned field says what was found, written or left for the person.
+function repositoryIdentity(root, options) {
+  return ensureRepositoryIdentity(root, {
+    requested: options.repository ?? null,
+    skip: options.skipRepository === true,
+    envValue: envRepository(root, options.envFile ?? ".env"),
+  });
 }
 
 async function discoverSetup(origin, profile, cancel) {

@@ -105,7 +105,8 @@ async function run(argv, { stdout, stderr }) {
     }
     const receipt = result.data?.receipt;
     const summary = receipt ? `Workspace: ${receipt.workspace_id}\nDeployment: ${receipt.deployment_profile} at ${receipt.origin}\nCompleted: ${receipt.completed_steps.join(", ")}\nPending: ${receipt.pending_steps.join(", ")}\n` : "";
-    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
+    const identity = repositoryLine(result.data?.repository);
+    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}${identity}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
     if (containsKnownCredential(human, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
       stdout.write(parsed.json ? toJsonLine(result) : "Setup stopped.\n");
@@ -163,4 +164,21 @@ async function run(argv, { stdout, stderr }) {
   });
   stdout.write(parsed.json ? toJsonLine(result) : doctorText(result));
   return result;
+}
+
+// One line on the repository identity setup found or recorded. The value is
+// owner/name only; a remote URL is never shown.
+function repositoryLine(repository) {
+  if (!repository) return "";
+  const where = repository.path ? ` in ${repository.path}` : repository.source === "env_file" ? " in the env file" : "";
+  switch (repository.status) {
+    case "written": return `Repository: ${repository.repository} (recorded${where}; commit it)\n`;
+    case "existing": return repository.repository === null
+      ? `Repository: already set${where}\n` : `Repository: ${repository.repository} (already set${where})\n`;
+    case "mismatch": return `Repository: ${repository.repository} (already set${where}; differs from ${repository.expected}, left unchanged)\n`;
+    case "invalid_config": return `Repository: not recorded (${repository.path} is not a usable config; left unchanged)\n`;
+    case "skipped": return "Repository: not recorded (--no-repository)\n";
+    case "write_failed": return `Repository: not recorded (could not write ${repository.path})\n`;
+    default: return "Repository: not recorded (no owner/name git remote; pass --repository OWNER/NAME)\n";
+  }
 }
