@@ -1,0 +1,21 @@
+[build-system]
+requires = ["flit_core>=3.9,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "metergraph-agent"
+version = "0.0.1"
+description = "Name held by Metergraph. Contains no functionality; see the README for the package to use."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Metergraph" }]
+classifiers = ["Development Status :: 1 - Planning", "License :: OSI Approved :: Apache Software License"]
+dependencies = []
+
+[project.urls]
+Homepage = "https://www.metergraph.dev/"
+Source = "https://github.com/metergraph/cli"
+
+[tool.flit.module]
+name = "metergraph_agent"

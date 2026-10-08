@@ -1,0 +1,35 @@
+[build-system]
+requires = ["flit_core>=3.9,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "metergraph-skills"
+version = "0.1.0"
+description = "Installs the Metergraph agent skill into a project for Codex, Claude Code or Cursor"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Metergraph" }]
+keywords = ["metergraph", "agent", "skill", "llm", "cost-tracking"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://www.metergraph.dev/"
+Source = "https://github.com/metergraph/cli"
+Issues = "https://github.com/metergraph/cli/issues"
+
+[project.scripts]
+metergraph-skills = "metergraph_skills.cli:main"
+
+[tool.flit.module]
+name = "metergraph_skills"
+
+[tool.flit.sdist]
+include = ["tests/"]

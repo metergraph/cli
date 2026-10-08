@@ -217,6 +217,14 @@ does not match. It never downloads the skill or runs a remote script. A new skil
 revision ships only in a new CLI release; `skill update` then upgrades projects that
 hold an unchanged earlier revision.
 
+#### From Python
+
+The same installer is published for Python as
+[`metergraph-skills`](python/metergraph-skills/README.md). It bundles the same
+`SKILL.md` and writes the same paths and receipt, so either installer recognises and
+updates what the other wrote. When `assets/skill/` changes, update the Python copy
+too; CI fails while they differ.
+
 ### login and logout
 
 `login` binds a project directory to one Metergraph workspace. Your browser does the
@@ -875,6 +883,11 @@ npm view metergraph-cli@VERSION dist.attestations
 
 Releases from the workflow should show a provenance attestation that names
 `metergraph/cli` and the released commit. The bootstrap version will not.
+
+### Python packages
+
+The Python packages in `python/` are released to PyPI by a separate manual workflow,
+`release-pypi.yml`. See [Releasing to PyPI](python/README.md#releasing-to-pypi).
 
 ## Security
 
