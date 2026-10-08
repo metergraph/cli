@@ -1,0 +1,252 @@
+# Manual release of the Python packages in python/ to PyPI.
+#
+# Mirrors release.yml. There is deliberately no tag, push or schedule
+# trigger. A maintainer starts this workflow by hand from main and picks one
+# package. commit_sha must equal the commit main pointed to when the run
+# started (GITHUB_SHA), because the PyPI attestation records that commit as
+# the source. The validate job always runs and produces checksummed
+# distributions. The publish job runs only when "publish" is true, waits for
+# approval on the protected "pypi-release" environment, and refuses to run
+# until a maintainer sets the repository variable
+# METERGRAPH_PYPI_PUBLISH_ENABLED to "true" after the PyPI trusted publishers
+# are configured. No PyPI token is stored. See "Releasing to PyPI" in
+# python/README.md.
+
+name: Release Python package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to release."
+        required: true
+        type: choice
+        options:
+          - metergraph-skills
+          - metergraph-cli
+          - metergraph-mcp
+          - metergraph-skill
+          - metergraph-agent
+          - metergraph-agents
+      version:
+        description: "Exact version to release. Must equal the package's pyproject.toml version."
+        required: true
+        type: string
+      commit_sha:
+        description: "Full 40 character SHA of the current head of main. Must equal the commit this run starts from."
+        required: true
+        type: string
+      publish:
+        description: "Publish to PyPI after validation. Leave false for a dry run."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pypi
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha256sums: ${{ steps.build.outputs.sha256sums }}
+    steps:
+      - name: Check inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Start this workflow from main."
+            exit 1
+          fi
+          if ! printf '%s' "$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::commit_sha must be a full lowercase 40 character SHA."
+            exit 1
+          fi
+          # The attestation names GITHUB_SHA as the source revision, so only
+          # that exact commit may be released by this run.
+          if [ "$COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::commit_sha must equal the main commit this run started from ($GITHUB_SHA). Start a new run if main has moved."
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$'; then
+            echo "::error::version must be a PEP 440 version such as 0.1.0 or 0.2.0b1."
+            exit 1
+          fi
+
+      - name: Check out the exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Check commit, version and registry state
+        id: package
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$COMMIT_SHA" ]; then
+            echo "::error::Checked out commit does not match commit_sha."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+            echo "::error::commit_sha is not on main."
+            exit 1
+          fi
+          if [ "$PACKAGE" = "metergraph-skills" ]; then
+            DIR="python/metergraph-skills"
+          else
+            DIR="python/placeholders/$PACKAGE"
+          fi
+          if ! grep -qx "name = \"$PACKAGE\"" "$DIR/pyproject.toml"; then
+            echo "::error::$DIR/pyproject.toml does not name $PACKAGE."
+            exit 1
+          fi
+          if ! grep -qx "version = \"$VERSION\"" "$DIR/pyproject.toml"; then
+            echo "::error::pyproject.toml version does not match the requested version."
+            exit 1
+          fi
+          # Fail closed: only a 404 from PyPI means the version is free. Any
+          # other status, or a network failure (000), stops the run. The
+          # response body and curl error text are discarded.
+          STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --proto '=https' --max-time 30 \
+            "https://pypi.org/pypi/$PACKAGE/$VERSION/json" || true)"
+          case "$STATUS" in
+            404) echo "$PACKAGE $VERSION is not on PyPI." ;;
+            200) echo "::error::This version already exists on PyPI."; exit 1 ;;
+            *) echo "::error::Could not confirm that this version is unpublished (PyPI status $STATUS)."; exit 1 ;;
+          esac
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned build tools
+        run: python -m pip install --require-hashes --no-deps -r python/requirements-build.txt
+
+      - name: Unit and subprocess tests
+        if: ${{ inputs.package == 'metergraph-skills' }}
+        run: python -m unittest discover -s python/metergraph-skills/tests -v
+
+      - name: Build distributions
+        id: build
+        env:
+          DIR: ${{ steps.package.outputs.dir }}
+        run: |
+          set -euo pipefail
+          DIST="$RUNNER_TEMP/dist"
+          python -m build --no-isolation --outdir "$DIST" "$DIR"
+          python scripts/check_python_dist.py "$DIR" "$DIST"
+          (cd "$DIST" && sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS")
+          cat "$RUNNER_TEMP/SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Built from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "sha256sums<<EOF"
+            cat "$RUNNER_TEMP/SHA256SUMS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Clean install smoke test
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/dist/*.whl
+          MODULE="$(printf '%s' "$PACKAGE" | tr - _)"
+          if [ "$PACKAGE" = "metergraph-skills" ]; then
+            cd "$RUNNER_TEMP"
+            METERGRAPH_SKILLS_TEST_INSTALLED=1 "$RUNNER_TEMP/smoke/bin/python" -m unittest discover \
+              -s "$GITHUB_WORKSPACE/python/metergraph-skills/tests" -v
+          else
+            set +e
+            "$RUNNER_TEMP/smoke/bin/python" -m "$MODULE"
+            STATUS=$?
+            set -e
+            if [ "$STATUS" != 6 ]; then
+              echo "::error::The placeholder module exited with $STATUS, expected 6."
+              exit 1
+            fi
+          fi
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-release
+          path: ${{ runner.temp }}/dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish to PyPI
+    needs: validate
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require explicit publish enablement
+        env:
+          PUBLISH_ENABLED: ${{ vars.METERGRAPH_PYPI_PUBLISH_ENABLED }}
+        run: |
+          if [ "$PUBLISH_ENABLED" != "true" ]; then
+            echo "::error::Publishing to PyPI is not enabled for this repository. See Releasing to PyPI in python/README.md."
+            exit 1
+          fi
+
+      - name: Check commit
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          if [ "$COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::commit_sha and the workflow commit must be identical."
+            exit 1
+          fi
+
+      - name: Download release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: python-release
+          path: dist
+
+      - name: Verify artifact checksums
+        env:
+          EXPECTED: ${{ needs.validate.outputs.sha256sums }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$EXPECTED" > "$RUNNER_TEMP/SHA256SUMS"
+          if [ "$(ls dist | wc -l)" != "$(wc -l < "$RUNNER_TEMP/SHA256SUMS")" ]; then
+            echo "::error::The artifact holds a different number of files than were validated."
+            exit 1
+          fi
+          (cd dist && sha256sum --check --strict "$RUNNER_TEMP/SHA256SUMS")
+
+      - name: Publish with attestations
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          attestations: true

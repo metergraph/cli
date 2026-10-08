@@ -1,0 +1,9 @@
+{
+  "manifest_version": 1,
+  "name": "metergraph",
+  "file": "SKILL.md",
+  "source_url": "https://www.metergraph.dev/SKILL.md",
+  "sha256": "57b920677adf62759c7221629327192a2d16b7e6034f7948ffd96cee402d4891",
+  "size": 10426,
+  "revision": "sha256-57b920677adf"
+}
