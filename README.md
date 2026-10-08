@@ -1,6 +1,6 @@
 # metergraph-cli
 
-The Metergraph command line tool. Version `0.2.0-preview.0` is published on the
+The Metergraph command line tool. Version `0.2.0-preview.1` is published on the
 `next` npm tag. The `latest` tag remains on `0.1.0`.
 
 Install the released preview channel with npm or run it directly:
@@ -11,7 +11,7 @@ npx --yes metergraph-cli@next doctor --json
 npm install -g metergraph-cli@next
 ```
 
-The installed command is `metergraph`. Pin `metergraph-cli@0.2.0-preview.0`
+The installed command is `metergraph`. Pin `metergraph-cli@0.2.0-preview.1`
 when you need this exact preview rather than whichever version `next` names later.
 
 **Availability:**
@@ -20,6 +20,10 @@ when you need this exact preview rather than whichever version `next` names late
   `skill update`. It has no sign in commands.
 - `metergraph-cli@0.2.0-preview.0` adds `login`, `logout`, `setup`, `verify`,
   `status`, `context`, `capabilities`, `usage`, `routes` and `traces`.
+- `metergraph-cli@0.2.0-preview.1` makes `setup` write the SDK service root as
+  `METERGRAPH_INGEST_URL` and repairs the full ingest endpoint that
+  `0.2.0-preview.0` wrote, after checking the saved key. It also keeps validated,
+  workspace-bound trace links in Metadata reads.
 - Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
   revocation. A service without them is reported as unsupported, and the CLI never
   falls back to broader access.
@@ -759,7 +763,7 @@ To try a packed artifact without publishing:
 
 ```sh
 npm pack --pack-destination "$(mktemp -d)"
-npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.0.tgz -- metergraph --version
+npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.1.tgz -- metergraph --version
 ```
 
 Do not commit tarballs or other generated files.
@@ -768,7 +772,7 @@ Do not commit tarballs or other generated files.
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-`0.2.0-preview.0` is published on the `next` npm tag; `latest` remains on
+`0.2.0-preview.1` is published on the `next` npm tag; `latest` remains on
 `0.1.0`. The hosted service supports sign in, Metadata reads and ingest bootstrap.
 Subsequent releases must pass the checks below before publication.
 
