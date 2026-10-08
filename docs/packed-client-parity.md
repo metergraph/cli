@@ -8,7 +8,7 @@ agent discovered or followed the skill.
 ```sh
 pack_dir="$(mktemp -d)"
 npm pack --json --ignore-scripts --pack-destination "$pack_dir"
-node scripts/client-parity.mjs --tarball "$pack_dir/metergraph-cli-0.2.0-preview.2.tgz"
+node scripts/client-parity.mjs --tarball "$pack_dir/metergraph-cli-0.2.0-preview.3.tgz"
 ```
 
 The harness requires an absolute tarball path. It installs that tarball with
