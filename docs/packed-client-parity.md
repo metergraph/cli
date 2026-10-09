@@ -71,6 +71,15 @@ node scripts/client-parity.mjs --package metergraph-cli@0.2.0 \
 - **managed** approvals (`--approver person`) open the person's own browser and
   wait for them. Run it only with their consent and an approved test workspace.
   Scenarios that need an automated denial or interruption are skipped.
+- `--approver relay` writes each approval URL, with the action the scenario
+  needs (`approve`, `deny` or `ignore`), to `evidence/relay.jsonl` in the
+  work directory instead of opening a browser. Someone helping the person
+  opens it in the person's own signed-in browser and acts on it. This covers
+  the denial and interruption scenarios on hosted too. The report keeps
+  `app_url` for the dashboard view.
+- Every journey ends by logging out of each project it signed in, so no
+  Metadata grant is left behind. Ingest keys the run created stay active until
+  someone disables them on the Keys page.
 - The SDK step runs `scripts/parity/sdk_app.py` with the given Python. That
   environment needs the public `metergraph` and `openai` packages. The OpenAI
   client points at a loopback mock inside the harness, so nothing is sent to a
