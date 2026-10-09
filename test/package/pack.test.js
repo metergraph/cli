@@ -32,6 +32,7 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
   "package.json",
+  "src/approval-handoff.js",
   "src/args.js",
   "src/auth-binding.js",
   "src/auth-browser.js",
@@ -283,6 +284,12 @@ test("the installed CLI hands a cloud sign in off offline and writes nothing", a
   assert.equal(parsed.error.reason, "runtime_not_supported");
   assert.equal(parsed.data.authenticated, false);
   assert.equal(parsed.data.next_action.kind, "connection_guide");
+  // --json --no-browser runs through the installed package's detached
+  // waiter and relays its one line and exit code.
+  const relayed = await run(process.execPath, [...args, "--no-browser"], { cwd: workDir });
+  assert.equal(relayed.code, 6);
+  assert.equal(relayed.stderr, "");
+  assert.deepEqual(parseJsonLine(relayed.stdout), parsed);
   assert.equal(existsSync(config), false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });

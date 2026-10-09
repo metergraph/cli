@@ -42,7 +42,8 @@ import { deadline, trapSignals } from "./transport.js";
 // options.announce(data), given only with --json --no-browser, receives the
 // login data with an open_url next action as soon as the authorization URL
 // exists, while the listener keeps waiting. The caller prints it as the one
-// JSON line, so an agent can hand the URL to a person.
+// JSON line, so an agent can hand the URL to a person; approval-handoff.js
+// lets the agent's command exit then while this process keeps waiting.
 
 export async function runLogin(options, progress) {
   const ctx = {
@@ -382,8 +383,9 @@ export function openUrl(url, seconds, purpose) {
     kind: "open_url",
     url,
     timeout_seconds: seconds,
-    message: `Open this URL in a browser on this machine and ${purpose}. This command keeps waiting ` +
-      `up to ${seconds} seconds for approval. When it exits, run the same command again to continue.`,
+    message: `Show this URL to the person now and ask them to open it in a browser on this machine to ` +
+      `${purpose}. A background process waits up to ${seconds} seconds for their approval. ` +
+      "After they approve, run the same command again to continue.",
   };
 }
 

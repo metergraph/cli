@@ -180,6 +180,6 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
     "A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry.",
   action_required:
     "A person must act before this command can finish; data.next_action says what to do. " +
-    "With --json --no-browser this line is printed as soon as the approval URL exists, and the command " +
-    "keeps waiting for approval until --timeout-ms. Run the same command again to continue.",
+    "With --json --no-browser the command exits as soon as the approval URL exists, and a background " +
+    "process waits for approval until --timeout-ms. After approval, run the same command again to continue.",
 });

@@ -261,7 +261,7 @@ metergraph logout
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
 | `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
-| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval prints its JSON line at once, exit 18 `action_required` with an `open_url` next action, and keeps waiting. See [Approval from an agent](#approval-from-an-agent). |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits at once with 18 `action_required` and an `open_url` next action, while a background process waits for the approval. See [Approval from an agent](#approval-from-an-agent). |
 | `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
@@ -743,9 +743,10 @@ stderr.
 ### Approval from an agent
 
 A coding agent usually runs commands without a terminal, so it cannot read a URL
-from stderr. With `--json --no-browser`, `login` and `setup` print their one JSON
-line on stdout as soon as a person must approve in a browser, and then keep the
-loopback listener open:
+from stderr. Its shell tool usually shows output only after a command exits, so it
+cannot read a URL from a command that is still waiting, either. With `--json
+--no-browser`, a `login` or `setup` step that needs a person to approve in a browser
+therefore exits within seconds with the URL:
 
 ```json
 {
@@ -762,31 +763,38 @@ loopback listener open:
       "kind": "open_url",
       "url": "https://metergraph.example.com/v1/oauth/authorize?response_type=code&client_id=...&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fcallback&scope=agent%3Ametadata&state=...&code_challenge=...&code_challenge_method=S256&resource=...",
       "timeout_seconds": 300,
-      "message": "Open this URL in a browser on this machine and sign in with Metadata access. This command keeps waiting up to 300 seconds for approval. When it exits, run the same command again to continue."
+      "message": "Show this URL to the person now and ask them to open it in a browser on this machine to sign in with Metadata access. A background process waits up to 300 seconds for their approval. After they approve, run the same command again to continue."
     }
   },
   "error": {
     "code": "action_required",
     "reason": "browser_approval_required",
-    "message": "A person must approve in a browser. Open data.next_action.url on this machine; this command keeps waiting until approval or its timeout. Then run the same command again to continue."
+    "message": "A person must approve in a browser. Open data.next_action.url on this machine; a background process waits for the approval until the timeout. After approval, run the same command again to continue."
   }
 }
 ```
 
 - The agent shows `next_action.url` to the person, who opens it in a browser on the
-  same machine (the URL redirects to the CLI's `127.0.0.1` listener). The URL is the
+  same machine. The URL redirects to the CLI's `127.0.0.1` listener. The URL is the
   authorization request only: public client ID, loopback redirect, state and PKCE
   challenge. It never holds a token, code, verifier or ingest key.
-- The command waits for approval, denial or `--timeout-ms`, saves what the approval
-  completed, writes nothing more to stdout or stderr, and exits 18 whatever happened.
-  Wait for the process to exit, then run the same command again: the rerun resumes
-  from the saved sign in and setup state, and reports the outcome.
+- The approval comes back to a loopback listener. So when the command needs approval
+  under `--json --no-browser`, it runs as a detached background process, which the
+  command starts with the same arguments and no credential. The command prints that
+  process's one JSON line and exits at once. The background process keeps listening
+  until approval, denial or `--timeout-ms`, saves what the approval completed, and
+  exits. It prints nothing and holds none of the agent shell's output, so the agent's
+  command returns at once. A step that needs no approval runs as before and prints
+  its usual result.
+- After the person approves, the agent runs the same command again. The rerun resumes
+  from the saved sign in and setup state. A rerun before approval announces a fresh
+  URL; the earlier one keeps working until its own timeout.
 - One run announces at most one URL. `setup` on a project that is not signed in
   needs two approvals, so an agent runs it three times: sign in (`status:
   "login_pending"`), ingest-only setup approval (`status: "approval_pending"`, with
   the `receipt`), then a rerun that needs no approval and returns
   `ready_for_instrumentation`.
-- A timed out or denied approval saves nothing; the rerun announces a fresh URL.
+- A denied approval, or one that times out, saves nothing. The rerun announces a fresh URL.
 
 ## Safe origins
 

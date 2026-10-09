@@ -106,6 +106,15 @@ const SKILLS_STATE_LABELS = {
   unsafe_path: "unsafe path",
 };
 
+// How a coding agent gets an approval URL from login or setup. Many agent
+// shells show output only after the command exits, which is too late.
+const AGENT_APPROVAL_HELP = [
+  "From a coding agent: with --json --no-browser, a step that needs approval exits at once",
+  "with exit 18 action_required and the URL in data.next_action.url, while a background",
+  "process keeps waiting for the approval until --timeout-ms. Show the URL to the person,",
+  "and after they approve, run the same command again to continue.",
+];
+
 const CONFIG_DIR_OPTION = {
   name: "--config-dir",
   value: "DIR",
@@ -134,7 +143,7 @@ const LOGIN_OPTIONS = [
     summary: `Time to wait for the browser, ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}. Default ${LOGIN_DEFAULT_TIMEOUT_MS}.`,
   },
   { name: "--signup", value: null, summary: "Start at the hosted sign up page. Managed service only." },
-  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. With --json, print it as data.next_action (open_url) and keep waiting." },
+  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. With --json, exit 18 with it in data.next_action (open_url)." },
   { name: "--reconnect", value: null, summary: "Allow switching a bound project to another origin or workspace." },
   { name: "--json", value: null, summary: "Print one JSON line on stdout." },
 ];
@@ -353,7 +362,7 @@ export function helpData(topic) {
           { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
           { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
           { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
-          { name: "--no-browser", value: null, summary: "Print approval URL on stderr. With --json, print it as data.next_action (open_url), keep waiting, then rerun." },
+          { name: "--no-browser", value: null, summary: "Print approval URL on stderr. With --json, exit 18 with it in data.next_action (open_url); rerun after approval." },
           { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
           { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
           { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },
@@ -417,6 +426,7 @@ export function helpText(topic) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
       lines.push(`  ${flag.padEnd(25)}${option.summary}`);
     }
+    lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
     lines.push(`Usage: ${login ? LOGIN_USAGE : LOGOUT_USAGE}`, "");
@@ -449,6 +459,7 @@ export function helpText(topic) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
       lines.push(`  ${flag.padEnd(18)}${option.summary}`);
     }
+    if (login) lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "verify") {
     lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
       "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
@@ -720,8 +731,8 @@ const AUTH_MESSAGES = {
   ci_environment:
     "This is a CI environment, where no person can approve sign in in a browser. Nothing was written.",
   browser_approval_required:
-    "A person must approve in a browser. Open data.next_action.url on this machine; this command keeps " +
-    "waiting until approval or its timeout. Then run the same command again to continue.",
+    "A person must approve in a browser. Open data.next_action.url on this machine; a background process " +
+    "waits for the approval until the timeout. After approval, run the same command again to continue.",
   bound_to_other_origin:
     "This project is bound to a different origin. Nothing was changed. Use --reconnect to switch it.",
   bound_to_other_workspace:

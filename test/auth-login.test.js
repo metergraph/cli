@@ -259,32 +259,31 @@ test("a rerun on a signed in project reuses the grant without a browser or new c
   });
 });
 
-test("JSON --no-browser returns the sign in URL as an open_url next action and keeps waiting for it", async () => {
+test("JSON --no-browser returns the sign in URL at once and a background waiter saves the approved grant", async () => {
   await withServer({}, async (server) => {
     const box = sandbox();
     assert.equal((await login(assert, box, server)).run.code, 0);
     const oldSlot = readBindingFile(box).credential_slot;
     for (const grant of [...server.state.refresh.values(), ...server.state.access.values()]) grant.revoked = true;
-    const cli = startCli(["--json", "login", "--runtime", "local", "--no-browser", "--url", server.origin,
-      "--project", box.project, "--config-dir", box.config, "--timeout-ms", "15000"],
-    { imports: [BROWSER], env: { METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
-    // The line arrives before approval, while the process still waits.
-    const line = await cli.waitFor(({ stdout }) => stdout.includes("\n") && stdout);
-    assert.equal(cli.child.exitCode, null, "the command stopped waiting before approval");
-    const announced = JSON.parse(line);
-    assert.equal(announced.outcome, "action_required");
-    assert.equal(announced.exit_code, 18);
-    assert.equal(announced.data.status, "approval_pending");
-    const next = announced.data.next_action;
+    // The agent's command exits with the URL before anyone approves.
+    const started = Date.now();
+    const { run, result } = await login(assert, box, server, ["--no-browser", "--timeout-ms", "15000"]);
+    assert.ok(Date.now() - started < 5000, "the command waited for approval");
+    assert.equal(run.code, 18);
+    assertFailure(result, "action_required", "browser_approval_required");
+    assert.equal(result.data.status, "approval_pending");
+    const next = result.data.next_action;
     assert.equal(next.kind, "open_url");
     assert.equal(next.timeout_seconds, 15);
-    assert.match(next.message, /Open this URL in a browser on this machine and sign in/);
+    assert.match(next.message, /^Show this URL to the person now/);
+    assert.match(next.message, /browser on this machine to sign in/);
     assert.ok(next.url.startsWith(`${server.origin}/v1/oauth/authorize?`));
+    assert.equal(readBindingFile(box).credential_slot, oldSlot, "something was saved before approval");
+    // The person approves later; the waiter saves the new grant.
     assert.equal(await completeInBrowser(next.url), 200);
-    const run = await cli.done;
-    const { result } = checked(assert, run, { box, server });
-    assert.deepEqual(result, announced, "stdout must hold only the announced line");
-    assert.equal(run.code, 18);
+    for (let i = 0; i < 400 && readBindingFile(box).credential_slot === oldSlot; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     assert.notEqual(readBindingFile(box).credential_slot, oldSlot, "the approved grant was not saved");
     assert.equal(browserLog(box).filter((entry) => entry.url).length, 1, "a browser was opened again");
 

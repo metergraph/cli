@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
-import { BROWSER, LOCAL_ENV, completeInBrowser, login, sandboxes, secretsOf, startCli } from "./auth-helpers.js";
-import { assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
+import { BROWSER, LOCAL_ENV, completeInBrowser, login, sandboxes, secretsOf } from "./auth-helpers.js";
+import { BIN, FAKE_SECRETS, assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
 import { startOAuthServer } from "./fixtures/oauth-server.js";
 import { aclStatus } from "../src/setup-env-acl.js";
 
@@ -459,23 +460,23 @@ test("an explicitly repaired family can recover after its private env file was l
   } finally { await server.close(); }
 });
 
-// An agent's run: --json --no-browser with no terminal. The one stdout line
-// arrives while the listener still waits, so the agent can hand the URL to a
-// person, and the run's exit code is that line's.
+// An agent's run: --json --no-browser, in the foreground, as an agent's
+// shell tool runs it. The command must return within seconds with the URL
+// while a detached waiter keeps the loopback listener open.
 async function agentSetup(box, server, extra = []) {
-  const cli = startCli(["--json", "setup", "--runtime", "local", "--project", box.project, "--config-dir", box.config,
+  const started = Date.now();
+  const run = await runCli(["--json", "setup", "--runtime", "local", "--project", box.project, "--config-dir", box.config,
     "--deployment", "customer-local", "--confirm-prerequisites", "--url", server.origin,
     "--workspace", server.behavior.workspaceId, "--client", "codex", "--no-browser", ...extra],
-  { imports: [BROWSER], env: { METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
-  const line = await cli.waitFor(({ stdout }) => stdout.includes("\n") && stdout);
-  const announced = parseJsonLine(line);
-  return { announced, cli };
+  { env: { ...LOCAL_ENV, METERGRAPH_TEST_BROWSER_LOG: box.log } });
+  const elapsed = Date.now() - started;
+  return { run, result: parseJsonLine(run.stdout), elapsed };
 }
 
-function assertAnnounced(result, run, server) {
+function assertAnnounced({ run, result, elapsed }, server) {
+  assert.ok(elapsed < 5000, `the command waited ${elapsed} ms for approval instead of returning`);
   assert.equal(run.stderr, "", "JSON mode must keep stderr empty");
   assert.equal(run.stdout.split("\n").filter(Boolean).length, 1, "stdout must hold exactly one JSON line");
-  assert.deepEqual(parseJsonLine(run.stdout), result);
   assert.equal(result.exit_code, run.code);
   assert.equal(result.outcome, "action_required");
   assert.equal(result.exit_code, 18);
@@ -484,47 +485,58 @@ function assertAnnounced(result, run, server) {
   const next = result.data.next_action;
   assert.deepEqual(Object.keys(next).sort(), ["kind", "message", "timeout_seconds", "url"]);
   assert.equal(next.kind, "open_url");
-  assert.match(next.message, /Open this URL in a browser on this machine/);
+  assert.match(next.message, /^Show this URL to the person now/);
   assert.match(next.message, /run the same command again/);
   assertNoLeak(assert, run.stdout);
   for (const secret of secretsOf(server)) assert.ok(!run.stdout.includes(secret), "a credential was printed");
   return new URL(next.url);
 }
 
-test("JSON --no-browser setup returns each approval URL as an open_url next action and resumes on rerun", async () => {
-  const server = await startOAuthServer({ setup: true, profile: "local" });
+async function until(predicate, label) {
+  for (let i = 0; i < 400; i += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+const setupPhase = (box) => {
+  try { return JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json"))).phase; }
+  catch { return null; }
+};
+
+test("JSON --no-browser setup returns each approval URL at once and a background waiter completes it", async () => {
+  const server = await startOAuthServer({ setup: true });
   try {
     const box = boxFor();
-    // Run 1: no sign in yet. The sign in URL is announced; nothing else
-    // is approved in this run, because stdout has room for one line.
+    // Run 1: no sign in yet. The command returns with the sign in URL; one
+    // URL fits in one line, so this run approves nothing else.
     const first = await agentSetup(box, server);
-    assert.equal(first.announced.data.status, "login_pending");
-    const signIn = new URL(first.announced.data.next_action.url);
+    const signIn = assertAnnounced(first, server);
+    assert.equal(first.result.data.status, "login_pending");
     assert.equal(`${signIn.origin}${signIn.pathname}`, `${server.origin}/v1/oauth/authorize`);
     assert.match(signIn.searchParams.get("redirect_uri"), /^http:\/\/127\.0\.0\.1:[0-9]+\/callback$/);
     assert.equal(signIn.searchParams.get("code_challenge_method"), "S256");
-    assert.equal(fs.existsSync(path.join(box.log)), false, "a browser was launched");
+    assert.equal(fs.existsSync(box.log), false, "a browser was launched");
+    // The person approves after the command has exited.
     assert.equal(await completeInBrowser(signIn.href), 200);
-    const firstRun = await first.cli.done;
-    assertAnnounced(first.announced, firstRun, server);
-    assert.ok(fs.existsSync(path.join(box.project, ".metergraph", "project.json")), "sign in was not saved");
+    await until(() => fs.existsSync(path.join(box.project, ".metergraph", "project.json")), "the waiter to save sign in");
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
     assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
 
-    // Run 2: signed in, so the ingest-only approval URL is announced, and
-    // the run finishes delivery after the person approves.
+    // Run 2: signed in, so the ingest-only approval URL comes back, and the
+    // waiter finishes delivery after the person approves.
     const second = await agentSetup(box, server);
-    assert.equal(second.announced.data.status, "approval_pending");
-    assert.equal(second.announced.data.receipt.workspace_id, server.behavior.workspaceId);
-    assert.deepEqual(second.announced.data.receipt.completed_steps, ["login"]);
-    const approval = new URL(second.announced.data.next_action.url);
+    const approval = assertAnnounced(second, server);
+    assert.equal(second.result.data.status, "approval_pending");
+    assert.equal(second.result.data.receipt.workspace_id, server.behavior.workspaceId);
+    assert.deepEqual(second.result.data.receipt.completed_steps, ["login"]);
     assert.equal(`${approval.origin}${approval.pathname}`, `${server.origin}/v1/cli/setup/authorize`);
     assert.equal(approval.searchParams.get("intent"), "create");
     assert.equal(await completeInBrowser(approval.href), 200);
-    const secondRun = await second.cli.done;
-    assertAnnounced(second.announced, secondRun, server);
+    await until(() => setupPhase(box) === "delivered" &&
+      fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")), "the waiter to deliver the key");
     assert.match(fs.readFileSync(path.join(box.project, ".env"), "utf8"), /^METERGRAPH_APP_TOKEN=mg_/m);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json"))).phase, "delivered");
 
     // Run 3: nothing left to approve, so the usual result line.
     const done = await setup(box, server, ["--no-browser"]);
@@ -535,27 +547,62 @@ test("JSON --no-browser setup returns each approval URL as an open_url next acti
     assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
     for (const secret of secretsOf(server)) {
-      assert.ok(![firstRun.stdout, secondRun.stdout].some((text) => text.includes(secret)), "a credential was printed");
+      assert.ok(![first.run.stdout, second.run.stdout].some((text) => text.includes(secret)), "a credential was printed");
     }
   } finally { await server.close(); }
 });
 
-test("an announced approval that times out saves nothing and a rerun announces a fresh URL", async () => {
+test("an agent shell tool that waits for the command to exit gets the approval URL within seconds",
+  { skip: process.platform === "win32" && "the check uses a POSIX shell" }, async () => {
+    const server = await startOAuthServer({ setup: true });
+    try {
+      const box = boxFor();
+      assert.equal((await login(assert, box, server)).result.ok, true);
+      // A shell tool returns when the command exits and its output pipes
+      // close. The detached waiter must hold neither, even with the default
+      // five minute approval timeout. (Spawned asynchronously: this process
+      // also serves the synthetic service.)
+      const started = Date.now();
+      const shell = await new Promise((resolve, reject) => {
+        const child = spawn("sh", ["-c", '"$@"', "sh", process.execPath, BIN, "--json", "setup", "--runtime", "local",
+          "--project", box.project, "--config-dir", box.config, "--deployment", "customer-local",
+          "--confirm-prerequisites", "--url", server.origin, "--workspace", server.behavior.workspaceId,
+          "--client", "claude", "--no-browser"],
+        { env: { ...process.env, ...FAKE_SECRETS, ...LOCAL_ENV }, stdio: ["pipe", "pipe", "pipe"] });
+        const output = { stdout: "", stderr: "" };
+        child.stdout.setEncoding("utf8").on("data", (chunk) => (output.stdout += chunk));
+        child.stderr.setEncoding("utf8").on("data", (chunk) => (output.stderr += chunk));
+        const timer = setTimeout(() => { child.kill(); reject(new Error("the shell tool is still waiting")); }, 15000);
+        child.on("close", (status) => { clearTimeout(timer); resolve({ status, ...output }); });
+      });
+      assert.ok(Date.now() - started < 5000, "the shell tool waited for approval");
+      assert.equal(shell.status, 18);
+      assert.equal(shell.stderr, "");
+      const line = parseJsonLine(shell.stdout);
+      assert.equal(line.data.status, "approval_pending");
+      assert.equal(await completeInBrowser(line.data.next_action.url), 200);
+      await until(() => setupPhase(box) === "delivered", "the waiter to deliver the key");
+      const done = await setup(box, server, ["--no-browser", "--client", "claude"]);
+      assert.equal(done.outcome, "ok");
+      assert.ok(fs.existsSync(path.join(box.project, ".claude", "skills", "metergraph", "SKILL.md")));
+    } finally { await server.close(); }
+  });
+
+test("an approval nobody completes saves nothing and a rerun announces a fresh URL", async () => {
   const server = await startOAuthServer({ setup: true });
   try {
     const box = boxFor();
     assert.equal((await login(assert, box, server)).result.ok, true);
-    const started = Date.now();
     const pending = await agentSetup(box, server, ["--timeout-ms", "1000"]);
-    const run = await pending.cli.done;
-    const url = assertAnnounced(pending.announced, run, server);
-    assert.ok(Date.now() - started < 15000);
-    assert.equal(pending.announced.data.next_action.timeout_seconds, 1);
+    const url = assertAnnounced(pending, server);
+    assert.equal(pending.result.data.next_action.timeout_seconds, 1);
+    // The waiter gives up after its timeout; nothing was redeemed or written.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.notEqual(await completeInBrowser(url.href).catch(() => "refused"), 200);
     assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
     assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 0);
     const retry = await agentSetup(box, server, ["--timeout-ms", "1000"]);
-    const retried = await retry.cli.done;
-    const fresh = assertAnnounced(retry.announced, retried, server);
+    const fresh = assertAnnounced(retry, server);
     assert.notEqual(fresh.searchParams.get("state"), url.searchParams.get("state"));
     assert.equal(fresh.searchParams.get("family_id"), url.searchParams.get("family_id"));
   } finally { await server.close(); }

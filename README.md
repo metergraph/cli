@@ -107,11 +107,13 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   tells the agent what to do next.
 - **No hidden prompts.** No command reads stdin or asks a question. `--no-browser`
   prints the sign in URL for a person to open instead of launching a browser. With
-  `--json`, a step that needs approval prints its one JSON line as soon as the URL
-  exists: exit 18 `action_required`, with `data.next_action` set to
-  `{"kind": "open_url", "url": "...", "timeout_seconds": N, "message": "..."}`. The
-  command keeps waiting for the approval until `--timeout-ms`; when it exits, run the
-  same command again to continue from the saved state.
+  `--json`, a step that needs approval exits within seconds with 18
+  `action_required` and `data.next_action` set to
+  `{"kind": "open_url", "url": "...", "timeout_seconds": N, "message": "..."}`, so an
+  agent can show the URL to the person. A background process waits for the approval
+  until `--timeout-ms`; afterwards, run the same command again to continue from the
+  saved state
+  ([details](https://github.com/metergraph/cli/blob/main/docs/reference.md#approval-from-an-agent)).
 - **MCP.** Workspace tools for agents are served by the hosted MCP endpoint, not by this
   CLI. See the [MCP server guide](https://www.metergraph.dev/docs/guides/mcp-server/)
   and the [agent access guide](https://www.metergraph.dev/docs/guides/agent-access/).
@@ -171,7 +173,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 | 15 | `permission_denied` | The service refused this read for the signed in grant, for example for a missing scope or permission. |
 | 16 | `rate_limited` | The service asked the CLI to slow down. Nothing was retried. Try again later. |
 | 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
-| 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` print this line as soon as an approval URL exists (`next_action.kind: "open_url"`), keep waiting for approval until `--timeout-ms`, and exit 18 whatever happens next. Run the same command again to continue. |
+| 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` exit with this as soon as an approval URL exists (`next_action.kind: "open_url"`), while a background process waits for the approval until `--timeout-ms`. After approval, run the same command again to continue. |
 
 ## Security and privacy
 

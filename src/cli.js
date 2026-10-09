@@ -188,8 +188,9 @@ async function run(argv, { stdout, stderr }) {
 
 // With --json --no-browser, login and setup print their one JSON line as
 // soon as a person must open an approval URL, then keep waiting for the
-// callback. Whatever the run does afterwards, that line is its result and its
-// exit code; the agent reruns the command to continue. screen(data) returns
+// callback; bin/metergraph.js has already moved this process to the
+// background (approval-handoff.js). Whatever the run does afterwards, that
+// line is its result; the agent reruns the command to continue. screen(data) returns
 // the data to print, or null to print a credential_echo refusal instead.
 function announcer(parsed, stdout, screen) {
   const pending = { announce: null, result: null };
