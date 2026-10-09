@@ -19,7 +19,7 @@ To try a packed artifact without publishing:
 
 ```sh
 npm pack --pack-destination "$(mktemp -d)"
-npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.4.tgz -- metergraph --version
+npx --yes --package=/path/to/metergraph-cli-0.2.0-preview.5.tgz -- metergraph --version
 ```
 
 Do not commit tarballs or other generated files.
