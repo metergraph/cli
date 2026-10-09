@@ -3,6 +3,18 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
+## Unreleased
+
+- Non-hosted `setup` (`--deployment customer-local|byoc|oss`) refuses an SSH, cloud
+  workspace or CI session before it contacts the service or reads
+  `--agent-token-file`. Previously it checked the route, and could read and send the
+  agent token, before refusing.
+- Every non-hosted setup handoff now carries `data.next_action` as an object with
+  `kind`, `prerequisite` and `url`. Some handoffs returned a bare string.
+- An unreachable customer-local origin points to the `bundle_started_verified`
+  prerequisite, and an unreachable BYOC origin to `check_private_network`, instead of
+  the general connection guide.
+
 ## 0.2.0-preview.5
 
 - New `skills install`, `skills update` and `skills list` commands install the

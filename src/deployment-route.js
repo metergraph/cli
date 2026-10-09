@@ -117,7 +117,7 @@ const DEPLOYMENT_PATH = "/v1/deployment";
 const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 60000;
 
-function action(kind, prerequisite = null) {
+export function action(kind, prerequisite = null) {
   // Kinds are constants from this module, so this is a programming error.
   if (!ACTION_KINDS.includes(kind)) throw new Error("unknown next action kind");
   return { kind, prerequisite, url: CONNECTION_GUIDE_URL };

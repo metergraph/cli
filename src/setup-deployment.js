@@ -1,5 +1,6 @@
+import { detectRemoteSession } from "./auth-browser.js";
 import { runDoctor } from "./doctor.js";
-import { planDeploymentRoute, verifyDeploymentRoute } from "./deployment-route.js";
+import { action, planDeploymentRoute, verifyDeploymentRoute } from "./deployment-route.js";
 import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
 
 // Setup routing uses the same deployment model and Metadata credential checks
@@ -41,6 +42,17 @@ const handoff = (outcome, reason, nextAction = null, details = {}) => ({
     next_action: nextAction,
   },
 });
+
+// The next action when the service did not answer as a healthy deployment.
+// An unreachable customer-local origin usually means the bundle is not
+// running; an unreachable BYOC origin is private networking. Neither is
+// tunnelled or relaxed.
+function unreachedAction(deployment, outcome) {
+  if (deployment === "oss") return action("oss_operator_handoff");
+  if (outcome !== "connection_failed") return action("connection_guide");
+  if (deployment === "byoc") return action("check_private_network");
+  return action("complete_prerequisite", "bundle_started_verified");
+}
 
 // The static agent token can be any printable string of at least 16 bytes.
 // Even a fixed status such as "operator_handoff" might equal that token. Keep
@@ -94,13 +106,21 @@ export function planNonHostedSetup(options) {
   return { proceed: true, plan: planned.plan, prerequisites };
 }
 
-export async function preflightNonHostedSetup(options) {
+export async function preflightNonHostedSetup(options, { env = process.env } = {}) {
   const planned = planNonHostedSetup(options);
   if (!planned.proceed) return planned;
   const { plan, prerequisites } = planned;
+  // Setup itself refuses a remote session, but only after this preflight.
+  // Refuse here first, so a remote shell sends no request and never reads the
+  // separate agent token file.
+  if (detectRemoteSession(env) !== null) {
+    return handoff("unsupported", "run_on_local_machine", action("run_on_customer_machine"), {
+      profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
+    });
+  }
   const timeoutMs = Math.min(options.timeoutMs, AUTH_HTTP_TIMEOUT_MS);
   if (options.deployment === "oss" && !options.agentTokenFile) {
-    return handoff("unsupported", "oss_agent_token_file_required", "oss_operator_handoff", {
+    return handoff("unsupported", "oss_agent_token_file_required", action("oss_operator_handoff"), {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
       prerequisites: "operator_confirmed",
     });
@@ -123,7 +143,7 @@ export async function preflightNonHostedSetup(options) {
     // The OSS operator provisions MG_TOKENS and MG_AGENT_TOKENS separately.
     // No released OSS server implements the purpose-bound ingest bootstrap,
     // and a Metadata agent token cannot issue a key. Keep this a handoff.
-    return guardKnownCredentials(handoff("unsupported", "oss_ingest_operator_handoff", "oss_operator_handoff", {
+    return guardKnownCredentials(handoff("unsupported", "oss_ingest_operator_handoff", action("oss_operator_handoff"), {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
       prerequisites: "operator_confirmed", metadataAccess: "verified",
     }), verified);
@@ -134,13 +154,13 @@ export async function preflightNonHostedSetup(options) {
   // and unsafe network responses and reports only a fixed profile token.
   const doctor = await runDoctor({ origin: plan.origin, timeoutMs });
   if (doctor.report.deployment_profile !== null && doctor.report.deployment_profile !== plan.deployment_profile) {
-    return handoff("unsupported", "deployment_profile_mismatch", "connection_guide", {
+    return handoff("unsupported", "deployment_profile_mismatch", action("connection_guide"), {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
       prerequisites: "operator_confirmed",
     });
   }
   if (doctor.outcome !== "authentication_required") {
-    return handoff(doctor.outcome, doctor.reason, options.deployment === "oss" ? "oss_operator_handoff" : "connection_guide", {
+    return handoff(doctor.outcome, doctor.reason, unreachedAction(options.deployment, doctor.outcome), {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
       prerequisites: "operator_confirmed",
     });

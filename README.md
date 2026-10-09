@@ -194,9 +194,11 @@ report. See [SECURITY.md](https://github.com/metergraph/cli/blob/main/SECURITY.m
 
 `--url ORIGIN` selects the service; the default is `https://app.metergraph.dev`. It
 accepts a bare `https://` origin, or `http://` on `localhost`, `127.0.0.1` or `[::1]`.
-`setup --deployment` supports the hosted service (`managed`), the commercial
-`customer-local` bundle, customer-owned cloud (`byoc`) and the open source server
-(`oss`). See [self-hosting](https://www.metergraph.dev/docs/self-host/local/) and the
+`setup --deployment` routes to the hosted service (`managed`), the commercial
+`customer-local` bundle, customer-owned cloud (`byoc`) or the open source server
+(`oss`). The hosted service and released customer-local bundle are the release
+targets; `byoc` and `oss` are not yet verified against a live deployment. See
+[self-hosting](https://www.metergraph.dev/docs/self-host/local/) and the
 [setup reference](https://github.com/metergraph/cli/blob/main/docs/reference.md#setup).
 
 ## Links

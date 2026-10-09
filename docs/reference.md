@@ -363,7 +363,28 @@ route. OSS uses separate `MG_TOKENS` ingestion and `MG_AGENT_TOKENS` read
 credentials; `--deployment oss` verifies its Metadata route with a private
 agent token file and hands ingest configuration to the operator. It does not
 try hosted login or ingest bootstrap against OSS. Remote runtimes are handed
-off to a local machine, with no implicit tunnel or credential forwarding.
+off to a local machine, with no implicit tunnel or credential forwarding. A
+session with SSH, cloud workspace or CI markers is refused as
+`run_on_local_machine` before any request is sent or the agent token file is
+read.
+
+The hosted service and the released customer-local bundle are the release
+targets. The `byoc` and `oss` routes are implemented and covered by synthetic
+tests, but have not been verified against a live deployment.
+
+A non-hosted handoff has `data.status: "operator_handoff"` and
+`data.next_action` set to `{"kind": "...", "prerequisite": null | "...", "url": "..."}`.
+The kinds are:
+
+| `kind` | When |
+|---|---|
+| `complete_prerequisite` | A prerequisite is not confirmed, or a customer-local origin is unreachable (`prerequisite: "bundle_started_verified"`) |
+| `check_private_network` | A BYOC origin is unreachable |
+| `run_on_customer_machine` | The runtime or session is not the customer's machine |
+| `use_https_origin` | BYOC was given a non-HTTPS origin |
+| `oss_operator_handoff` | An OSS step only the server operator can complete |
+| `connection_guide` | Profile mismatch, redirect or another service response |
+| `platform_credential_handoff`, `fix_credential_file`, `use_metadata_only_credential` | The `--agent-token-file` cannot be used |
 
 If the project has no usable Metadata sign in, `setup` opens the deployment's
 browser sign in and workspace choice. `--signup` starts at hosted sign up;
