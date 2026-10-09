@@ -1,6 +1,9 @@
 # Packed client parity check
 
-This check runs a **local, unpublished tarball** in fresh projects. It proves
+`scripts/client-parity.mjs` checks one CLI artifact: a **local tarball**
+(`--tarball`) or a **published package** (`--package metergraph-cli@VERSION`,
+installed from the registry with an empty npm cache). Its offline part runs
+the artifact in fresh projects. It proves
 packaged CLI behavior for project skill placement, an unchanged rerun, and
 honest sign-in and verification refusals. It does not prove that a coding
 agent discovered or followed the skill.
@@ -35,9 +38,54 @@ the bytes published to npm.
 | Environment, workload and retained content reads | `unsupported` | No broadened read or silent filter loss |
 | Verify without exact identity | `invalid_input` | Exact trace is required |
 
+## Live setup journey
+
+`--journey customer-local` or `--journey managed` adds a live run against a real
+deployment. It records results in the report's `journey` field, and the
+[release matrix](release-matrix.md) is updated from it. For each client it does
+a fresh setup. It then runs the rerun, existing env file, wrong workspace,
+modified skill, interrupted and denied approval, no-browser, SDK trace with
+exact verify and dashboard view, verify timeout, revoked grant and logout
+scenarios. Each result is labelled with its evidence class, and the report also
+records timings and approval counts.
+
+```sh
+node scripts/client-parity.mjs --package metergraph-cli@0.2.0 \
+  --journey customer-local --url http://localhost:8080 --workspace <workspace-id> \
+  --bundle-manifest /path/to/metergraph-byoc-release.json \
+  --python /path/to/venv/bin/python --keep --out report.json
+```
+
+- **customer-local** approvals are automated. `scripts/parity/browser-approver.mjs`
+  is preloaded into the CLI under test and replaces the browser launcher. It hands
+  each URL to a headless Chromium that signs in as the stack's own administrator
+  and approves, denies or ignores the request, as the scenario needs.
+  Configuration is read from the environment, never from argv:
+  - `METERGRAPH_PARITY_ADMIN_ENV`: the bundle's private `.env`. Only the admin
+    email and password lines are read.
+  - `METERGRAPH_PARITY_PLAYWRIGHT`: an installed `playwright-core`.
+  - `METERGRAPH_PARITY_CHROME`: the Chromium executable.
+
+  Use a disposable stack started from a verified signed bundle, with no model
+  provider keys in its `.env`.
+- **managed** approvals (`--approver person`) open the person's own browser and
+  wait for them. Run it only with their consent and an approved test workspace.
+  Scenarios that need an automated denial or interruption are skipped.
+- The SDK step runs `scripts/parity/sdk_app.py` with the given Python. That
+  environment needs the public `metergraph` and `openai` packages. The OpenAI
+  client points at a loopback mock inside the harness, so nothing is sent to a
+  provider. Setup's two `.env` values are passed to that child process only.
+- `--keep` keeps the work directory, including the approval and dashboard
+  screenshots and the approver log. The log holds URL paths only.
+
+A journey report holds the deployment origin, a workspace ID and a trace ID.
+Keep reports and screenshots in the internal tracker, not in this repository.
+
 ## Release acceptance still needed
 
-The report explicitly lists its unchecked gates. After a release, repeat
+The report lists the gates it did not check in `not_checked`. A coding agent
+finding and following the skill (`live_client_discovery`) and provider-billed
+traffic (`application_traffic`) are always in that list. After a release, repeat
 installation with the **registry artifact** and compare its bytes/version to
 the reviewed source. For each client, confirm actual skill discovery and the
 setup flow in a clean environment. Separately verify hosted authentication,
