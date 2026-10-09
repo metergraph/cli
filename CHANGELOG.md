@@ -3,7 +3,7 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
-## Unreleased
+## 0.2.0-preview.5
 
 - New `skills install`, `skills update` and `skills list` commands install the
   Metergraph workflow skills bundled with the CLI: the model-swap loop
