@@ -30,14 +30,14 @@ EXIT_CODES = {
 
 
 USAGE = """Usage:
-  metergraph-skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
-  metergraph-skills update  --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+  metergraph-skills install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
+  metergraph-skills update  --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
   metergraph-skills path
   metergraph-skills --version
 
 Install or update the Metergraph agent skill in a project.
   --client   codex, claude or cursor
-  --runtime  local or cloud
+  --runtime  local (default) or cloud
   --project  Project directory. Default: the current directory.
   --json     Print one JSON line on stdout.
 
@@ -105,9 +105,7 @@ def parse_args(argv: List[str]) -> Dict[str, Any]:
         raise UsageError("missing_client", "--client is required. Use codex, claude or cursor.")
     if client not in SKILL_CLIENTS and client not in HANDOFF_SKILL_CLIENTS:
         raise UsageError("invalid_client", "--client must be codex, claude or cursor.")
-    runtime = values.get("--runtime")
-    if runtime is None:
-        raise UsageError("missing_runtime", "--runtime is required. Use local or cloud.")
+    runtime = values.get("--runtime", "local")
     if runtime not in SKILL_RUNTIMES and runtime not in HANDOFF_SKILL_RUNTIMES:
         raise UsageError("invalid_runtime", "--runtime must be local or cloud.")
     project = values.get("--project")

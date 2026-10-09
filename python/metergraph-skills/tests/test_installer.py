@@ -55,7 +55,7 @@ def run_raw(*args):
 SECRET = "mg_live_do_not_echo_0123456789"
 USAGE_CASES = [
     ["install", "--json"],
-    ["install", "--client", "codex", "--json"],
+    ["install", "--client", "codex", "--runtime", "", "--json"],
     ["install", "--client", SECRET, "--runtime", "local", "--json"],
     ["install", "--client", "codex", "--runtime", SECRET, "--json"],
     ["install", "--client", "codex", "--runtime", "local", "--project", "", "--json"],
@@ -142,6 +142,17 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(result["data"]["status"], "reused")
         entry = json.loads(self.read(RECEIPT))["installations"][0]
         self.assertEqual(entry["runtimes"], ["cloud", "local"])
+
+    def test_runtime_defaults_to_local(self):
+        result = run("install", "--client", "claude", project=self.project)
+        self.assertEqual((result["data"]["status"], result["data"]["runtime"]), ("installed", "local"))
+        entry = json.loads(self.read(RECEIPT))["installations"][0]
+        self.assertEqual(entry["runtimes"], ["local"])
+        result = run("update", "--client", "claude", project=self.project)
+        self.assertEqual((result["data"]["status"], result["data"]["runtime"]), ("reused", "local"))
+        result = run("install", "--client", "claude", "--runtime", "cloud", project=self.project)
+        self.assertEqual(result["data"]["runtime"], "cloud")
+        self.assertEqual(json.loads(self.read(RECEIPT))["installations"][0]["runtimes"], ["cloud", "local"])
 
     def test_unowned_skill_is_not_replaced(self):
         self.write(PATHS["claude"], b"mine\n")

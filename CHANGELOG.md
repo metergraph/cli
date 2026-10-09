@@ -3,6 +3,14 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
+## Unreleased
+
+- `skill install|update` and `skills install|update` default `--runtime` to `local`,
+  the runtime `setup` already installs the skill for, so
+  `metergraph skills install --client claude` works without it. `--runtime cloud` and
+  the `cloud-no-shell` handoff work as before. `metergraph-skills install|update` in
+  the Python package gets the same default.
+
 ## 0.2.0-preview.5
 
 - New `skills install`, `skills update` and `skills list` commands install the

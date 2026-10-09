@@ -245,6 +245,26 @@ test("the cloud runtime is recorded and a second runtime only updates the receip
   assertNoLeftovers(dir);
 });
 
+test("--runtime defaults to local, and explicit cloud and handoff runtimes still apply", async () => {
+  const dir = project();
+  const defaulted = await skill(["install", "--client", "claude", "--project", dir]);
+  assert.equal(defaulted.data.status, "installed");
+  assert.equal(defaulted.data.runtime, "local");
+  assert.deepEqual(JSON.parse(read(dir, RECEIPT)).installations[0].runtimes, ["local"]);
+  const updated = await skill(["update", "--client", "claude", "--project", dir]);
+  assert.equal(updated.data.status, "reused");
+  assert.equal(updated.data.runtime, "local");
+
+  const cloud = await skill(["install", "--client", "claude", "--runtime", "cloud", "--project", dir]);
+  assert.equal(cloud.data.runtime, "cloud");
+  assert.deepEqual(JSON.parse(read(dir, RECEIPT)).installations[0].runtimes, ["cloud", "local"]);
+
+  const handoff = project();
+  const noShell = await skill(["install", "--client", "claude", "--runtime", "cloud-no-shell", "--project", handoff]);
+  assertFailure(noShell, "unsupported", "runtime_not_supported");
+  assert.deepEqual(listFiles(handoff), []);
+});
+
 test("--project defaults to the working directory and accepts relative paths", async () => {
   const dir = project();
   const implicit = await skill(["install", "--client", "claude", "--runtime", "local"], { cwd: dir });
@@ -451,7 +471,6 @@ test("invalid arguments are rejected before any write and never echoed", async (
     [["install"], "missing_client"],
     [["install", "--client", "hunter2", "--runtime", "local"], "invalid_client"],
     [["install", "--client", "claude", "--runtime", "sk-fake-2222222222222222"], "invalid_runtime"],
-    [["install", "--client", "claude"], "missing_runtime"],
     [["--client", "claude", "--runtime", "local"], "missing_subcommand"],
     [["remove", "--client", "claude", "--runtime", "local"], "unknown_subcommand"],
     [["install", "--client", "claude", "--client", "codex", "--runtime", "local"], "duplicate_option"],

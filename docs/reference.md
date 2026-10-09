@@ -32,11 +32,11 @@ metergraph help doctor [--json]
 metergraph --version [--json]
 metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]
 metergraph help skill [--json]
-metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
-metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skill install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
+metergraph skill update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
 metergraph help skills [--json]
-metergraph skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
-metergraph skills update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skills install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
+metergraph skills update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
 metergraph skills list [--project DIR] [--json]
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
@@ -112,8 +112,9 @@ scripts and CI.
 ### skill install and skill update
 
 `skill install` copies the Metergraph skill bundled with this CLI into one client's
-native project skill directory. Both `--client` and `--runtime` are required, so the
-command never guesses where the skill will be used.
+native project skill directory. `--client` is required, so the command never guesses
+which client loads the skill. `--runtime` defaults to `local`, the runtime `setup`
+installs the skill for; pass `--runtime cloud` when the client runs in a cloud checkout.
 
 | `--client` | Client | Skill file written | Client documentation |
 | --- | --- | --- | --- |
@@ -127,7 +128,7 @@ overwrite another.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `--client CLIENT` | required | `codex`, `claude` or `cursor`. |
-| `--runtime RUNTIME` | required | `local` when the client runs on this machine, `cloud` when it runs in a cloud environment with a shell and a checkout of the project. Recorded, not detected. |
+| `--runtime RUNTIME` | `local` | `local` when the client runs on this machine, `cloud` when it runs in a cloud environment with a shell and a checkout of the project. Recorded, not detected. |
 | `--project DIR` | current directory | Must be an existing directory. Symbolic links in this path are resolved once; nothing below it is followed. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 

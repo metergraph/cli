@@ -80,11 +80,11 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   network access:
 
   ```sh
-  npx --yes metergraph-cli@next skill install --client codex --runtime local
+  npx --yes metergraph-cli@next skill install --client codex
   ```
 
   Python users can run `pip install metergraph-skills` and
-  `metergraph-skills install --client codex --runtime local` instead
+  `metergraph-skills install --client codex` instead
   ([details](https://github.com/metergraph/cli/blob/main/python/metergraph-skills/README.md)).
   Both write the same files and recognise each other's installs.
 - **Model-swap skills.** `skills install` adds the workflow skills from
@@ -94,8 +94,11 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   the `metergraph/skills` plugin marketplace instead.
 
   ```sh
-  npx --yes metergraph-cli@next skills install --client claude --runtime local
+  npx --yes metergraph-cli@next skills install --client claude
   ```
+
+  `--runtime` defaults to `local`. Pass `--runtime cloud` when the client runs in a
+  cloud environment with a checkout of the project.
 
 - **Machine output.** Every command takes `--json` and then prints exactly one JSON
   line on stdout and nothing on stderr. All results share one envelope:

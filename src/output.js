@@ -73,20 +73,20 @@ const SKILL_OPTIONS = [
   {
     name: "--runtime",
     value: "RUNTIME",
-    summary: "Required. local or cloud: where the client runs. Recorded, not detected.",
+    summary: "local (default) or cloud: where the client runs. Recorded, not detected.",
   },
   { name: "--project", value: "DIR", summary: "Existing project directory. Default: the current directory." },
   { name: "--json", value: null, summary: "Print one JSON line on stdout." },
 ];
 
 const SKILL_USAGE = [
-  "metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
-  "metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+  "metergraph skill install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]",
+  "metergraph skill update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]",
 ];
 
 const SKILLS_USAGE = [
-  "metergraph skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
-  "metergraph skills update --client CLIENT --runtime RUNTIME [--project DIR] [--json]",
+  "metergraph skills install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]",
+  "metergraph skills update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]",
   "metergraph skills list [--project DIR] [--json]",
 ];
 
