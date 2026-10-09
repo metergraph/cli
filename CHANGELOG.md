@@ -14,6 +14,16 @@
 - An unreachable customer-local origin points to the `bundle_started_verified`
   prerequisite, and an unreachable BYOC origin to `check_private_network`, instead of
   the general connection guide.
+- Non-hosted setup handoffs add `data.next_action.message`, fixed guidance for the
+  next step. Without `--json`, setup prints each pending prerequisite with what to
+  do, for example how to start and check the customer-local bundle, and that the
+  registry pull credential never goes to this CLI.
+- A customer-local or BYOC setup rerun can omit `--deployment`, `--url`,
+  `--workspace` and `--confirm-prerequisites`. It resumes the saved route and checks
+  the live service again. Previously a plain rerun failed with
+  `deployment_profile_mismatch`.
+- `setup` refuses an existing `METERGRAPH_APP_TOKEN` it did not issue before sign in,
+  instead of after a browser approval.
 
 ## 0.2.0-preview.5
 

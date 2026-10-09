@@ -67,6 +67,13 @@ export async function runSetup(options, progress = () => {}) {
         (bound !== null && (bound.origin !== saved.value.origin || bound.workspace_id !== saved.value.workspace_id)))) {
       return stop("conflict", "setup_binding_changed");
     }
+    // An env key this setup does not own stops before any sign in, so the
+    // refusal costs no approval and leaves the binding untouched. The check
+    // after sign in stays, against a fresh read.
+    if (!saved) {
+      const early = currentEnvValues(preflightEnv({ project: root, envFile: options.envFile, signal: trap.signal }));
+      if (early.token !== null) return stop("conflict", "existing_ingest_key_unowned");
+    }
     const bindingDiffers = bound !== null && (bound.origin !== intendedOrigin ||
       (intendedWorkspace !== null && bound.workspace_id !== intendedWorkspace));
     if (bindingDiffers && !options.reconnect) return stop("conflict", "bound_to_other_workspace");

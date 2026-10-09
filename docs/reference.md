@@ -372,9 +372,12 @@ The hosted service and the released customer-local bundle are the release
 targets. The `byoc` and `oss` routes are implemented and covered by synthetic
 tests, but have not been verified against a live deployment.
 
-A non-hosted handoff has `data.status: "operator_handoff"` and
-`data.next_action` set to `{"kind": "...", "prerequisite": null | "...", "url": "..."}`.
-The kinds are:
+A non-hosted handoff has `data.status: "operator_handoff"`,
+`data.pending_prerequisites` listing every prerequisite not yet confirmed, and
+`data.next_action` set to
+`{"kind": "...", "prerequisite": null | "...", "url": "...", "message": "..."}`.
+`message` is fixed guidance for that kind or prerequisite. Without `--json`,
+setup prints each pending prerequisite with its guidance. The kinds are:
 
 | `kind` | When |
 |---|---|
@@ -386,6 +389,32 @@ The kinds are:
 | `connection_guide` | Profile mismatch, redirect or another service response |
 | `platform_credential_handoff`, `fix_credential_file`, `use_metadata_only_credential` | The `--agent-token-file` cannot be used |
 
+The prerequisites each deployment needs confirmed are:
+
+| Deployment | Prerequisites |
+|---|---|
+| `customer-local` | `released_signed_bundle`, `registry_invitation`, `bundle_started_verified`, `local_admin_configured`, `metadata_agent_credential` |
+| `byoc` | `operator_provisioning`, `private_network_reachability`, `identity_membership_configured`, `metadata_agent_credential` |
+| `oss` | `server_distribution_installed`, `deployment_discovery_supported`, `metadata_scope_supported`, `ingestion_tokens_configured`, `agent_read_tokens_configured`, `metadata_agent_credential` |
+
+Each deployment keeps its credentials apart. The customer-local registry pull
+credential is only for pulling the bundle's images, and setup never reads it.
+The local admin signs in only in the browser. The ingest key comes only from
+setup's single-use redemption and is written only to the env file. A separate
+`--agent-token-file` token is read from its private file and sent only to
+`/v1/agent/workspace` and `/v1/agent/capabilities`, before any sign in. It is
+never written anywhere, and setup stops if it grants content, replay or any
+access beyond Metadata. For OSS, `MG_TOKENS` ingestion tokens and
+`MG_AGENT_TOKENS` read tokens stay with the operator: setup verifies only the
+read token and never issues or writes an OSS ingest token.
+
+A rerun of customer-local or BYOC setup can omit `--deployment`, `--url`,
+`--workspace` and `--confirm-prerequisites`, as a hosted rerun does. Setup then
+resumes the route saved in `.metergraph/setup.json`, and checks the live
+profile and sign in again. A rerun cannot move the project to another
+deployment, origin or workspace: those stop with a conflict or a handoff, and
+nothing is changed.
+
 If the project has no usable Metadata sign in, `setup` opens the deployment's
 browser sign in and workspace choice. `--signup` starts at hosted sign up;
 `--workspace UUID` requires that exact workspace. An existing binding to a
@@ -394,8 +423,10 @@ deployment must advertise `metergraph.cli-setup/v1` on its own origin. Its setup
 metadata may name a pre-registered CLI client in `metergraph_cli_client_id`, which
 setup then uses for ingest approval instead of registering a new client. Setup
 refuses reconnecting an existing ingest family to another workspace; its
-original workspace must be restored before that family can be reused. Setup
-checks the env file and Git state, then opens the deployment's consent page. An
+original workspace must be restored before that family can be reused. An env
+file that already holds a `METERGRAPH_APP_TOKEN` this setup did not issue stops
+with `existing_ingest_key_unowned` before any sign in, so the refusal costs no
+approval. Setup checks the env file and Git state, then opens the deployment's consent page. An
 owner or member of the verified workspace approves an ingest-only key. The CLI
 redeems the single-use receipt, writes `METERGRAPH_APP_TOKEN` and
 `METERGRAPH_INGEST_URL` into `.env`, checks the new key with the service, and
