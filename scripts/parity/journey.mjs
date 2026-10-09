@@ -45,9 +45,10 @@ export async function runJourney(options) {
     ? readFileSync(approverLog, "utf8").trim().split("\n").filter((line) => line.includes('"step":"opened"')).length : 0);
 
   function cli(args, project, { mode = "approve", signalAfterOpen = null } = {}) {
-    const preload = approver === "automated" ? ["--import", APPROVER] : [];
+    const preload = approver === "person" ? [] : ["--import", APPROVER];
     const env = { ...process.env, ...LOCAL_SESSION, METERGRAPH_PARITY_APPROVER: mode,
-      METERGRAPH_PARITY_PROFILE: browserProfile, METERGRAPH_PARITY_LOG: approverLog };
+      METERGRAPH_PARITY_PROFILE: browserProfile, METERGRAPH_PARITY_LOG: approverLog,
+      ...(approver === "relay" ? { METERGRAPH_PARITY_APPROVER_RELAY: path.join(work, "evidence", "relay.jsonl") } : {}) };
     const started = now();
     const before = approvals();
     return new Promise((resolve) => {
@@ -103,8 +104,8 @@ export async function runJourney(options) {
     return project;
   };
   const setupArgs = (client, extra = []) => ["setup", "--runtime", "local", "--client", client,
-    ...(deployment === "managed" ? ["--url", origin] : ["--deployment", deployment, "--url", origin,
-      "--workspace", workspace, "--confirm-prerequisites"]), "--timeout-ms", "120000", ...extra];
+    ...(deployment === "managed" ? ["--url", origin, ...(workspace === null ? [] : ["--workspace", workspace])] : ["--deployment", deployment, "--url", origin,
+      "--workspace", workspace, "--confirm-prerequisites"]), "--timeout-ms", approver === "automated" ? "120000" : "600000", ...extra];
   const projectState = (project, client = "claude") => ({
     env: hashOf(path.join(project, ".env")),
     setup: hashOf(path.join(project, ".metergraph", "setup.json")),
@@ -229,7 +230,7 @@ export async function runJourney(options) {
     check("restored_rerun_ok", restored.body?.outcome === "ok" && restored.body?.data?.skill === "reused");
   });
 
-  if (approver === "automated") {
+  if (approver !== "person") {
     for (const [id, mode, signal, expected] of [
       ["interrupted_setup", "ignore", "SIGINT", "cancelled"],
       ["denied_approval", "deny", null, "access_denied"],
@@ -268,7 +269,10 @@ export async function runJourney(options) {
       summarize(record, run);
       check("verify_ok", run.body?.outcome === "ok", `${record.outcome}/${record.reason}`);
       const data = run.body?.data ?? {};
+      // The dashboard link is workspace-bound and holds no credential. It is
+      // kept so a person can open it after a relay or person run.
       record.verify = { attempts: data.attempts ?? null, trace_status: data.trace?.status ?? data.status ?? null,
+        app_url: data.app_url ?? null,
         link_workspace_bound: data.link_workspace_bound ?? null, content_included: data.content_included ?? null };
       check("content_not_included", data.content_included === false);
       check("link_workspace_bound", data.link_workspace_bound === true);
@@ -343,6 +347,17 @@ export async function runJourney(options) {
       window?.since ?? new Date(now() - 60000).toISOString(), "--until", window?.until ?? new Date(now()).toISOString(),
       "--source", "synthetic"], base);
     check("verify_login_required", verify.body?.outcome === "login_required", verify.body?.outcome);
+  });
+
+  // Leave no grant behind: log out of every project this run signed in.
+  await scenario("cleanup_logout", "real_deployment", async (record, check) => {
+    for (const name of readdirSync(path.join(work, "projects"))) {
+      const project = path.join(work, "projects", name);
+      if (!existsSync(path.join(project, ".metergraph", "project.json"))) continue;
+      const run = await cli(["logout"], project);
+      check(`logout_${name}`, run.body?.outcome === "ok", run.body?.error?.reason);
+    }
+    if (Object.keys(record.checks).length === 0) record.checks.nothing_to_log_out = "pass";
   });
 
   return { results, trace_id: traceId, evidence_dir: path.dirname(approverLog),

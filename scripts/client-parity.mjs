@@ -20,7 +20,7 @@ const CLIENT_PATHS = Object.freeze({
 const NO_NETWORK = fileURLToPath(new URL("../test/fixtures/no-network.js", import.meta.url));
 const USAGE = `Usage: node scripts/client-parity.mjs (--tarball /absolute/path.tgz | --package metergraph-cli@VERSION)
   [--journey customer-local|managed --url ORIGIN [--workspace UUID] [--bundle-manifest FILE]
-   [--approver automated|person] [--python PATH] [--clients codex,claude,cursor] [--keep] [--out FILE]]
+   [--approver automated|person|relay] [--python PATH] [--clients codex,claude,cursor] [--keep] [--out FILE]]
 `;
 
 function parseArgs(argv) {
@@ -45,7 +45,7 @@ function parseArgs(argv) {
   const clients = (values["--clients"] ?? "codex,claude,cursor").split(",");
   if (clients.length === 0 || clients.some((client) => !Object.hasOwn(CLIENT_PATHS, client))) return null;
   const approver = values["--approver"] ?? (journey === "customer-local" ? "automated" : "person");
-  if (!["automated", "person"].includes(approver) || (approver === "automated" && journey !== "customer-local")) return null;
+  if (!["automated", "person", "relay"].includes(approver) || (approver === "automated" && journey !== "customer-local")) return null;
   return { tarball: values["--tarball"] ?? null, spec: values["--package"] ?? null, journey, origin: values["--url"] ?? null,
     workspace: values["--workspace"] ?? null, manifest: values["--bundle-manifest"] ?? null, approver,
     python: values["--python"] ?? "python3", clients, keep: flags.has("--keep"), out: values["--out"] ?? null };
