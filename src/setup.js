@@ -1,7 +1,7 @@
 import { detectRemoteSession, openBrowser } from "./auth-browser.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { startCallbackListener } from "./auth-callback.js";
-import { runLogin } from "./auth-login.js";
+import { openUrl, runLogin } from "./auth-login.js";
 import { clientFor, endpointsFor, newPkce, offeredClientId } from "./auth-oauth.js";
 import { Stop } from "./auth-store.js";
 import { verifiedSession } from "./auth-session.js";
@@ -24,26 +24,26 @@ const PURPOSE = "ingest-bootstrap-v1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RECEIPT = /^mgbs_[A-Za-z0-9_-]{32,256}$/;
 const KEY = (value) => typeof value === "string" && UUID.test(value);
-// --json cannot show a person the --no-browser approval URL. The refusal names
-// a fixed, secret-free next step instead of only a reason token.
-const RUN_IN_TERMINAL = Object.freeze({
-  kind: "run_in_terminal",
-  message: "Run the same setup command in a terminal without --json to see the approval URL.",
-});
-const fail = (outcome, reason, status = "not_ready", receipt = null) => ({ outcome, reason,
-  data: { status, application_traffic_verified: false, receipt,
-    next_action: reason === "no_browser_requires_terminal" ? RUN_IN_TERMINAL : null } });
+const fail = (outcome, reason, status = "not_ready", receipt = null, next = null) => ({ outcome, reason,
+  data: { status, application_traffic_verified: false, receipt, next_action: next } });
 
 // This command never receives an ingest key from argv, stdin, an environment
 // variable or a Metadata OAuth grant. Only the purpose-bound redemption
 // response can supply it. Every returned string is fixed and non-secret.
+//
+// With --json --no-browser the caller passes options.announce(data). The
+// first approval this run needs (sign in, or ingest-only setup approval) is
+// announced as setup data with an open_url next action while the listener
+// keeps waiting; stdout has room for one line, so a second approval in the
+// same run is not started. The person approves, the run saves what it
+// finished, and the agent reruns setup, which resumes from the saved state.
 export async function runSetup(options, progress = () => {}) {
   if (options.runtime !== "local" || detectRemoteSession() !== null) return fail("unsupported", "run_on_local_machine");
   const trap = trapSignals();
   let receipt = null;
   let loginVerified = false;
   let credentialVerified = false;
-  const stop = (outcome, reason, status = "not_ready") => {
+  const currentReceipt = () => {
     let current = receipt;
     if (current !== null && (!loginVerified || !credentialVerified)) {
       const completed = loginVerified ? ["login"] : [];
@@ -52,8 +52,14 @@ export async function runSetup(options, progress = () => {}) {
           ...(!loginVerified ? ["login"] : []), "credential", "skill", "instrument", "verify", "view",
         ] };
     }
-    return fail(outcome, reason, status, current);
+    return current;
   };
+  const stop = (outcome, reason, status = "not_ready") => fail(outcome, reason, status, currentReceipt());
+  let announced = false;
+  const announce = options.announce ? (status, next) => {
+    announced = true;
+    options.announce(fail("action_required", "browser_approval_required", status, currentReceipt(), next).data);
+  } : null;
   try {
     const root = resolveProject(options.project);
     const saved = readSetupState(root);
@@ -74,7 +80,8 @@ export async function runSetup(options, progress = () => {}) {
       await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
     if (!signedIn.ok && signedIn.outcome === "login_required") {
       const login = await runLogin({ ...options, origin: intendedOrigin, workspace: intendedWorkspace,
-        project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null }, progress);
+        project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null,
+        announce: announce && ((data) => announce("login_pending", data.next_action)) }, progress);
       if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending");
       signedIn = await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
     }
@@ -146,8 +153,9 @@ export async function runSetup(options, progress = () => {}) {
     }
 
     // A verified rerun returned above without approval. From here a person
-    // must open an approval URL, which --json cannot show with --no-browser.
-    if (options.json && options.noBrowser) return stop("unsupported", "no_browser_requires_terminal");
+    // must open an approval URL. A run that already announced its sign in URL
+    // has used its one JSON line, so it stops here and the rerun continues.
+    if (announced) return stop("action_required", "browser_approval_required", "approval_pending");
     const setup = await discoverSetup(origin, profile, trap.signal);
     if (!setup.ok) return stop(setup.outcome, setup.reason);
 
@@ -183,7 +191,9 @@ export async function runSetup(options, progress = () => {}) {
       if (intent === "repair") params.expected_key_id = state.key_id;
       url.search = new URLSearchParams(params).toString();
       if (trap.signal.aborted) return stop("authorization_failed", "cancelled");
-      if (options.noBrowser) progress(`Open this URL on this machine to approve ingest-only setup:\n${url.href}`);
+      if (options.noBrowser && announce) {
+        announce("approval_pending", openUrl(url.href, Math.round(options.timeoutMs / 1000), "approve ingest-only setup"));
+      } else if (options.noBrowser) progress(`Open this URL on this machine to approve ingest-only setup:\n${url.href}`);
       else if (!(await openBrowser(url.href))) return stop("authorization_failed", "browser_unavailable");
       else progress("Opened your browser for ingest-only setup approval.");
       callback = await pending;

@@ -32,11 +32,11 @@ metergraph help doctor [--json]
 metergraph --version [--json]
 metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]
 metergraph help skill [--json]
-metergraph skill install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
-metergraph skill update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skill install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
+metergraph skill update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
 metergraph help skills [--json]
-metergraph skills install --client CLIENT --runtime RUNTIME [--project DIR] [--json]
-metergraph skills update --client CLIENT --runtime RUNTIME [--project DIR] [--json]
+metergraph skills install --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
+metergraph skills update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
 metergraph skills list [--project DIR] [--json]
 metergraph help login [--json]
 metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
@@ -112,8 +112,9 @@ scripts and CI.
 ### skill install and skill update
 
 `skill install` copies the Metergraph skill bundled with this CLI into one client's
-native project skill directory. Both `--client` and `--runtime` are required, so the
-command never guesses where the skill will be used.
+native project skill directory. `--client` is required, so the command never guesses
+which client loads the skill. `--runtime` defaults to `local`, the runtime `setup`
+installs the skill for; pass `--runtime cloud` when the client runs in a cloud checkout.
 
 | `--client` | Client | Skill file written | Client documentation |
 | --- | --- | --- | --- |
@@ -127,7 +128,7 @@ overwrite another.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `--client CLIENT` | required | `codex`, `claude` or `cursor`. |
-| `--runtime RUNTIME` | required | `local` when the client runs on this machine, `cloud` when it runs in a cloud environment with a shell and a checkout of the project. Recorded, not detected. |
+| `--runtime RUNTIME` | `local` | `local` when the client runs on this machine, `cloud` when it runs in a cloud environment with a shell and a checkout of the project. Recorded, not detected. |
 | `--project DIR` | current directory | Must be an existing directory. Symbolic links in this path are resolved once; nothing below it is followed. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
@@ -260,7 +261,7 @@ metergraph logout
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
 | `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
-| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits 6 `no_browser_requires_terminal` with a `run_in_terminal` next action. |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits at once with 18 `action_required` and an `open_url` next action, while a background process waits for the approval. See [Approval from an agent](#approval-from-an-agent). |
 | `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
@@ -413,12 +414,10 @@ deployment profile, selected client, and completed and pending steps. A skill
 conflict leaves the delivered key in place and reports `credential_ready_skill_pending`;
 resolve the skill file conflict and rerun setup without another approval.
 With `--no-browser`, setup prints the approval URL on stderr instead of opening a
-browser. Under `--json` it cannot show that URL, so a rerun that needs no approval
-(a working saved key) still succeeds, and one that needs approval exits 6
-`no_browser_requires_terminal` before any approval request or env write, with
-`data.next_action` set to `{"kind": "run_in_terminal", "message": "..."}`. The
-message is fixed text and holds no URL or credential. Non-hosted operator
-handoffs carry their own deployment `next_action`; every other setup result has
+browser. Under `--json`, a rerun that needs no approval (a working saved key)
+still succeeds, and one that needs approval announces its URL as described in
+[Approval from an agent](#approval-from-an-agent). Non-hosted operator handoffs
+carry their own deployment `next_action`; every other setup result has
 `next_action: null`.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
@@ -722,8 +721,10 @@ A successful `login`:
   is then `accepted`, `unconfirmed` or `not_attempted`).
 - `credential_protection` is `owner_only_file` or `dpapi`.
 - On failure `authenticated` and `configured` are `false`, `scopes` is empty, and
-  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect`,
-  `run_in_terminal` or `no_browser`.
+  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect` or
+  `no_browser`. With `--json --no-browser`, a sign in that needs approval returns
+  `action_required` with `status: "approval_pending"` and an `open_url` next action;
+  see [Approval from an agent](#approval-from-an-agent).
 - The schema version `1` is the version of this CLI's own JSON output. It is unrelated
   to the service's agent access contract version, `metergraph.agent-access/v1`.
 - `login` and `logout` never print tokens, the authorization code, the PKCE verifier,
@@ -738,6 +739,62 @@ A successful `login`:
 Without `--json`, results are printed as text on stdout and usage errors go to stderr.
 `login` prints progress lines, and with `--no-browser` the authorization URL, on
 stderr.
+
+### Approval from an agent
+
+A coding agent usually runs commands without a terminal, so it cannot read a URL
+from stderr. Its shell tool usually shows output only after a command exits, so it
+cannot read a URL from a command that is still waiting, either. With `--json
+--no-browser`, a `login` or `setup` step that needs a person to approve in a browser
+therefore exits within seconds with the URL:
+
+```json
+{
+  "schema_version": 1,
+  "command": "setup",
+  "ok": false,
+  "outcome": "action_required",
+  "exit_code": 18,
+  "data": {
+    "status": "login_pending",
+    "application_traffic_verified": false,
+    "receipt": null,
+    "next_action": {
+      "kind": "open_url",
+      "url": "https://metergraph.example.com/v1/oauth/authorize?response_type=code&client_id=...&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fcallback&scope=agent%3Ametadata&state=...&code_challenge=...&code_challenge_method=S256&resource=...",
+      "timeout_seconds": 300,
+      "message": "Show this URL to the person now and ask them to open it in a browser on this machine to sign in with Metadata access. A background process waits up to 300 seconds for their approval. After they approve, run the same command again to continue."
+    }
+  },
+  "error": {
+    "code": "action_required",
+    "reason": "browser_approval_required",
+    "message": "A person must approve in a browser. Open data.next_action.url on this machine; a background process waits for the approval until the timeout. After approval, run the same command again to continue."
+  }
+}
+```
+
+- The agent shows `next_action.url` to the person, who opens it in a browser on the
+  same machine. The URL redirects to the CLI's `127.0.0.1` listener. The URL is the
+  authorization request only: public client ID, loopback redirect, state and PKCE
+  challenge. It never holds a token, code, verifier or ingest key.
+- The approval comes back to a loopback listener. So when the command needs approval
+  under `--json --no-browser`, it runs as a detached background process, which the
+  command starts with the same arguments and no credential. The command prints that
+  process's one JSON line and exits at once. The background process keeps listening
+  until approval, denial or `--timeout-ms`, saves what the approval completed, and
+  exits. It prints nothing and holds none of the agent shell's output, so the agent's
+  command returns at once. A step that needs no approval runs as before and prints
+  its usual result.
+- After the person approves, the agent runs the same command again. The rerun resumes
+  from the saved sign in and setup state. A rerun before approval announces a fresh
+  URL; the earlier one keeps working until its own timeout.
+- One run announces at most one URL. `setup` on a project that is not signed in
+  needs two approvals, so an agent runs it three times: sign in (`status:
+  "login_pending"`), ingest-only setup approval (`status: "approval_pending"`, with
+  the `receipt`), then a rerun that needs no approval and returns
+  `ready_for_instrumentation`.
+- A denied approval, or one that times out, saves nothing. The rerun announces a fresh URL.
 
 ## Safe origins
 

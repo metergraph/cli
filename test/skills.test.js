@@ -129,6 +129,32 @@ test("an unchanged rerun of install or update writes nothing", async () => {
   }
 });
 
+test("--runtime defaults to local for install and update; explicit runtimes still apply", async () => {
+  const dir = project();
+  const defaulted = await skills(["install", "--client", "claude", "--project", dir]);
+  assert.equal(defaulted.ok, true);
+  assert.equal(defaulted.data.runtime, "local");
+  for (const skill of defaulted.data.skills) {
+    const receipt = JSON.parse(fs.readFileSync(path.join(dir, receiptPath(skill.name)), "utf8"));
+    assert.deepEqual(receipt.installations[0].runtimes, ["local"]);
+  }
+  const updated = await skills(["update", "--client", "claude", "--project", dir]);
+  assert.equal(updated.ok, true);
+  assert.equal(updated.data.runtime, "local");
+  assert.ok(Object.values(statuses(updated)).every((status) => status === "reused"));
+
+  const cloud = await skills(["install", "--client", "claude", "--runtime", "cloud", "--project", dir]);
+  assert.equal(cloud.data.runtime, "cloud");
+  const first = JSON.parse(fs.readFileSync(path.join(dir, receiptPath(NAMES[0])), "utf8"));
+  assert.deepEqual(first.installations[0].runtimes, ["cloud", "local"]);
+
+  const handoff = project();
+  const noShell = await skills(["install", "--client", "claude", "--runtime", "cloud-no-shell", "--project", handoff]);
+  assert.equal(noShell.outcome, "unsupported");
+  assert.equal(noShell.error.reason, "runtime_not_supported");
+  assert.deepEqual(listFiles(handoff), []);
+});
+
 test("the setup skill and the pack keep separate receipts", async () => {
   const dir = project();
   const core = await runCli(["skill", "install", "--client", "claude", "--runtime", "local", "--project", dir, "--json"], { offline: true });
@@ -287,7 +313,7 @@ test("skills help works offline and names what it does not do", async () => {
   for (const args of [["help", "skills"], ["skills", "--help"]]) {
     const run = await runCli(args, { offline: true });
     assert.equal(run.code, 0);
-    assert.match(run.stdout, /metergraph skills install --client CLIENT --runtime RUNTIME/);
+    assert.match(run.stdout, /metergraph skills install --client CLIENT \[--runtime RUNTIME\]/);
     assert.match(run.stdout, /metergraph skills list \[--project DIR\]/);
     assert.match(run.stdout, /plugin marketplace/);
   }

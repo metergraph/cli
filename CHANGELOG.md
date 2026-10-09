@@ -3,6 +3,23 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
+## Unreleased
+
+- `skill install|update` and `skills install|update` default `--runtime` to `local`,
+  the runtime `setup` already installs the skill for, so
+  `metergraph skills install --client claude` works without it. `--runtime cloud` and
+  the `cloud-no-shell` handoff work as before. `metergraph-skills install|update` in
+  the Python package gets the same default.
+- `login --json --no-browser` and `setup --json --no-browser` no longer exit 6
+  `no_browser_requires_terminal` when approval is needed. They exit within seconds
+  with the new exit code 18 `action_required`, reason `browser_approval_required` and
+  `data.next_action: {"kind": "open_url", "url", "timeout_seconds", "message"}`, so a
+  coding agent can show the URL to the person. A detached background process keeps
+  the loopback listener open until approval or `--timeout-ms` and saves what the
+  approval completes. Run the same command again after approval to continue. The URL
+  is the authorization request and carries no credential. The `run_in_terminal` next
+  action is gone.
+
 ## 0.2.0-preview.5
 
 - New `skills install`, `skills update` and `skills list` commands install the
