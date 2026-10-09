@@ -7,6 +7,11 @@ import { after, test } from "node:test";
 import { containsKnownCredential, planNonHostedSetup, preflightNonHostedSetup } from "../src/setup-deployment.js";
 import { main } from "../src/cli.js";
 import { healthyRoutes, json, startServer } from "./helpers.js";
+import { LOCAL_ENV } from "./auth-helpers.js";
+
+// These tests call setup in process. Blank the runner's CI or SSH markers so
+// they run as a local session; the remote handoff test sets its own.
+for (const [name, value] of Object.entries(LOCAL_ENV)) process.env[name] = value;
 
 const WORKSPACE = "00000000-0000-4000-8000-00000000000a";
 const servers = [];
@@ -187,4 +192,53 @@ test("successful local verification keeps the separate agent token guarded witho
   assert.equal(containsKnownCredential({ status: token }, routed), true);
   assert.deepEqual(server.requests.filter((request) => request.headers.authorization).map((request) => request.path),
     ["/v1/agent/workspace", "/v1/agent/capabilities"]);
+});
+
+const GUIDE = "https://www.metergraph.dev/docs/guides/agent-access/";
+const closedOrigin = async (scheme) => {
+  const server = await startServer({});
+  const { port } = new URL(server.origin);
+  await server.close();
+  return `${scheme}://localhost:${port}`;
+};
+
+test("every setup handoff carries a structured next action, not a bare kind", async () => {
+  const server = await serve(healthyRoutes("managed"));
+  const wrong = await preflightNonHostedSetup(input(server.origin), { env: {} });
+  assert.deepEqual(wrong.data.next_action, { kind: "connection_guide", prerequisite: null, url: GUIDE });
+  const oss = await preflightNonHostedSetup(input(server.origin, { deployment: "oss" }), { env: {} });
+  assert.deepEqual(oss.data.next_action, { kind: "oss_operator_handoff", prerequisite: null, url: GUIDE });
+});
+
+test("an unreachable customer-local origin hands off to starting the bundle", async () => {
+  const result = await preflightNonHostedSetup(input(await closedOrigin("http")), { env: {} });
+  assert.equal(result.proceed, false);
+  assert.equal(result.outcome, "connection_failed");
+  assert.deepEqual(result.data.next_action,
+    { kind: "complete_prerequisite", prerequisite: "bundle_started_verified", url: GUIDE });
+  assert.equal(result.data.metadata_access, "not_checked");
+});
+
+test("an unreachable BYOC origin hands off to a private network check, with no tunnel", async () => {
+  const result = await preflightNonHostedSetup(input(await closedOrigin("https"), { deployment: "byoc" }), { env: {} });
+  assert.equal(result.proceed, false);
+  assert.equal(result.outcome, "connection_failed");
+  assert.deepEqual(result.data.next_action, { kind: "check_private_network", prerequisite: null, url: GUIDE });
+});
+
+test("a remote session is handed off before any request or credential read", async () => {
+  const server = await serve(healthyRoutes("local", discoveryRoutes()));
+  for (const env of [{ SSH_CONNECTION: "192.0.2.1 50000 192.0.2.2 22" }, { CODESPACES: "true" }]) {
+    for (const deployment of ["customer-local", "oss"]) {
+      const result = await preflightNonHostedSetup(input(server.origin, {
+        deployment, agentTokenFile: "/never-created/agent-token",
+      }), { env });
+      assert.equal(result.proceed, false);
+      assert.equal(result.outcome, "unsupported");
+      assert.equal(result.reason, "run_on_local_machine");
+      assert.deepEqual(result.data.next_action, { kind: "run_on_customer_machine", prerequisite: null, url: GUIDE });
+      assert.equal(result.data.metadata_access, "not_checked");
+    }
+  }
+  assert.equal(server.requests.length, 0, "no request was sent from a remote session");
 });
