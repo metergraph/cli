@@ -57,6 +57,9 @@ export async function startOAuthServer(initial = {}) {
     // A pre-registered CLI client ID that both metadata documents offer, or
     // null for a service that only supports dynamic registration.
     cliClientId: null,
+    // Static agent read tokens an operator configured, accepted on the
+    // bearer documents for the behavior's workspace, as MG_AGENT_TOKENS are.
+    agentTokens: [],
     ...initial,
   };
 
@@ -383,7 +386,9 @@ export async function startOAuthServer(initial = {}) {
 
   function bearer(request, response, path, query) {
     const header = request.headers.authorization ?? "";
-    const grant = header.startsWith("Bearer ") ? state.access.get(header.slice(7)) : undefined;
+    const presented = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const grant = presented === null ? undefined : state.access.get(presented) ??
+      (behavior.agentTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false } : undefined);
     if (grant === undefined || grant.revoked) {
       response.writeHead(401, {
         "content-type": "application/json",

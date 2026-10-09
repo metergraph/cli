@@ -442,7 +442,8 @@ function parseSetup(values, flags, json, fail) {
     parseTimeout(rawTimeout, LOGIN_MIN_TIMEOUT_MS, LOGIN_MAX_TIMEOUT_MS);
   if (timeoutMs === null) return fail("invalid_timeout", `--timeout-ms must be a whole number from ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}.`);
   return { ok: true, command: "setup", runtime, origin, originExplicit: values["--url"] !== undefined,
-    deployment, confirmPrerequisites: flags.has("--confirm-prerequisites"), agentTokenFile,
+    deployment, deploymentExplicit: values["--deployment"] !== undefined,
+    confirmPrerequisites: flags.has("--confirm-prerequisites"), agentTokenFile,
     workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
     project: paths.project, configDir: paths.configDir, envFile, client, skipSkill: flags.has("--skip-skill"),
     timeoutMs, noBrowser: flags.has("--no-browser"), repair: flags.has("--repair"),
