@@ -52,6 +52,16 @@ is checked before anything is written.
 To copy the file yourself, `metergraph-skills path` prints the directory that
 holds the bundled `SKILL.md` and `manifest.json`.
 
+## More Metergraph skills
+
+The setup skill comes from [metergraph/skills](https://github.com/metergraph/skills),
+the source for every Metergraph agent skill, at a pinned commit. That repository
+also has the model-swap skills: choose a workload, choose traces and models,
+define the eval, run the analysis, read the report and rerun. This package installs
+only the setup skill. For the others, use `npx skills add metergraph/skills`,
+`npx --yes metergraph-cli@next skills install --client claude --runtime local`, or
+the `metergraph/skills` plugin marketplace in Claude Code and Claude Desktop.
+
 ## Exit codes
 
 | Code | Outcome |
