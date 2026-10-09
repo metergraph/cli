@@ -80,11 +80,11 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   network access:
 
   ```sh
-  npx --yes metergraph-cli@next skill install --client codex --runtime local
+  npx --yes metergraph-cli@next skill install --client codex
   ```
 
   Python users can run `pip install metergraph-skills` and
-  `metergraph-skills install --client codex --runtime local` instead
+  `metergraph-skills install --client codex` instead
   ([details](https://github.com/metergraph/cli/blob/main/python/metergraph-skills/README.md)).
   Both write the same files and recognise each other's installs.
 - **Model-swap skills.** `skills install` adds the workflow skills from
@@ -94,8 +94,11 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   the `metergraph/skills` plugin marketplace instead.
 
   ```sh
-  npx --yes metergraph-cli@next skills install --client claude --runtime local
+  npx --yes metergraph-cli@next skills install --client claude
   ```
+
+  `--runtime` defaults to `local`. Pass `--runtime cloud` when the client runs in a
+  cloud environment with a checkout of the project.
 
 - **Machine output.** Every command takes `--json` and then prints exactly one JSON
   line on stdout and nothing on stderr. All results share one envelope:
@@ -103,8 +106,14 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   Failures carry a fixed `error.reason` and, where useful, a `data.next_action` that
   tells the agent what to do next.
 - **No hidden prompts.** No command reads stdin or asks a question. `--no-browser`
-  prints the sign in URL for a person to open instead of launching a browser; with
-  `--json`, a step that needs approval exits 6 with a `run_in_terminal` next action.
+  prints the sign in URL for a person to open instead of launching a browser. With
+  `--json`, a step that needs approval exits within seconds with 18
+  `action_required` and `data.next_action` set to
+  `{"kind": "open_url", "url": "...", "timeout_seconds": N, "message": "..."}`, so an
+  agent can show the URL to the person. A background process waits for the approval
+  until `--timeout-ms`; afterwards, run the same command again to continue from the
+  saved state
+  ([details](https://github.com/metergraph/cli/blob/main/docs/reference.md#approval-from-an-agent)).
 - **MCP.** Workspace tools for agents are served by the hosted MCP endpoint, not by this
   CLI. See the [MCP server guide](https://www.metergraph.dev/docs/guides/mcp-server/)
   and the [agent access guide](https://www.metergraph.dev/docs/guides/agent-access/).
@@ -141,7 +150,7 @@ writes, and full JSON examples.
 
 ## Exit codes
 
-Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not in
+Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not in
 `0.1.0`.
 
 | Code | Outcome | Meaning |
@@ -152,7 +161,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |
 | 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. For `verify`, the deadline expired before any valid answer arrived. A trace that is still pending is exit 11, not 4. |
 | 5 | `unhealthy` | The service answered but reported that it is not healthy, or answered with a server error. |
-| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment, or `--json --no-browser` needs a browser approval it cannot show (`no_browser_requires_terminal`). Nothing was written. |
+| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment. Nothing was written. |
 | 7 | `redirect_rejected` | The service answered with a redirect. Redirects are never followed. |
 | 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update, or the project is bound to a different origin or workspace. Nothing was changed. |
 | 9 | `filesystem_error` | Project or credential files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
@@ -164,6 +173,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not
 | 15 | `permission_denied` | The service refused this read for the signed in grant, for example for a missing scope or permission. |
 | 16 | `rate_limited` | The service asked the CLI to slow down. Nothing was retried. Try again later. |
 | 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
+| 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` exit with this as soon as an approval URL exists (`next_action.kind: "open_url"`), while a background process waits for the approval until `--timeout-ms`. After approval, run the same command again to continue. |
 
 ## Security and privacy
 

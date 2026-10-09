@@ -23,6 +23,20 @@ schedule. It:
 
 Leave `publish` false for a dry run that validates and packs without publishing.
 
+## Dist-tags
+
+`latest` takes stable versions only (`0.2.0`), and `next` takes prereleases only
+(`0.2.1-preview.0`). The workflow refuses any other pairing. After a stable release,
+`next` keeps pointing at the last prerelease, which may be older than `latest`.
+`npx metergraph-cli@next` then installs that older build, so after each stable release
+a maintainer points `next` at it too, from a machine signed in to npm as an owner:
+
+```sh
+npm dist-tag add metergraph-cli@<version> next
+```
+
+Skip this only if a newer prerelease is already on `next`.
+
 ## Exact revision rule
 
 npm provenance records the commit that triggered the workflow (`GITHUB_SHA`) as the

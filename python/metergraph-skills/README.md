@@ -13,7 +13,7 @@ Python SDK for instrumenting an application is a different package,
 
 ```sh
 pip install metergraph-skills
-metergraph-skills install --client claude --runtime local
+metergraph-skills install --client claude
 ```
 
 Run it in the project directory, or pass `--project DIR`.
@@ -21,7 +21,7 @@ Run it in the project directory, or pass `--project DIR`.
 | Option | Values |
 | --- | --- |
 | `--client` | `codex`, `claude`, `cursor` |
-| `--runtime` | `local`, `cloud` |
+| `--runtime` | `local` (default), `cloud` |
 | `--project` | Project directory. Default: the current directory. |
 | `--json` | Print one JSON line on stdout. |
 

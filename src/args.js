@@ -279,9 +279,10 @@ function parseVerify(values, flags, json, fail) {
     open: flags.has("--open"), noBrowser: flags.has("--no-browser"), json };
 }
 
-// Client and runtime are required, so a script states where the skill is
-// used instead of the CLI guessing. Values for clients and runtimes that
-// cannot use project skill files are accepted here and handed off later.
+// The client is required, so a script states which client loads the skill.
+// The runtime defaults to local, the runtime setup installs the skill for;
+// pass --runtime cloud for a cloud checkout. Values for clients and runtimes
+// that cannot use project skill files are accepted here and handed off later.
 function parseSkill(action, values, json, fail) {
   if (action === null) {
     return fail(
@@ -296,10 +297,7 @@ function parseSkill(action, values, json, fail) {
   if (!Object.hasOwn(SKILL_CLIENTS, client) && !Object.hasOwn(HANDOFF_SKILL_CLIENTS, client)) {
     return fail("invalid_client", "--client must be codex, claude or cursor.");
   }
-  const runtime = values["--runtime"];
-  if (runtime === undefined) {
-    return fail("missing_runtime", "--runtime is required. Use local or cloud.");
-  }
+  const runtime = values["--runtime"] ?? "local";
   if (!SKILL_RUNTIMES.includes(runtime) && !HANDOFF_SKILL_RUNTIMES.includes(runtime)) {
     return fail("invalid_runtime", "--runtime must be local or cloud.");
   }

@@ -141,6 +141,7 @@ export const EXIT_CODES = Object.freeze({
   permission_denied: 15,
   rate_limited: 16,
   cancelled: 17,
+  action_required: 18,
 });
 
 export const EXIT_CODE_MEANINGS = Object.freeze({
@@ -177,4 +178,8 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
   rate_limited: "The service asked the CLI to slow down. Nothing was retried. Try again later.",
   cancelled:
     "A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry.",
+  action_required:
+    "A person must act before this command can finish; data.next_action says what to do. " +
+    "With --json --no-browser the command exits as soon as the approval URL exists, and a background " +
+    "process waits for approval until --timeout-ms. After approval, run the same command again to continue.",
 });

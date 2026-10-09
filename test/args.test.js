@@ -54,6 +54,18 @@ test("parses skill install and update in both spellings", () => {
     project: null,
     json: true,
   });
+  // --runtime defaults to local, the runtime setup installs the skill for,
+  // for skill and skills install and update alike. Explicit values still win.
+  for (const command of ["skill", "skills"]) {
+    for (const action of ["install", "update"]) {
+      const defaulted = parseArgs([command, action, "--client", "claude"]);
+      assert.equal(defaulted.ok, true, `${command} ${action}`);
+      assert.equal(defaulted.runtime, "local", `${command} ${action}`);
+      assert.equal(parseArgs([command, action, "--client", "claude", "--runtime", "cloud"]).runtime, "cloud");
+      assert.equal(parseArgs([command, action, "--client", "claude", "--runtime", "cloud-no-shell"]).runtime, "cloud-no-shell");
+      assert.equal(parseArgs([command, action, "--client", "claude", "--runtime", ""]).code, "invalid_runtime");
+    }
+  }
   assert.equal(parseArgs(["skill", "install", "--client", "chatgpt", "--runtime", "cloud"]).ok, true);
   assert.equal(parseArgs(["skill", "install", "--client", "claude", "--runtime", "cloud-no-shell"]).ok, true);
   assert.equal(parseArgs(["help", "skill"]).topic, "skill");
@@ -67,7 +79,6 @@ test("rejects bad skill input with fixed messages that never contain the input",
     [["skill", "install", "--runtime", "local"], "missing_client"],
     [["skill", "install", "--client", "hunter2", "--runtime", "local"], "invalid_client"],
     [["skill", "install", "--client", "CODEX", "--runtime", "local"], "invalid_client"],
-    [["skill", "install", "--client", "codex"], "missing_runtime"],
     [["skill", "install", "--client", "codex", "--runtime", "sk-fake-2222222222222222"], "invalid_runtime"],
     [["skill", "install", "--client", "codex", "--runtime", "local", "--project="], "invalid_project"],
     [["skill", "install", "--client", "codex", "--runtime", "local", "--force"], "unknown_argument"],

@@ -5,15 +5,20 @@
 
 ## Unreleased
 
-- Non-hosted `setup` (`--deployment customer-local|byoc|oss`) refuses an SSH, cloud
-  workspace or CI session before it contacts the service or reads
-  `--agent-token-file`. Previously it checked the route, and could read and send the
-  agent token, before refusing.
-- Every non-hosted setup handoff now carries `data.next_action` as an object with
-  `kind`, `prerequisite` and `url`. Some handoffs returned a bare string.
-- An unreachable customer-local origin points to the `bundle_started_verified`
-  prerequisite, and an unreachable BYOC origin to `check_private_network`, instead of
-  the general connection guide.
+- `skill install|update` and `skills install|update` default `--runtime` to `local`,
+  the runtime `setup` already installs the skill for, so
+  `metergraph skills install --client claude` works without it. `--runtime cloud` and
+  the `cloud-no-shell` handoff work as before. `metergraph-skills install|update` in
+  the Python package gets the same default.
+- `login --json --no-browser` and `setup --json --no-browser` no longer exit 6
+  `no_browser_requires_terminal` when approval is needed. They exit within seconds
+  with the new exit code 18 `action_required`, reason `browser_approval_required` and
+  `data.next_action: {"kind": "open_url", "url", "timeout_seconds", "message"}`, so a
+  coding agent can show the URL to the person. A detached background process keeps
+  the loopback listener open until approval or `--timeout-ms` and saves what the
+  approval completes. Run the same command again after approval to continue. The URL
+  is the authorization request and carries no credential. The `run_in_terminal` next
+  action is gone.
 
 ## 0.2.0-preview.5
 

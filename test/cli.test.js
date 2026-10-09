@@ -47,6 +47,7 @@ test("help works offline in text and JSON form", async () => {
     permission_denied: 15,
     rate_limited: 16,
     cancelled: 17,
+    action_required: 18,
   });
   assert.deepEqual(
     result.data.commands.map((command) => command.name),
@@ -101,8 +102,8 @@ test("skill help works offline and states what is not done", async () => {
     const run = await runCli(args, { offline: true });
     assert.equal(run.code, 0);
     assert.equal(run.stderr, "");
-    assert.match(run.stdout, /metergraph skill install --client CLIENT --runtime RUNTIME/);
-    assert.match(run.stdout, /metergraph skill update --client CLIENT --runtime RUNTIME/);
+    assert.match(run.stdout, /metergraph skill install --client CLIENT \[--runtime RUNTIME\]/);
+    assert.match(run.stdout, /metergraph skill update --client CLIENT \[--runtime RUNTIME\]/);
     assert.match(run.stdout, /Discovery stays pending/);
     assert.match(run.stdout, /does not sign in/);
   }
