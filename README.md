@@ -106,8 +106,12 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   Failures carry a fixed `error.reason` and, where useful, a `data.next_action` that
   tells the agent what to do next.
 - **No hidden prompts.** No command reads stdin or asks a question. `--no-browser`
-  prints the sign in URL for a person to open instead of launching a browser; with
-  `--json`, a step that needs approval exits 6 with a `run_in_terminal` next action.
+  prints the sign in URL for a person to open instead of launching a browser. With
+  `--json`, a step that needs approval prints its one JSON line as soon as the URL
+  exists: exit 18 `action_required`, with `data.next_action` set to
+  `{"kind": "open_url", "url": "...", "timeout_seconds": N, "message": "..."}`. The
+  command keeps waiting for the approval until `--timeout-ms`; when it exits, run the
+  same command again to continue from the saved state.
 - **MCP.** Workspace tools for agents are served by the hosted MCP endpoint, not by this
   CLI. See the [MCP server guide](https://www.metergraph.dev/docs/guides/mcp-server/)
   and the [agent access guide](https://www.metergraph.dev/docs/guides/agent-access/).
@@ -144,7 +148,7 @@ writes, and full JSON examples.
 
 ## Exit codes
 
-Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not in
+Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not in
 `0.1.0`.
 
 | Code | Outcome | Meaning |
@@ -155,7 +159,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |
 | 4 | `connection_failed` | The origin could not be reached, the connection failed, or the probe timed out. For `verify`, the deadline expired before any valid answer arrived. A trace that is still pending is exit 11, not 4. |
 | 5 | `unhealthy` | The service answered but reported that it is not healthy, or answered with a server error. |
-| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment, or `--json --no-browser` needs a browser approval it cannot show (`no_browser_requires_terminal`). Nothing was written. |
+| 6 | `unsupported` | The service answered with a response, deployment profile or status this CLI does not support, or the skill client or runtime cannot use project skill files, or sign in cannot run in this environment. Nothing was written. |
 | 7 | `redirect_rejected` | The service answered with a redirect. Redirects are never followed. |
 | 8 | `conflict` | The skill target is not owned by this CLI, was modified, is unsafe, is locked or needs an explicit update, or the project is bound to a different origin or workspace. Nothing was changed. |
 | 9 | `filesystem_error` | Project or credential files could not be read or written. Partial changes were rolled back unless the message says otherwise. |
@@ -167,6 +171,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 17 are not
 | 15 | `permission_denied` | The service refused this read for the signed in grant, for example for a missing scope or permission. |
 | 16 | `rate_limited` | The service asked the CLI to slow down. Nothing was retried. Try again later. |
 | 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
+| 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` print this line as soon as an approval URL exists (`next_action.kind: "open_url"`), keep waiting for approval until `--timeout-ms`, and exit 18 whatever happens next. Run the same command again to continue. |
 
 ## Security and privacy
 

@@ -75,8 +75,10 @@ async function run(argv, { stdout, stderr }) {
     // Human progress goes to stderr, never with --json, so stdout carries
     // only the final result.
     const progress = parsed.json ? () => {} : (text) => stderr.write(`${text}\n`);
+    const pending = announcer(parsed, stdout, (data) => data);
     const { outcome, reason, data } =
-      parsed.command === "login" ? await runLogin(parsed, progress) : await runLogout(parsed);
+      parsed.command === "login" ? await runLogin({ ...parsed, announce: pending.announce }, progress) : await runLogout(parsed);
+    if (pending.result) return pending.result;
     const message = authMessage(outcome, reason);
     const result = envelope({
       command: parsed.command,
@@ -95,9 +97,12 @@ async function run(argv, { stdout, stderr }) {
       : await preflightNonHostedSetup(parsed);
     const progress = parsed.json ? () => {} : (line) =>
       stderr.write(containsKnownCredential(line, routed) ? "Setup progress.\n" : `${line}\n`);
+    // The announced line is checked for known credentials like the final one.
+    const pending = announcer(parsed, stdout, (data) => containsKnownCredential(data, routed) ? null : data);
     const response = routed.proceed
-      ? await runSetup({ ...parsed, expectedProfile: routed.profile ?? null }, progress)
+      ? await runSetup({ ...parsed, expectedProfile: routed.profile ?? null, announce: pending.announce }, progress)
       : routed;
+    if (pending.result) return pending.result;
     const { outcome, reason, data } = response;
     let result = envelope({ command: "setup", outcome, reason, data,
       message: outcome === "ok" ? null : "Setup did not complete. Review the reason and retry safely." });
@@ -179,6 +184,26 @@ async function run(argv, { stdout, stderr }) {
   });
   stdout.write(parsed.json ? toJsonLine(result) : doctorText(result));
   return result;
+}
+
+// With --json --no-browser, login and setup print their one JSON line as
+// soon as a person must open an approval URL, then keep waiting for the
+// callback. Whatever the run does afterwards, that line is its result and its
+// exit code; the agent reruns the command to continue. screen(data) returns
+// the data to print, or null to print a credential_echo refusal instead.
+function announcer(parsed, stdout, screen) {
+  const pending = { announce: null, result: null };
+  if (!parsed.json || !parsed.noBrowser) return pending;
+  pending.announce = (data) => {
+    if (pending.result) return;
+    const safe = screen(data);
+    pending.result = safe === null
+      ? envelope({ command: parsed.command, outcome: "unsupported", reason: "credential_echo" })
+      : envelope({ command: parsed.command, outcome: "action_required", reason: "browser_approval_required",
+        data: safe, message: authMessage("action_required", "browser_approval_required") });
+    stdout.write(toJsonLine(pending.result));
+  };
+  return pending;
 }
 
 // One line on the repository identity setup found or recorded. The value is

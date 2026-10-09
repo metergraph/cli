@@ -247,24 +247,50 @@ test("a rerun on a signed in project reuses the grant without a browser or new c
     const quiet = await login(assert, box, server, ["--no-browser"]);
     assert.equal(quiet.run.code, 0);
     assert.equal(quiet.result.data.status, "reused");
-    const switched = await login(assert, box, server, ["--no-browser", "--reconnect"]);
-    assert.equal(switched.run.code, 6);
-    assertFailure(switched.result, "unsupported", "no_browser_requires_terminal");
+    // --reconnect needs approval: the URL is the result line, and an
+    // unapproved run changes nothing.
+    const switched = await login(assert, box, server, ["--no-browser", "--reconnect", "--timeout-ms", "1000"]);
+    assert.equal(switched.run.code, 18);
+    assertFailure(switched.result, "action_required", "browser_approval_required");
+    assert.equal(switched.result.data.status, "approval_pending");
+    assert.equal(switched.result.data.next_action.kind, "open_url");
     assert.equal(browserLog(box).filter((entry) => entry.url).length, 1, "a browser was opened again");
     assert.deepEqual(fs.readFileSync(path.join(box.project, BINDING)), binding);
   });
 });
 
-test("JSON --no-browser is refused once a saved grant no longer works, without a browser", async () => {
+test("JSON --no-browser returns the sign in URL as an open_url next action and keeps waiting for it", async () => {
   await withServer({}, async (server) => {
     const box = sandbox();
     assert.equal((await login(assert, box, server)).run.code, 0);
+    const oldSlot = readBindingFile(box).credential_slot;
     for (const grant of [...server.state.refresh.values(), ...server.state.access.values()]) grant.revoked = true;
-    const { run, result } = await login(assert, box, server, ["--no-browser"]);
-    assert.equal(run.code, 6);
-    assertFailure(result, "unsupported", "no_browser_requires_terminal");
-    assert.equal(result.data.next_action.kind, "run_in_terminal");
+    const cli = startCli(["--json", "login", "--runtime", "local", "--no-browser", "--url", server.origin,
+      "--project", box.project, "--config-dir", box.config, "--timeout-ms", "15000"],
+    { imports: [BROWSER], env: { METERGRAPH_TEST_BROWSER: "follow", METERGRAPH_TEST_BROWSER_LOG: box.log } });
+    // The line arrives before approval, while the process still waits.
+    const line = await cli.waitFor(({ stdout }) => stdout.includes("\n") && stdout);
+    assert.equal(cli.child.exitCode, null, "the command stopped waiting before approval");
+    const announced = JSON.parse(line);
+    assert.equal(announced.outcome, "action_required");
+    assert.equal(announced.exit_code, 18);
+    assert.equal(announced.data.status, "approval_pending");
+    const next = announced.data.next_action;
+    assert.equal(next.kind, "open_url");
+    assert.equal(next.timeout_seconds, 15);
+    assert.match(next.message, /Open this URL in a browser on this machine and sign in/);
+    assert.ok(next.url.startsWith(`${server.origin}/v1/oauth/authorize?`));
+    assert.equal(await completeInBrowser(next.url), 200);
+    const run = await cli.done;
+    const { result } = checked(assert, run, { box, server });
+    assert.deepEqual(result, announced, "stdout must hold only the announced line");
+    assert.equal(run.code, 18);
+    assert.notEqual(readBindingFile(box).credential_slot, oldSlot, "the approved grant was not saved");
     assert.equal(browserLog(box).filter((entry) => entry.url).length, 1, "a browser was opened again");
+
+    const rerun = await login(assert, box, server, ["--no-browser"]);
+    assert.equal(rerun.run.code, 0);
+    assert.equal(rerun.result.data.status, "reused");
   });
 });
 
@@ -331,14 +357,14 @@ test("a bound project is never switched silently, only with --reconnect", async 
   });
 });
 
-test("cloud runtimes, remote sessions and JSON without a browser get a handoff before anything else", async () => {
+test("cloud runtimes and remote sessions get a handoff before anything else, with or without a browser", async () => {
   const cases = [
     [["--runtime", "cloud"], {}, "runtime_not_supported", "connection_guide"],
     [["--runtime", "cloud-no-shell"], {}, "runtime_not_supported", "connection_guide"],
     [["--runtime", "local"], { SSH_CONNECTION: "SYNTHETIC_HEADER_MARKER 22" }, "ssh_session", "connection_guide"],
     [["--runtime", "local"], { CODESPACES: "true" }, "cloud_workspace", "connection_guide"],
     [["--runtime", "local"], { CI: "true" }, "ci_environment", "connection_guide"],
-    [["--runtime", "local", "--no-browser"], {}, "no_browser_requires_terminal", "run_in_terminal"],
+    [["--runtime", "local", "--no-browser"], { CI: "true" }, "ci_environment", "connection_guide"],
   ];
   for (const [flags, env, reason, next] of cases) {
     const box = sandbox();

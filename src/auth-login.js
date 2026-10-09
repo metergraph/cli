@@ -39,6 +39,10 @@ import { deadline, trapSignals } from "./transport.js";
 // server-verified workspace UUID. Token values, the authorization code, the
 // PKCE verifier, absolute paths and server text never leave this module.
 // progress(text) prints human progress lines; it is a no-op with --json.
+// options.announce(data), given only with --json --no-browser, receives the
+// login data with an open_url next action as soon as the authorization URL
+// exists, while the listener keeps waiting. The caller prints it as the one
+// JSON line, so an agent can hand the URL to a person.
 
 export async function runLogin(options, progress) {
   const ctx = {
@@ -58,21 +62,12 @@ export async function runLogin(options, progress) {
   if (options.runtime !== "local") return end("unsupported", "runtime_not_supported", GUIDE);
   const remote = detectRemoteSession();
   if (remote !== null) return end("unsupported", remote, GUIDE);
-  // --json cannot show a person the --no-browser URL. A rerun with a saved,
-  // working grant needs no URL, so only refuse once approval is required.
-  const noBrowserHandoff = () => end("unsupported", "no_browser_requires_terminal", {
-    kind: "run_in_terminal",
-    message: "Run the same login command in a terminal without --json to see the sign in URL.",
-  });
-  const urlUnshowable = options.json && options.noBrowser;
-
   const trap = trapSignals();
   try {
     const root = resolveProject(options.project);
     const configDir = resolveConfigDir(options.configDir);
     const existing = readBinding(root);
     const bound = existing?.binding ?? null;
-    if (urlUnshowable && (bound === null || options.reconnect)) return noBrowserHandoff();
     // Setup pins a deployment model before sign in. A stale binding for a
     // different profile must never be silently reused or reconnected.
     if (options.expectedProfile && bound !== null && !options.reconnect &&
@@ -102,9 +97,11 @@ export async function runLogin(options, progress) {
       }
       if (session.outcome !== "login_required") return end(session.outcome, session.reason);
     }
-    if (urlUnshowable) return noBrowserHandoff();
 
-    const flow = await authorize(options, ctx, trap.signal, progress);
+    const announce = options.announce
+      ? (next) => options.announce(loginData({ ...ctx, status: "approval_pending" }, next))
+      : null;
+    const flow = await authorize(options, ctx, trap.signal, progress, announce);
     if (!flow.ok) return end(flow.outcome, flow.reason, flow.next ?? null);
     const { endpoints, clientId, grant } = flow;
 
@@ -169,7 +166,7 @@ export async function runLogin(options, progress) {
 // written here. A validated grant that is not accepted is sent for revocation
 // before returning; that is best effort, and a token response that fails
 // validation cannot be revoked.
-async function authorize(options, ctx, cancel, progress) {
+async function authorize(options, ctx, cancel, progress, announce) {
   const preflight = await runDoctor({ origin: ctx.origin, timeoutMs: AUTH_HTTP_TIMEOUT_MS });
   if (cancel.aborted) return fail("authorization_failed", "cancelled");
   if (preflight.outcome !== "authentication_required") return fail(preflight.outcome, preflight.reason);
@@ -217,7 +214,9 @@ async function authorize(options, ctx, cancel, progress) {
     const seconds = Math.round(options.timeoutMs / 1000);
     // A wait armed after Ctrl+C has already settled; do not show the URL.
     if (cancel.aborted) return fail("authorization_failed", "cancelled");
-    if (options.noBrowser) {
+    if (options.noBrowser && announce) {
+      announce(openUrl(url, seconds, "sign in with Metadata access"));
+    } else if (options.noBrowser) {
       progress(
         "Open this URL in a browser on this machine to sign in:\n" +
           `${url}\n` +
@@ -373,6 +372,19 @@ function httpFailure(result, cancel) {
 
 function fail(outcome, reason, next = null) {
   return { ok: false, outcome, reason, next };
+}
+
+// The next action a --json --no-browser run prints while it waits. The URL is
+// the authorization request: public client ID, loopback redirect, state and
+// PKCE challenge. It carries no token, code or verifier.
+export function openUrl(url, seconds, purpose) {
+  return {
+    kind: "open_url",
+    url,
+    timeout_seconds: seconds,
+    message: `Open this URL in a browser on this machine and ${purpose}. This command keeps waiting ` +
+      `up to ${seconds} seconds for approval. When it exits, run the same command again to continue.`,
+  };
 }
 
 const GUIDE = { kind: "connection_guide", url: CONNECTION_GUIDE_URL };

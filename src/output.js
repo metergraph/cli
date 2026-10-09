@@ -134,7 +134,7 @@ const LOGIN_OPTIONS = [
     summary: `Time to wait for the browser, ${LOGIN_MIN_TIMEOUT_MS} to ${LOGIN_MAX_TIMEOUT_MS}. Default ${LOGIN_DEFAULT_TIMEOUT_MS}.`,
   },
   { name: "--signup", value: null, summary: "Start at the hosted sign up page. Managed service only." },
-  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. With --json, only a rerun that needs no sign in succeeds." },
+  { name: "--no-browser", value: null, summary: "Print the sign in URL on stderr instead of opening a browser. With --json, print it as data.next_action (open_url) and keep waiting." },
   { name: "--reconnect", value: null, summary: "Allow switching a bound project to another origin or workspace." },
   { name: "--json", value: null, summary: "Print one JSON line on stdout." },
 ];
@@ -353,7 +353,7 @@ export function helpData(topic) {
           { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
           { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
           { name: "--reconnect", value: null, summary: "Permit switching an existing project binding." },
-          { name: "--no-browser", value: null, summary: "Print approval URL on stderr. With --json, only a rerun that needs no approval succeeds." },
+          { name: "--no-browser", value: null, summary: "Print approval URL on stderr. With --json, print it as data.next_action (open_url), keep waiting, then rerun." },
           { name: "--repair", value: null, summary: "Explicitly approve replacement of an acknowledged key that no longer verifies." },
           { name: "--deployment", value: "MODEL", summary: "managed, customer-local, byoc or oss. Default managed." },
           { name: "--confirm-prerequisites", value: null, summary: "Attest deployment prerequisites are met; it does not verify bundle publication." },
@@ -719,9 +719,9 @@ const AUTH_MESSAGES = {
     "so sign in cannot finish here. Follow the connection guide instead. Nothing was written.",
   ci_environment:
     "This is a CI environment, where no person can approve sign in in a browser. Nothing was written.",
-  no_browser_requires_terminal:
-    "Approval is needed, and --no-browser prints its URL for a person to open, which --json cannot do. " +
-    "Run the same command without --json in a terminal. Nothing was done.",
+  browser_approval_required:
+    "A person must approve in a browser. Open data.next_action.url on this machine; this command keeps " +
+    "waiting until approval or its timeout. Then run the same command again to continue.",
   bound_to_other_origin:
     "This project is bound to a different origin. Nothing was changed. Use --reconnect to switch it.",
   bound_to_other_workspace:
@@ -737,7 +737,7 @@ const AUTH_MESSAGES = {
   timeout: "The operation did not finish within the time limit. Nothing was saved.",
   cancelled: "Sign in was cancelled. Nothing was saved.",
   browser_unavailable:
-    "The browser could not be opened. Run login again with --no-browser, without --json, and open the URL it prints.",
+    "The browser could not be opened. Run login again with --no-browser and open the URL it prints.",
   oauth_metadata_missing: "This service does not support CLI sign in yet. Nothing was written.",
   metadata_scope_unsupported:
     "This service does not offer Metadata-only access for the CLI yet. The CLI does not fall back to broader access.",

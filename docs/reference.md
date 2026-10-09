@@ -261,7 +261,7 @@ metergraph logout
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
 | `--signup` | off | Start at the hosted sign up page, which returns to the same authorization request. Managed service only; other profiles exit 6. |
-| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval exits 6 `no_browser_requires_terminal` with a `run_in_terminal` next action. |
+| `--no-browser` | off | Print the authorization URL on stderr for you to open on this machine, then wait. With `--json`, a rerun that needs no approval succeeds; one that needs approval prints its JSON line at once, exit 18 `action_required` with an `open_url` next action, and keeps waiting. See [Approval from an agent](#approval-from-an-agent). |
 | `--reconnect` | off | Allow replacing a binding to a different origin or workspace. |
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
@@ -414,12 +414,10 @@ deployment profile, selected client, and completed and pending steps. A skill
 conflict leaves the delivered key in place and reports `credential_ready_skill_pending`;
 resolve the skill file conflict and rerun setup without another approval.
 With `--no-browser`, setup prints the approval URL on stderr instead of opening a
-browser. Under `--json` it cannot show that URL, so a rerun that needs no approval
-(a working saved key) still succeeds, and one that needs approval exits 6
-`no_browser_requires_terminal` before any approval request or env write, with
-`data.next_action` set to `{"kind": "run_in_terminal", "message": "..."}`. The
-message is fixed text and holds no URL or credential. Non-hosted operator
-handoffs carry their own deployment `next_action`; every other setup result has
+browser. Under `--json`, a rerun that needs no approval (a working saved key)
+still succeeds, and one that needs approval announces its URL as described in
+[Approval from an agent](#approval-from-an-agent). Non-hosted operator handoffs
+carry their own deployment `next_action`; every other setup result has
 `next_action: null`.
 Success means the key was delivered and the project is ready to instrument.
 It does **not** mean application traffic has arrived. Run your application and
@@ -723,8 +721,10 @@ A successful `login`:
   is then `accepted`, `unconfirmed` or `not_attempted`).
 - `credential_protection` is `owner_only_file` or `dpapi`.
 - On failure `authenticated` and `configured` are `false`, `scopes` is empty, and
-  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect`,
-  `run_in_terminal` or `no_browser`.
+  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect` or
+  `no_browser`. With `--json --no-browser`, a sign in that needs approval returns
+  `action_required` with `status: "approval_pending"` and an `open_url` next action;
+  see [Approval from an agent](#approval-from-an-agent).
 - The schema version `1` is the version of this CLI's own JSON output. It is unrelated
   to the service's agent access contract version, `metergraph.agent-access/v1`.
 - `login` and `logout` never print tokens, the authorization code, the PKCE verifier,
@@ -739,6 +739,54 @@ A successful `login`:
 Without `--json`, results are printed as text on stdout and usage errors go to stderr.
 `login` prints progress lines, and with `--no-browser` the authorization URL, on
 stderr.
+
+### Approval from an agent
+
+A coding agent usually runs commands without a terminal, so it cannot read a URL
+from stderr. With `--json --no-browser`, `login` and `setup` print their one JSON
+line on stdout as soon as a person must approve in a browser, and then keep the
+loopback listener open:
+
+```json
+{
+  "schema_version": 1,
+  "command": "setup",
+  "ok": false,
+  "outcome": "action_required",
+  "exit_code": 18,
+  "data": {
+    "status": "login_pending",
+    "application_traffic_verified": false,
+    "receipt": null,
+    "next_action": {
+      "kind": "open_url",
+      "url": "https://metergraph.example.com/v1/oauth/authorize?response_type=code&client_id=...&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fcallback&scope=agent%3Ametadata&state=...&code_challenge=...&code_challenge_method=S256&resource=...",
+      "timeout_seconds": 300,
+      "message": "Open this URL in a browser on this machine and sign in with Metadata access. This command keeps waiting up to 300 seconds for approval. When it exits, run the same command again to continue."
+    }
+  },
+  "error": {
+    "code": "action_required",
+    "reason": "browser_approval_required",
+    "message": "A person must approve in a browser. Open data.next_action.url on this machine; this command keeps waiting until approval or its timeout. Then run the same command again to continue."
+  }
+}
+```
+
+- The agent shows `next_action.url` to the person, who opens it in a browser on the
+  same machine (the URL redirects to the CLI's `127.0.0.1` listener). The URL is the
+  authorization request only: public client ID, loopback redirect, state and PKCE
+  challenge. It never holds a token, code, verifier or ingest key.
+- The command waits for approval, denial or `--timeout-ms`, saves what the approval
+  completed, writes nothing more to stdout or stderr, and exits 18 whatever happened.
+  Wait for the process to exit, then run the same command again: the rerun resumes
+  from the saved sign in and setup state, and reports the outcome.
+- One run announces at most one URL. `setup` on a project that is not signed in
+  needs two approvals, so an agent runs it three times: sign in (`status:
+  "login_pending"`), ingest-only setup approval (`status: "approval_pending"`, with
+  the `receipt`), then a rerun that needs no approval and returns
+  `ready_for_instrumentation`.
+- A timed out or denied approval saves nothing; the rerun announces a fresh URL.
 
 ## Safe origins
 

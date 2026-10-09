@@ -47,6 +47,7 @@ test("help works offline in text and JSON form", async () => {
     permission_denied: 15,
     rate_limited: 16,
     cancelled: 17,
+    action_required: 18,
   });
   assert.deepEqual(
     result.data.commands.map((command) => command.name),

@@ -10,6 +10,14 @@
   `metergraph skills install --client claude` works without it. `--runtime cloud` and
   the `cloud-no-shell` handoff work as before. `metergraph-skills install|update` in
   the Python package gets the same default.
+- `login --json --no-browser` and `setup --json --no-browser` no longer exit 6
+  `no_browser_requires_terminal` when approval is needed. They print their one JSON
+  line as soon as the approval URL exists, with the new exit code 18
+  `action_required`, reason `browser_approval_required` and
+  `data.next_action: {"kind": "open_url", "url", "timeout_seconds", "message"}`, then
+  keep waiting for approval until `--timeout-ms`. Run the same command again to
+  continue from the saved state. The URL is the authorization request and carries no
+  credential. The `run_in_terminal` next action is gone.
 
 ## 0.2.0-preview.5
 
