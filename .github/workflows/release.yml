@@ -55,6 +55,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           COMMIT_SHA: ${{ inputs.commit_sha }}
+          DIST_TAG: ${{ inputs.dist_tag }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
@@ -76,6 +77,17 @@ jobs:
             echo "::error::version must be a semantic version such as 0.1.0."
             exit 1
           fi
+          # latest is for stable versions only, and next only for prereleases,
+          # so neither tag can be moved to the wrong kind of build by mistake.
+          case "$DIST_TAG:$VERSION" in
+            latest:*-*)
+              echo "::error::A prerelease ($VERSION) cannot be published to latest. Use next."
+              exit 1 ;;
+            next:*-*) ;;
+            next:*)
+              echo "::error::A stable version ($VERSION) must be published to latest, not next."
+              exit 1 ;;
+          esac
 
       - name: Check out the exact commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
