@@ -36,6 +36,15 @@ package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
 application invocation, its time window and the intended workspace.
 
+`login` and `setup` need the person to approve in a browser on this machine. If the
+installed CLI's help lists exit code 18 `action_required`, run them with
+`--json --no-browser`. When a step needs approval, the command exits 18 within
+seconds. Show `data.next_action.url` to the person and ask them to approve; a
+background process waits for the approval. After they approve, run the same command
+again. A new project takes three runs: sign in, ingest approval, then a final check.
+An older CLI exits 6 `no_browser_requires_terminal` instead. Then the person has to
+run setup in their own terminal.
+
 Repository identity is optional for capture but keeps traces attributable when
 several repositories share a workspace. If the installed CLI's `setup` help lists
 `--repository`, setup records `owner/name` from the git remote in a committed
@@ -68,7 +77,7 @@ For hosted Claude Desktop on an individual account, guide the human through Cust
 
 For a fresh hosted workspace, first ask whether the human already has a Metergraph account and workspace. Direct them to https://app.metergraph.dev/ and the signup, invitation or sign-in flow actually offered. The hosted UI can offer "Get a free API key" for self-service signup, but do not assume that button or a workspace invitation is available to everyone. If access is unavailable, direct them to their workspace owner or Metergraph. Confirm the workspace before creating a coding-agent key.
 
-For the commercial customer-local bundle, direct them to https://www.metergraph.dev/docs/self-host/local/#the-customer-local-bundle and the signed public release. They need a separate pull-only registry credential from Metergraph to pull the images; the public bundle download does not grant registry access. Verify the release before installation. Local admin credentials from the bundle's private configuration provide dashboard sign-in; create a coding-agent key in that installation's Keys page. Do not substitute hosted signup or a hosted key. Do not clone the private implementation or run development seed commands.
+For the commercial customer-local bundle, direct them to https://www.metergraph.dev/docs/self-host/local/#the-customer-local-bundle and the signed public release. They need a separate pull-only registry credential from Metergraph to pull the images; the public bundle download does not grant registry access. Verify the release before installation. Local admin credentials from the bundle's private configuration provide dashboard sign-in; create a coding-agent key in that installation's Keys page. Do not substitute hosted signup or a hosted key. Do not clone the private implementation or run development seed commands. Use `metergraph-local-bundle` to stand the bundle up when that skill is installed.
 
 For customer-owned AWS, direct them to https://www.metergraph.dev/docs/self-host/aws/. An operator provisions the installation, identity and membership. There is no public signup. Ask for the installation's actual reachable address and use a coding-agent key from its Keys page. Its default internal load balancer is private, and its Agent Access surface excludes trace content and replay.
 

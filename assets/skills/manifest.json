@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "25a62e420589cb805e3dd7d9bb3e3a35d85e2ece",
+  "commit": "402b7494c6ce302df31d11771d6ba63e37616a36",
   "skills": [
     {
       "name": "metergraph-analyze",
@@ -34,6 +34,12 @@
       "revision": "sha256-9ce5a2cf527e"
     },
     {
+      "name": "metergraph-local-bundle",
+      "sha256": "692cd8952a8a8896ec2c06091b329a7a01912e261e87d62a9458452172a7c9b0",
+      "size": 12245,
+      "revision": "sha256-692cd8952a8a"
+    },
+    {
       "name": "metergraph-model-swap",
       "sha256": "d77ee37f882ab1e50dc4a093e64a2c3661f4cd9bb59f184da6dccbd76fd51a18",
       "size": 4705,
@@ -41,9 +47,9 @@
     },
     {
       "name": "metergraph-onboarding",
-      "sha256": "15be9083f5b0d18cc6fe0d225f0921e2f16c5b4fb3d811c3984cef5cbc7941ba",
-      "size": 10208,
-      "revision": "sha256-15be9083f5b0"
+      "sha256": "6e6f418933f37b34437035ab3171344d43f37dee3770815b19f97efb62e5f1d1",
+      "size": 10267,
+      "revision": "sha256-6e6f418933f3"
     },
     {
       "name": "metergraph-report",

@@ -34,8 +34,9 @@ skill installation; a later installed version may offer `login`, `setup` and
 https://www.metergraph.dev/docs/start/first-trace/ and its manual setup steps.
 Do not infer that a server endpoint or source-only CLI command has shipped.
 
-For customer-local MeterGraph, use the released bundle and its included
-README, signed manifest and verification files. The human obtains the current
+For customer-local MeterGraph, use `metergraph-local-bundle` to stand up the
+released bundle, then continue here. Use its included README, signed manifest
+and verification files. The human obtains the current
 pull-only registry credential; registry access is not yet universally self-serve.
 Use password-stdin and the local secret store for registry login. Verify the
 archive before running its scripts. Configure the bundle's local settings,

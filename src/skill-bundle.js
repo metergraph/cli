@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // public skill at the manifest's source_url. The source has no version of its
 // own, so the revision is derived from the content hash. The hash is pinned
 // here as well as in the manifest, so editing either file alone is detected.
-const PINNED_SHA256 = "92f7955f6f8761a20a1886ad81f22dfcee239afddf8e9f1e761c35eb8e70f218";
+const PINNED_SHA256 = "e7fc4eb7a22eeb16c357bede9d0a080ad3b415aaab1d9c72f164d5350d48c4b1";
 
 const ASSET_DIR = new URL("../assets/skill/", import.meta.url);
 const MANIFEST_KEYS = ["file", "manifest_version", "name", "revision", "sha256", "size", "source_url"];
@@ -55,7 +55,7 @@ export function loadBundledSkill() {
 // The workflow skills that "skills install" writes, vendored from the public
 // skills repository at one commit. The manifest's own hash is pinned here, and
 // the manifest pins each skill's hash, so changing any file alone is detected.
-const PINNED_PACK_SHA256 = "c8e4d9b0d90bd201e90758e16ab0827b8ea36e3620a28223a7e73e91c035d835";
+const PINNED_PACK_SHA256 = "84191ddbc8f5c327e1defdd890b1032e338c08eb174e4eed5fb09f93b41202f5";
 
 const PACK_DIR = new URL("../assets/skills/", import.meta.url);
 const PACK_KEYS = ["commit", "manifest_version", "repository", "skills"];

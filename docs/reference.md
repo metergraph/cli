@@ -207,7 +207,9 @@ client's project skill directory, one folder per skill. They come from
 [metergraph/skills](https://github.com/metergraph/skills) at the commit pinned in
 `skills-source.json`, and cover investigation and the model-swap loop: choose a
 workload, choose traces and models, define the eval, run the analysis, summarize the
-report and rerun. Start with the `metergraph-model-swap` skill. The setup skill,
+report and rerun. Start with the `metergraph-model-swap` skill. The pack also has
+`metergraph-local-bundle`, which verifies and starts the signed customer-local bundle
+on the person's own machine before `setup --deployment customer-local`. The setup skill,
 `metergraph`, is not part of the pack; `skill install` installs it.
 
 `--client`, `--runtime` and `--project` work as for `skill install`. For each bundled
@@ -352,6 +354,10 @@ workspace:
 ```sh
 metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --confirm-prerequisites --client codex
 ```
+
+If the bundle is not running yet, setup returns the `complete_prerequisite` handoff
+below. The `metergraph-local-bundle` skill from `skills install` walks a coding agent
+through downloading, verifying and starting it first; the CLI itself provisions nothing.
 
 `--confirm-prerequisites` records the operator's attestation that the released
 signed bundle, registry invitation, local admin, and separate Metadata access
@@ -717,8 +723,8 @@ A successful `skill install`:
     "status": "installed",
     "source": {
       "name": "metergraph",
-      "revision": "sha256-92f7955f6f87",
-      "sha256": "92f7955f6f8761a20a1886ad81f22dfcee239afddf8e9f1e761c35eb8e70f218"
+      "revision": "sha256-e7fc4eb7a22e",
+      "sha256": "e7fc4eb7a22eeb16c357bede9d0a080ad3b415aaab1d9c72f164d5350d48c4b1"
     },
     "discovery": "pending",
     "authenticated": false,

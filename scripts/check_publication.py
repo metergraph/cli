@@ -17,6 +17,16 @@ PATTERNS = {
     "private repository reference": re.compile("PioneerSquareLabs/" + "metergraph-internal", re.I),
 }
 
+# Exact strings exempt from PATTERNS. The customer-local release is signed by a
+# workflow in the private repository, so verifying it needs that repository's
+# name in the anchored cosign certificate identity, which every public release
+# page also publishes. Only this whole identity is exempt; any other mention of
+# the repository is still reported. Built from parts, like PATTERNS.
+ALLOWED = (
+    r"^https://github\.com/PioneerSquareLabs/" + "metergraph-internal"
+    + r"/\.github/workflows/byoc-release\.yml@refs/(heads/main|tags/v.+)$",
+)
+
 
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True)
@@ -56,6 +66,9 @@ def main() -> int:
         branch = pull_request.get("head", {}).get("ref") or branch
     if PATTERNS["internal issue ID"].search(branch):
         print("Review branch name: it appears to contain an internal issue ID.")
+
+    for allowed in ALLOWED:
+        metadata = [(location, content.replace(allowed, "")) for location, content in metadata]
 
     findings = [
         f"{location}: {name}"

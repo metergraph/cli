@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+- The bundled skill pack adds `metergraph-local-bundle`. It walks a coding agent
+  through standing up the signed customer-local bundle on the person's own machine
+  (verify the release signature and archive digest before extracting, create `.env`
+  without printing its passwords, reuse an existing `.env` or database volume, run
+  `bin/start`) and then hands over to `setup --deployment customer-local`. Remote,
+  cloud and CI sessions get the `run_on_customer_machine` handoff instead. The
+  bundled `metergraph` and `metergraph-onboarding` skills now point to it.
 - `skill install|update` and `skills install|update` default `--runtime` to `local`,
   the runtime `setup` already installs the skill for, so
   `metergraph skills install --client claude` works without it. `--runtime cloud` and
