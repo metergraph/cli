@@ -18,7 +18,7 @@ import { runRead } from "./read.js";
 import { readMessage, readText } from "./read-output.js";
 import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
-import { containsKnownCredential, preflightNonHostedSetup } from "./setup-deployment.js";
+import { containsKnownCredential, preflightNonHostedSetup, prerequisiteGuide, resumeNonHostedRoute } from "./setup-deployment.js";
 import { VERSION } from "./constants.js";
 import { runVerify } from "./verify.js";
 import { verifyMessage, verifyText } from "./verify-output.js";
@@ -92,15 +92,16 @@ async function run(argv, { stdout, stderr }) {
   }
 
   if (parsed.command === "setup") {
-    const routed = parsed.deployment === "managed"
+    const options = resumeNonHostedRoute(parsed);
+    const routed = options.deployment === "managed"
       ? { proceed: true, profile: "managed" }
-      : await preflightNonHostedSetup(parsed);
+      : await preflightNonHostedSetup(options);
     const progress = parsed.json ? () => {} : (line) =>
       stderr.write(containsKnownCredential(line, routed) ? "Setup progress.\n" : `${line}\n`);
     // The announced line is checked for known credentials like the final one.
     const pending = announcer(parsed, stdout, (data) => containsKnownCredential(data, routed) ? null : data);
     const response = routed.proceed
-      ? await runSetup({ ...parsed, expectedProfile: routed.profile ?? null, announce: pending.announce }, progress)
+      ? await runSetup({ ...options, expectedProfile: routed.profile ?? null, announce: pending.announce }, progress)
       : routed;
     if (pending.result) return pending.result;
     const { outcome, reason, data } = response;
@@ -112,7 +113,8 @@ async function run(argv, { stdout, stderr }) {
     const receipt = result.data?.receipt;
     const summary = receipt ? `Workspace: ${receipt.workspace_id}\nDeployment: ${receipt.deployment_profile} at ${receipt.origin}\nCompleted: ${receipt.completed_steps.join(", ")}\nPending: ${receipt.pending_steps.join(", ")}\n` : "";
     const identity = repositoryLine(result.data?.repository);
-    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}${identity}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
+    const guide = handoffLines(result.data);
+    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}${identity}${guide}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
     if (containsKnownCredential(human, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
       stdout.write(parsed.json ? toJsonLine(result) : "Setup stopped.\n");
@@ -205,6 +207,26 @@ function announcer(parsed, stdout, screen) {
     stdout.write(toJsonLine(pending.result));
   };
   return pending;
+}
+
+// What an operator handoff is waiting for, in fixed text: the route, each
+// unconfirmed prerequisite with its guidance, and the next action.
+function handoffLines(data) {
+  if (data?.status !== "operator_handoff") return "";
+  let text = data.origin ? `Deployment: ${data.deployment_profile} at ${data.origin}\n` : "";
+  if (data.workspace_id) text += `Workspace: ${data.workspace_id}\n`;
+  if (data.pending_prerequisites.length > 0) {
+    text += "Confirm each prerequisite, then rerun with --confirm-prerequisites:\n";
+    for (const name of data.pending_prerequisites) {
+      text += `  - ${name}: ${prerequisiteGuide(name, data.deployment_profile) ?? "see the guide"}\n`;
+    }
+  }
+  const next = data.next_action;
+  if (next?.message && !(next.kind === "complete_prerequisite" && data.pending_prerequisites.includes(next.prerequisite))) {
+    text += `Next: ${next.message}\n`;
+  }
+  if (next?.url) text += `Guide: ${next.url}\n`;
+  return text;
 }
 
 // One line on the repository identity setup found or recorded. The value is
