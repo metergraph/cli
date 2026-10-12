@@ -13,7 +13,7 @@ token and route metadata back. Every command has stable `--json` output and exit
 so agents can run it as well as people.
 
 ```sh
-npx --yes metergraph-cli --help
+npx --yes metergraph-cli@latest --help
 ```
 
 Published on npm as `latest`. See the [changelog](https://github.com/metergraph/cli/blob/main/CHANGELOG.md).
@@ -26,7 +26,7 @@ writes `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` to a private `.env`, a
 installs the skill for your coding agent.
 
 ```sh
-npx --yes metergraph-cli setup --runtime local --client claude
+npx --yes metergraph-cli@latest setup --runtime local --client claude
 ```
 
 Use `--client codex` or `--client cursor` for the other agents.
@@ -39,18 +39,18 @@ ID or request ID and when the call started and ended.
 exact trace is visible in your workspace.
 
 ```sh
-npx --yes metergraph-cli verify --trace-id TRACE_ID \
+npx --yes metergraph-cli@latest verify --trace-id TRACE_ID \
   --since 2026-01-08T12:00:00Z --until 2026-01-08T12:00:05Z
 ```
 
 Then read what Metergraph has recorded:
 
 ```sh
-npx --yes metergraph-cli usage --days 7      # calls, errors, cost and tokens per route per day
-npx --yes metergraph-cli traces --limit 20   # one page of trace metadata
+npx --yes metergraph-cli@latest usage --days 7      # calls, errors, cost and tokens per route per day
+npx --yes metergraph-cli@latest traces --limit 20   # one page of trace metadata
 ```
 
-To install it globally instead, run `npm install -g metergraph-cli`. The command is
+To install it globally instead, run `npm install -g metergraph-cli@latest`. The command is
 `metergraph`. Pin an exact version, such as `metergraph-cli@0.2.0`, when a
 script must not change with the `latest` tag. Previews use the `next` tag.
 
@@ -79,7 +79,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   network access:
 
   ```sh
-  npx --yes metergraph-cli skill install --client codex
+  npx --yes metergraph-cli@latest skill install --client codex
   ```
 
   Python users can run `pip install metergraph-skills` and
@@ -93,7 +93,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   the `metergraph/skills` plugin marketplace instead.
 
   ```sh
-  npx --yes metergraph-cli skills install --client claude
+  npx --yes metergraph-cli@latest skills install --client claude
   ```
 
   `--runtime` defaults to `local`. Pass `--runtime cloud` when the client runs in a
@@ -120,7 +120,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
 Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
 ```md
-- Metergraph CLI: `npx --yes metergraph-cli <command> --json`. Check exit codes;
+- Metergraph CLI: `npx --yes metergraph-cli@latest <command> --json`. Check exit codes;
   follow `data.next_action` on failure.
 - After changing instrumented code, run the app once and confirm the trace with
   `metergraph verify` before reporting that tracing works.
