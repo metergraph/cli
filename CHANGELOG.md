@@ -19,6 +19,12 @@
   approval completes. Run the same command again after approval to continue. The URL
   is the authorization request and carries no credential. The `run_in_terminal` next
   action is gone.
+- The bundled agent skill, and the copy in the Python `metergraph-skills` package, now
+  come from [metergraph/skills](https://github.com/metergraph/skills) at `c1e19a8`.
+  The skill tells the agent what to do when `login` or `setup` with
+  `--json --no-browser` exits 18: show `data.next_action.url` to the person and run
+  the command again after they approve. On older CLIs that exit 6, the person runs
+  setup in their own terminal. `skill update` upgrades unchanged earlier installs.
 
 ## 0.2.0-preview.5
 

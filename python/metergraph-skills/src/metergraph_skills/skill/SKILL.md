@@ -36,6 +36,15 @@ package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
 application invocation, its time window and the intended workspace.
 
+`login` and `setup` need the person to approve in a browser on this machine. If the
+installed CLI's help lists exit code 18 `action_required`, run them with
+`--json --no-browser`. When a step needs approval, the command exits 18 within
+seconds. Show `data.next_action.url` to the person and ask them to approve; a
+background process waits for the approval. After they approve, run the same command
+again. A new project takes three runs: sign in, ingest approval, then a final check.
+An older CLI exits 6 `no_browser_requires_terminal` instead. Then the person has to
+run setup in their own terminal.
+
 Repository identity is optional for capture but keeps traces attributable when
 several repositories share a workspace. If the installed CLI's `setup` help lists
 `--repository`, setup records `owner/name` from the git remote in a committed
