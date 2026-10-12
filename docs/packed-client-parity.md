@@ -44,7 +44,8 @@ the bytes published to npm.
 deployment. It records results in the report's `journey` field, and the
 [release matrix](release-matrix.md) is updated from it. For each client it does
 a fresh setup. It then runs the rerun, existing env file, wrong workspace,
-modified skill, interrupted and denied approval, no-browser, SDK trace with
+modified skill, interrupted and denied approval, the agent `--json --no-browser`
+flow (each `open_url` approved, then rerun until ready), SDK trace with
 exact verify and dashboard view, verify timeout, revoked grant and logout
 scenarios. Each result is labelled with its evidence class, and the report also
 records timings and approval counts.

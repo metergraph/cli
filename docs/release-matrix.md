@@ -26,7 +26,7 @@ Evidence is labelled by class and the classes are never merged:
 | Deployment | Status for 0.2.0 | Evidence |
 |---|---|---|
 | Hosted (`managed`) | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: every scenario below on `0.2.0-preview.5` from the registry, with a person's browser approvals. `real_application_traffic`: one approved paid call, its exact trace verified and viewed (`0.2.0-preview.1`, fixes rerun on `preview.2`) |
-| Customer-local, released signed bundle | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: signed bundle `v0.2.96`, every scenario below, on `0.2.0-preview.5` from the registry and packed from source |
+| Customer-local, released signed bundle | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: signed bundles `v0.2.96` and `v0.2.104`, every scenario below, on `0.2.0-preview.5` from the registry and on a tarball packed from `main` |
 | Customer-owned cloud (`byoc`) | Untested | `synthetic_fixture` only. No reachable operator-provisioned deployment was available |
 | Open source server (`oss`) | Untested | `synthetic_fixture` only. Setup hands ingest configuration to the operator |
 
@@ -50,7 +50,8 @@ the same for all three clients. Rows say what was run with each one.
 
 Both columns are from `0.2.0-preview.5` installed from the registry on macOS 27
 arm64, Node 24.7.0, npm 11.5.1, using the three clients' skill paths. Customer-local
-ran against `v0.2.96` with automated approvals. Hosted ran against production with
+ran against `v0.2.96` and `v0.2.104` with automated approvals, and the packed
+`main` CLI ran against `v0.2.104` as well. Hosted ran against production with
 the approvals done in the person's own signed-in browser.
 
 | Scenario | Customer-local | Hosted |
@@ -58,7 +59,7 @@ the approvals done in the person's own signed-in browser.
 | Fresh setup, per client | Pass. `ok`, `.env` created 0600 and git-ignored, skill bytes match the bundle. Two approvals | Pass, same checks |
 | Rerun | Pass. `env: unchanged`, `skill: reused`, files byte-identical, no approval | Pass |
 | Rerun with `--json --no-browser` | Pass. `ok` with no approval | Pass |
-| Fresh `--json --no-browser` | Pass. Exit 6 `no_browser_requires_terminal`, `next_action: run_in_terminal`, nothing written | Pass |
+| Fresh `--json --no-browser` (how an agent sets up) | `main`: pass. Three runs: exit 18 `action_required` with an `open_url` for sign-in, then for the ingest key, then `ready_for_instrumentation`. Nothing is written before the first approval; 3.4 s with the approvals automated. `preview.5`: pass on the older contract, exit 6 `no_browser_requires_terminal` with nothing written | `preview.5`: pass on the older contract. `main`: untested on hosted |
 | Existing `.env` with other values | Pass. Values kept, ingest values added | Pass |
 | Existing `.env` with a key setup did not issue | Pass. Exit 8 `existing_ingest_key_unowned`, `.env` byte-identical. One sign-in approval happens before the refusal | Pass, same |
 | Wrong `--workspace` on a set-up project | Pass. Exit 8 `setup_binding_changed`, nothing changed, no approval | Pass |
