@@ -1,7 +1,14 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.1.0`.
+`latest` stays on the last stable version, currently `0.2.0`.
+
+## 0.2.0
+
+First stable release of the 0.2.0 line, on `latest`. It is `0.2.0-preview.6` with no
+code changes. Compared with `0.1.0`, it adds `setup`, `login`, `logout`, `status`,
+`verify`, `usage`, `traces`, `routes`, `context`, `capabilities` and `skills`; see the
+preview entries below. The README now installs from `latest` instead of `next`.
 
 ## 0.2.0-preview.6
 

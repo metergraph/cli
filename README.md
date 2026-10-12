@@ -1,6 +1,6 @@
 # metergraph-cli
 
-[![npm](https://img.shields.io/npm/v/metergraph-cli/next?label=npm%40next)](https://www.npmjs.com/package/metergraph-cli)
+[![npm](https://img.shields.io/npm/v/metergraph-cli?label=npm)](https://www.npmjs.com/package/metergraph-cli)
 [![CI](https://github.com/metergraph/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/metergraph/cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/metergraph/cli/blob/main/LICENSE)
 
@@ -13,11 +13,10 @@ token and route metadata back. Every command has stable `--json` output and exit
 so agents can run it as well as people.
 
 ```sh
-npx --yes metergraph-cli@next --help
+npx --yes metergraph-cli --help
 ```
 
-This is a preview, published on the `next` npm tag. `latest` is still `0.1.0`, which has
-only `doctor` and `skill`. See the [changelog](https://github.com/metergraph/cli/blob/main/CHANGELOG.md).
+Published on npm as `latest`. See the [changelog](https://github.com/metergraph/cli/blob/main/CHANGELOG.md).
 
 ## Quickstart
 
@@ -27,7 +26,7 @@ writes `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` to a private `.env`, a
 installs the skill for your coding agent.
 
 ```sh
-npx --yes metergraph-cli@next setup --runtime local --client claude
+npx --yes metergraph-cli setup --runtime local --client claude
 ```
 
 Use `--client codex` or `--client cursor` for the other agents.
@@ -40,20 +39,20 @@ ID or request ID and when the call started and ended.
 exact trace is visible in your workspace.
 
 ```sh
-npx --yes metergraph-cli@next verify --trace-id TRACE_ID \
+npx --yes metergraph-cli verify --trace-id TRACE_ID \
   --since 2026-01-08T12:00:00Z --until 2026-01-08T12:00:05Z
 ```
 
 Then read what Metergraph has recorded:
 
 ```sh
-npx --yes metergraph-cli@next usage --days 7      # calls, errors, cost and tokens per route per day
-npx --yes metergraph-cli@next traces --limit 20   # one page of trace metadata
+npx --yes metergraph-cli usage --days 7      # calls, errors, cost and tokens per route per day
+npx --yes metergraph-cli traces --limit 20   # one page of trace metadata
 ```
 
-To install it globally instead, run `npm install -g metergraph-cli@next`. The command is
-`metergraph`. Pin an exact version, such as `metergraph-cli@0.2.0-preview.6`, when a
-script must not change with the `next` tag.
+To install it globally instead, run `npm install -g metergraph-cli`. The command is
+`metergraph`. Pin an exact version, such as `metergraph-cli@0.2.0`, when a
+script must not change with the `latest` tag. Previews use the `next` tag.
 
 ## Requirements
 
@@ -80,7 +79,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   network access:
 
   ```sh
-  npx --yes metergraph-cli@next skill install --client codex
+  npx --yes metergraph-cli skill install --client codex
   ```
 
   Python users can run `pip install metergraph-skills` and
@@ -94,7 +93,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   the `metergraph/skills` plugin marketplace instead.
 
   ```sh
-  npx --yes metergraph-cli@next skills install --client claude
+  npx --yes metergraph-cli skills install --client claude
   ```
 
   `--runtime` defaults to `local`. Pass `--runtime cloud` when the client runs in a
@@ -121,7 +120,7 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
 Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
 ```md
-- Metergraph CLI: `npx --yes metergraph-cli@next <command> --json`. Check exit codes;
+- Metergraph CLI: `npx --yes metergraph-cli <command> --json`. Check exit codes;
   follow `data.next_action` on failure.
 - After changing instrumented code, run the app once and confirm the trace with
   `metergraph verify` before reporting that tracing works.
@@ -155,7 +154,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
-| 0 | `ok` | Command succeeded. `doctor` does not return this in this preview. For `skill`, the file is in place; discovery is still pending. |
+| 0 | `ok` | Command succeeded. `doctor` does not return this in this release. For `skill`, the file is in place; discovery is still pending. |
 | 1 | `internal_error` | Unexpected failure inside the CLI. |
 | 2 | `invalid_input` | Unknown command or argument, or an invalid option value. No request was made. |
 | 3 | `authentication_required` | Service is reachable, healthy and supported, and requires authentication. No workspace is connected. |

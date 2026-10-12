@@ -9,12 +9,11 @@ include real credentials, tokens or customer data in a report.
 
 ## Supported versions
 
-`metergraph-cli` is a development preview. Only the latest version receives fixes.
+`metergraph-cli` is pre-1.0. Only the latest version receives fixes.
 
 ## Security properties of the CLI
 
-The published `0.1.0` package holds no credentials of its own. The
-`0.2.0` previews add `login` and `logout`, which hold one delegated,
+The `0.1.0` package holds no credentials of its own. `0.2.0` adds `login` and `logout`, which hold one delegated,
 Metadata-only grant per signed in project, and read commands that use it; see
 [Sign in](#sign-in-checkout-only) and [Read commands](#read-commands-checkout-only). The
 CLI is designed to limit what it reads, writes, sends and prints. These are the
