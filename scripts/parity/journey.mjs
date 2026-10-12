@@ -12,7 +12,7 @@
 // hand its two values to the SDK child process.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -45,9 +45,10 @@ export async function runJourney(options) {
     ? readFileSync(approverLog, "utf8").trim().split("\n").filter((line) => line.includes('"step":"opened"')).length : 0);
 
   function cli(args, project, { mode = "approve", signalAfterOpen = null } = {}) {
-    const preload = approver === "automated" ? ["--import", APPROVER] : [];
+    const preload = approver === "person" ? [] : ["--import", APPROVER];
     const env = { ...process.env, ...LOCAL_SESSION, METERGRAPH_PARITY_APPROVER: mode,
-      METERGRAPH_PARITY_PROFILE: browserProfile, METERGRAPH_PARITY_LOG: approverLog };
+      METERGRAPH_PARITY_PROFILE: browserProfile, METERGRAPH_PARITY_LOG: approverLog,
+      ...(approver === "relay" ? { METERGRAPH_PARITY_APPROVER_RELAY: path.join(work, "evidence", "relay.jsonl") } : {}) };
     const started = now();
     const before = approvals();
     return new Promise((resolve) => {
@@ -70,6 +71,31 @@ export async function runJourney(options) {
         resolve({ code, signal, body, stderr, ms: now() - started, approvals: approvals() - before });
       });
     });
+  }
+
+  // Approves a URL the CLI returned as an open_url next action, the way the
+  // person would after their agent showed it to them.
+  async function approveUrl(url) {
+    if (approver === "automated") {
+      const viewer = spawn(process.execPath, [BROWSER], { stdio: ["pipe", "ignore", "inherit"],
+        env: { ...process.env, METERGRAPH_PARITY_APPROVER: "approve", METERGRAPH_PARITY_PROFILE: browserProfile,
+          METERGRAPH_PARITY_LOG: approverLog } });
+      viewer.stdin.end(url);
+      await new Promise((resolve) => viewer.on("close", resolve));
+    } else if (approver === "relay") {
+      const entry = { at: new Date().toISOString(), step: "opened", mode: "approve", source: "open_url" };
+      appendFileSync(path.join(work, "evidence", "relay.jsonl"), `${JSON.stringify({ ...entry, url })}\n`, { mode: 0o600 });
+    } else {
+      process.stderr.write(`Approve in your browser: ${url}\n`);
+    }
+  }
+  async function waitFor(condition, timeoutMs) {
+    const deadline = now() + timeoutMs;
+    while (now() < deadline) {
+      if (condition()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return condition();
   }
 
   async function scenario(id, evidence, fn) {
@@ -103,8 +129,8 @@ export async function runJourney(options) {
     return project;
   };
   const setupArgs = (client, extra = []) => ["setup", "--runtime", "local", "--client", client,
-    ...(deployment === "managed" ? ["--url", origin] : ["--deployment", deployment, "--url", origin,
-      "--workspace", workspace, "--confirm-prerequisites"]), "--timeout-ms", "120000", ...extra];
+    ...(deployment === "managed" ? ["--url", origin, ...(workspace === null ? [] : ["--workspace", workspace])] : ["--deployment", deployment, "--url", origin,
+      "--workspace", workspace, "--confirm-prerequisites"]), "--timeout-ms", approver === "automated" ? "120000" : "600000", ...extra];
   const projectState = (project, client = "claude") => ({
     env: hashOf(path.join(project, ".env")),
     setup: hashOf(path.join(project, ".metergraph", "setup.json")),
@@ -160,14 +186,48 @@ export async function runJourney(options) {
     check("no_approval", run.approvals === 0);
   });
 
-  await scenario("no_browser_fresh_json", "real_deployment", async (record, check) => {
+  // How a coding agent sets up: --json --no-browser returns each approval URL
+  // as an open_url next action and exits, a background process waits for the
+  // approval, and the agent reruns. Fresh setup takes three runs and two
+  // approvals. Artifacts before that contract refuse with exit 6 instead.
+  await scenario("agent_no_browser_flow", "real_deployment", async (record, check) => {
     const project = freshProject("no-browser");
-    const run = await cli(setupArgs(baseClient, ["--no-browser"]), project);
-    summarize(record, run);
-    check("refused_exit_6", run.code === 6 && record.reason === "no_browser_requires_terminal", record.reason);
-    check("next_action_run_in_terminal", run.body?.data?.next_action?.kind === "run_in_terminal");
-    check("no_approval", run.approvals === 0);
-    check("nothing_written", nothingWritten(project));
+    const args = setupArgs(baseClient, ["--no-browser"]);
+    const started = now();
+    const first = await cli(args, project);
+    summarize(record, first);
+    if (first.code === 6) {
+      record.notes.push("legacy contract: --json --no-browser refuses instead of returning the URL");
+      check("refused_exit_6", record.reason === "no_browser_requires_terminal", record.reason);
+      check("next_action_run_in_terminal", first.body?.data?.next_action?.kind === "run_in_terminal");
+      check("nothing_written", nothingWritten(project));
+      return;
+    }
+    const steps = [
+      { run: first, status: "login_pending", done: () => existsSync(path.join(project, ".metergraph", "project.json")) },
+      { run: null, status: "approval_pending", done: () => existsSync(path.join(project, ".env")) },
+    ];
+    for (const [index, step] of steps.entries()) {
+      const run = step.run ?? await cli(args, project);
+      const action = run.body?.data?.next_action;
+      check(`run${index + 1}_action_required`, run.code === 18 && run.body?.error?.reason === "browser_approval_required",
+        `${run.code}/${run.body?.error?.reason}`);
+      check(`run${index + 1}_status_${step.status}`, run.body?.data?.status === step.status, run.body?.data?.status);
+      check(`run${index + 1}_open_url_on_origin`, action?.kind === "open_url" &&
+        typeof action.url === "string" && action.url.startsWith(`${origin}/`));
+      check(`run${index + 1}_no_browser_opened`, run.approvals === 0);
+      if (index === 0) check("nothing_written_before_approval", !existsSync(path.join(project, ".env")));
+      if (typeof action?.url !== "string") return;
+      await approveUrl(action.url);
+      check(`run${index + 1}_approval_saved`, await waitFor(step.done, 600000));
+    }
+    const last = await cli(args, project);
+    check("run3_ready", last.body?.outcome === "ok" && last.body?.data?.status === "ready_for_instrumentation",
+      `${last.body?.outcome}/${last.body?.data?.status}`);
+    check("env_private", process.platform === "win32" || (statSync(path.join(project, ".env")).mode & 0o077) === 0);
+    check("no_credential_in_output", !leaks(project, first) && !leaks(project, last));
+    record.flow_ms = now() - started;
+    record.agent_runs = 3;
   });
 
   await scenario("existing_env_unowned_key", "real_deployment", async (record, check) => {
@@ -229,7 +289,7 @@ export async function runJourney(options) {
     check("restored_rerun_ok", restored.body?.outcome === "ok" && restored.body?.data?.skill === "reused");
   });
 
-  if (approver === "automated") {
+  if (approver !== "person") {
     for (const [id, mode, signal, expected] of [
       ["interrupted_setup", "ignore", "SIGINT", "cancelled"],
       ["denied_approval", "deny", null, "access_denied"],
@@ -268,7 +328,10 @@ export async function runJourney(options) {
       summarize(record, run);
       check("verify_ok", run.body?.outcome === "ok", `${record.outcome}/${record.reason}`);
       const data = run.body?.data ?? {};
+      // The dashboard link is workspace-bound and holds no credential. It is
+      // kept so a person can open it after a relay or person run.
       record.verify = { attempts: data.attempts ?? null, trace_status: data.trace?.status ?? data.status ?? null,
+        app_url: data.app_url ?? null,
         link_workspace_bound: data.link_workspace_bound ?? null, content_included: data.content_included ?? null };
       check("content_not_included", data.content_included === false);
       check("link_workspace_bound", data.link_workspace_bound === true);
@@ -343,6 +406,17 @@ export async function runJourney(options) {
       window?.since ?? new Date(now() - 60000).toISOString(), "--until", window?.until ?? new Date(now()).toISOString(),
       "--source", "synthetic"], base);
     check("verify_login_required", verify.body?.outcome === "login_required", verify.body?.outcome);
+  });
+
+  // Leave no grant behind: log out of every project this run signed in.
+  await scenario("cleanup_logout", "real_deployment", async (record, check) => {
+    for (const name of readdirSync(path.join(work, "projects"))) {
+      const project = path.join(work, "projects", name);
+      if (!existsSync(path.join(project, ".metergraph", "project.json"))) continue;
+      const run = await cli(["logout"], project);
+      check(`logout_${name}`, run.body?.outcome === "ok", run.body?.error?.reason);
+    }
+    if (Object.keys(record.checks).length === 0) record.checks.nothing_to_log_out = "pass";
   });
 
   return { results, trace_id: traceId, evidence_dir: path.dirname(approverLog),
