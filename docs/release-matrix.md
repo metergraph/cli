@@ -25,7 +25,7 @@ Evidence is labelled by class and the classes are never merged:
 
 | Deployment | Status for 0.2.0 | Evidence |
 |---|---|---|
-| Hosted (`managed`) | Supported on macOS | `real_deployment`: the fresh agent `setup --json --no-browser` flow, rerun, `status` and `logout` on `0.2.0-preview.6` from the registry. `real_deployment` and `synthetic_application_traffic`: every scenario below on `0.2.0-preview.5` from the registry, with a person's browser approvals. `real_application_traffic`: one approved paid call on `0.2.0` from the registry after the agent `setup --json --no-browser` flow (13 input and 5 output tokens, under $0.0001), its exact trace verified with `verify --source application` in one attempt (0.66 s, `content_included: false`) and opened in the dashboard filtered to that trace. Earlier: one paid call on `0.2.0-preview.1`, fixes rerun on `preview.2` |
+| Hosted (`managed`) | Supported on macOS | `real_application_traffic` on the released `0.2.0` from the registry: the agent `setup --json --no-browser` flow, one approved paid call through an AI gateway (13 input and 5 output tokens, under $0.0001), its exact trace verified with `verify --source application` in one attempt (0.66 s, `content_included: false`) and opened in the dashboard filtered to that trace. `real_deployment`: the fresh agent `setup --json --no-browser` flow, rerun, `status` and `logout` on `0.2.0-preview.6` from the registry. `real_deployment` and `synthetic_application_traffic`: every scenario below on `0.2.0-preview.5` from the registry, with a person's browser approvals. Earlier `real_application_traffic`: one paid call on `0.2.0-preview.1`, fixes rerun on `preview.2` |
 | Customer-local, released signed bundle | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: signed bundle `v0.2.104`, every scenario below (19 of 19), on `0.2.0-preview.6` from the registry. Earlier: `v0.2.96` and `v0.2.104` on `0.2.0-preview.5` and on a tarball packed from `main` |
 | Customer-owned cloud (`byoc`) | Untested | `synthetic_fixture` only. No reachable operator-provisioned deployment was available |
 | Open source server (`oss`) | Untested | `synthetic_fixture` only. Setup hands ingest configuration to the operator |
@@ -67,7 +67,7 @@ the approvals done in the person's own signed-in browser.
 | Modified skill file | Pass. Exit 8, `credential_ready_skill_pending`, edit kept, `.env` unchanged; rerun after restoring passes | Pass |
 | Interrupted approval (SIGINT) | Pass. `authorization_failed` / `cancelled`, nothing saved, `status` is `login_required` | Pass |
 | Denied approval | Pass. `authorization_failed` / `access_denied`, nothing saved | Pass |
-| SDK trace and exact `verify` | Pass (`synthetic_application_traffic`). One processed trace, `content_included: false`, workspace-bound link | Pass (`synthetic_application_traffic`, and earlier `real_application_traffic`) |
+| SDK trace and exact `verify` | Pass (`synthetic_application_traffic`). One processed trace, `content_included: false`, workspace-bound link | `0.2.0`: pass (`real_application_traffic`). One paid chat completion (13 input, 5 output tokens) found on the first attempt in 0.66 s, `content_included: false`, workspace-bound link; the dashboard opened on the exact trace with the gateway's request ID. Earlier: `synthetic_application_traffic` on `preview.5` |
 | Dashboard view of the link | Pass. Opens filtered to the exact trace | Pass on the earlier paid trace. Not repeated in this run |
 | `verify` timeout, 3000 ms | Pass. Exit 11 `trace_not_found_within_bounds` in 3.1 s | Pass |
 | Grant revoked on the server but still saved locally | Pass. `status` and `verify` exit 12 `login_required` / `access_revoked`, no credential printed | Pass |
@@ -90,6 +90,9 @@ No comparison with other tools is claimed. Hosted setup took 10 to 16 s includin
 person's approvals in the earlier hosted runs. The latest hosted run's setup times
 measure the assisted approvals, not the CLI, so they are not a baseline. Its rerun
 took under 1 s with no approval.
+
+On the released `0.2.0`, hosted setup through the agent flow took three runs of 1.2 s,
+0.7 s and 0.9 s of CLI time, plus two approvals in a person's browser.
 
 ## Skill discovery
 
