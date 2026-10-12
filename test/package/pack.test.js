@@ -26,6 +26,7 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-evals/SKILL.md",
   "assets/skills/metergraph-investigate/SKILL.md",
   "assets/skills/metergraph-iterate/SKILL.md",
+  "assets/skills/metergraph-local-bundle/SKILL.md",
   "assets/skills/metergraph-model-swap/SKILL.md",
   "assets/skills/metergraph-onboarding/SKILL.md",
   "assets/skills/metergraph-report/SKILL.md",
@@ -68,7 +69,7 @@ const EXPECTED_FILES = [
   "src/verify-output.js",
   "src/verify.js",
 ];
-const SKILL_SHA256 = "92f7955f6f8761a20a1886ad81f22dfcee239afddf8e9f1e761c35eb8e70f218";
+const SKILL_SHA256 = "e7fc4eb7a22eeb16c357bede9d0a080ad3b415aaab1d9c72f164d5350d48c4b1";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;
