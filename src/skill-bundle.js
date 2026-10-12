@@ -55,7 +55,7 @@ export function loadBundledSkill() {
 // The workflow skills that "skills install" writes, vendored from the public
 // skills repository at one commit. The manifest's own hash is pinned here, and
 // the manifest pins each skill's hash, so changing any file alone is detected.
-const PINNED_PACK_SHA256 = "84191ddbc8f5c327e1defdd890b1032e338c08eb174e4eed5fb09f93b41202f5";
+const PINNED_PACK_SHA256 = "f08a188abba2018770dc3ba071509ff22f3af76ebc5c30a9f3a2ec2b2eae75b5";
 
 const PACK_DIR = new URL("../assets/skills/", import.meta.url);
 const PACK_KEYS = ["commit", "manifest_version", "repository", "skills"];
