@@ -12,6 +12,12 @@
   `bin/start`) and then hands over to `setup --deployment customer-local`. Remote,
   cloud and CI sessions get the `run_on_customer_machine` handoff instead. The
   bundled `metergraph` and `metergraph-onboarding` skills now point to it.
+- The bundled agent skill, and the copy in the Python `metergraph-skills` package, now
+  come from [metergraph/skills](https://github.com/metergraph/skills) at `dda4d5f`.
+  The skill tells the agent what to do when `login` or `setup` with
+  `--json --no-browser` exits 18: show `data.next_action.url` to the person and run
+  the command again after they approve. On older CLIs that exit 6, the person runs
+  setup in their own terminal. `skill update` upgrades unchanged earlier installs.
 - `skill install|update` and `skills install|update` default `--runtime` to `local`,
   the runtime `setup` already installs the skill for, so
   `metergraph skills install --client claude` works without it. `--runtime cloud` and
