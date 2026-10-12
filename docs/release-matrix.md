@@ -25,8 +25,8 @@ Evidence is labelled by class and the classes are never merged:
 
 | Deployment | Status for 0.2.0 | Evidence |
 |---|---|---|
-| Hosted (`managed`) | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: every scenario below on `0.2.0-preview.5` from the registry, with a person's browser approvals. `real_application_traffic`: one approved paid call, its exact trace verified and viewed (`0.2.0-preview.1`, fixes rerun on `preview.2`) |
-| Customer-local, released signed bundle | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: signed bundles `v0.2.96` and `v0.2.104`, every scenario below, on `0.2.0-preview.5` from the registry and on a tarball packed from `main` |
+| Hosted (`managed`) | Supported on macOS | `real_deployment`: the fresh agent `setup --json --no-browser` flow, rerun, `status` and `logout` on `0.2.0-preview.6` from the registry. `real_deployment` and `synthetic_application_traffic`: every scenario below on `0.2.0-preview.5` from the registry, with a person's browser approvals. `real_application_traffic`: one approved paid call, its exact trace verified and viewed (`0.2.0-preview.1`, fixes rerun on `preview.2`) |
+| Customer-local, released signed bundle | Supported on macOS | `real_deployment` and `synthetic_application_traffic`: signed bundle `v0.2.104`, every scenario below (19 of 19), on `0.2.0-preview.6` from the registry. Earlier: `v0.2.96` and `v0.2.104` on `0.2.0-preview.5` and on a tarball packed from `main` |
 | Customer-owned cloud (`byoc`) | Untested | `synthetic_fixture` only. No reachable operator-provisioned deployment was available |
 | Open source server (`oss`) | Untested | `synthetic_fixture` only. Setup hands ingest configuration to the operator |
 
@@ -59,9 +59,9 @@ the approvals done in the person's own signed-in browser.
 | Fresh setup, per client | Pass. `ok`, `.env` created 0600 and git-ignored, skill bytes match the bundle. Two approvals | Pass, same checks |
 | Rerun | Pass. `env: unchanged`, `skill: reused`, files byte-identical, no approval | Pass |
 | Rerun with `--json --no-browser` | Pass. `ok` with no approval | Pass |
-| Fresh `--json --no-browser` (how an agent sets up) | `main`: pass. Three runs: exit 18 `action_required` with an `open_url` for sign-in, then for the ingest key, then `ready_for_instrumentation`. Nothing is written before the first approval; 3.4 s with the approvals automated. `preview.5`: pass on the older contract, exit 6 `no_browser_requires_terminal` with nothing written | `preview.5`: pass on the older contract. `main`: untested on hosted |
+| Fresh `--json --no-browser` (how an agent sets up) | `preview.6` and `main`: pass. Three runs: exit 18 `action_required` with an `open_url` for sign-in, then for the ingest key, then `ready_for_instrumentation`. Nothing is written before the first approval; 3.4 s with the approvals automated. `preview.5`: pass on the older contract, exit 6 `no_browser_requires_terminal` with nothing written | `preview.6`: pass. Exit 18 with an `open_url` for sign-in in 2.2 s with nothing written in the project, then for the ingest key in 1.1 s; after both approvals `.env` is 0600 and git-ignored and the skill is `e7fc4eb7a22e`. The next run returns `ready_for_instrumentation` with `env: unchanged`, `skill: reused` in 1.4 s, `status` reports `managed` verified with `agent:metadata` only, and `logout` is `accepted`, then `status` exits 12 `login_required`. `preview.5`: pass on the older contract |
 | Existing `.env` with other values | Pass. Values kept, ingest values added | Pass |
-| Existing `.env` with a key setup did not issue | Pass. Exit 8 `existing_ingest_key_unowned`, `.env` byte-identical. One sign-in approval happens before the refusal | Pass, same |
+| Existing `.env` with a key setup did not issue | Pass. Exit 8 `existing_ingest_key_unowned`, `.env` byte-identical. `preview.6` refuses before sign-in with no approval; `preview.5` needed one | `preview.5`: pass, one approval before the refusal |
 | Wrong `--workspace` on a set-up project | Pass. Exit 8 `setup_binding_changed`, nothing changed, no approval | Pass |
 | Wrong `--workspace` on a fresh project | Pass. Exit 11 `workspace_mismatch` after one approval, nothing saved | Not run: hosted sign-in uses the browser's active workspace |
 | Modified skill file | Pass. Exit 8, `credential_ready_skill_pending`, edit kept, `.env` unchanged; rerun after restoring passes | Pass |

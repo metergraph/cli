@@ -1,7 +1,7 @@
 {
   "name": "metergraph-cli",
-  "version": "0.2.0-preview.6",
-  "description": "Preview Metergraph command line tool with a read-only connection probe, a project skill installer, Metadata-only sign in and bounded workspace Metadata reads",
+  "version": "0.2.0",
+  "description": "Metergraph command line tool with a read-only connection probe, a project skill installer, Metadata-only sign in and bounded workspace Metadata reads",
   "type": "module",
   "bin": {
     "metergraph": "bin/metergraph.js"

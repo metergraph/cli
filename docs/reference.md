@@ -101,7 +101,7 @@ Options:
 | `--json` | off | Print exactly one JSON line on stdout and nothing on stderr. |
 
 A healthy, supported service exits with code **3, `authentication_required`**. That is
-the best result this preview can report: the service is reachable, but this CLI holds
+the best result this release can report: the service is reachable, but this CLI holds
 no credentials, so `authenticated` is always `false` and `workspace` is always `null`.
 A reachable service is not a working workspace connection. To connect an application,
 follow the [connection guide](https://www.metergraph.dev/docs/guides/agent-access/).
