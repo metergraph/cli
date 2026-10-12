@@ -3,7 +3,7 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.1.0`.
 
-## Unreleased
+## 0.2.0-preview.6
 
 - The bundled skill pack adds `metergraph-local-bundle`. It walks a coding agent
   through standing up the signed customer-local bundle on the person's own machine
