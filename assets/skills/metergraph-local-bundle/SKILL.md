@@ -102,12 +102,23 @@ curl -fsSLO "$base/metergraph-byoc-release.json.sig"
 curl -fsSLO "$base/metergraph-byoc-release.json.pem"
 ```
 
-Do not list, extract or run archive contents. Open the per-version release page
-and run its complete `cosign verify-blob` command exactly as published. Its
-certificate identity regexp must be anchored at both ends and identify the
-published `byoc-release.yml` workflow on `refs/heads/main` or a `v` tag. Refuse
-an absent or unanchored identity, `.*`, `--insecure-ignore-tlog` or a similar
-bypass. Do not substitute an identity from memory.
+Do not list, extract or run archive contents. Verify the manifest signature
+with exactly this command. The issuer and identity are pinned here, not read
+from the release page, so a changed download site cannot change who must have
+signed the release:
+
+```sh
+cosign verify-blob \
+  --certificate metergraph-byoc-release.json.pem \
+  --signature metergraph-byoc-release.json.sig \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/PioneerSquareLabs/metergraph-internal/\.github/workflows/byoc-release\.yml@refs/(heads/main|tags/v.+)$' \
+  metergraph-byoc-release.json
+```
+
+Never loosen or drop the issuer or identity, and never add
+`--insecure-ignore-tlog` or a similar bypass. If the release page publishes a
+different identity, stop and tell the person rather than using it.
 
 If cosign fails, stop: "The manifest signature did not verify. Do not extract
 or run this bundle." After it succeeds, check signed fields:

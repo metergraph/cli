@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "70b705ff1a9b8d0187764f81c6f7df23b2ae6177",
+  "commit": "402b7494c6ce302df31d11771d6ba63e37616a36",
   "skills": [
     {
       "name": "metergraph-analyze",
@@ -35,9 +35,9 @@
     },
     {
       "name": "metergraph-local-bundle",
-      "sha256": "2e79615e61be235d96d96c951ebcb79fa88253baf061d40442a809630979a7c3",
-      "size": 11832,
-      "revision": "sha256-2e79615e61be"
+      "sha256": "692cd8952a8a8896ec2c06091b329a7a01912e261e87d62a9458452172a7c9b0",
+      "size": 12245,
+      "revision": "sha256-692cd8952a8a"
     },
     {
       "name": "metergraph-model-swap",
