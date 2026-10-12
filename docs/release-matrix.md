@@ -37,9 +37,9 @@ the same for all three clients. Rows say what was run with each one.
 
 | Client | OS / runtime | Hosted | Customer-local | Skill found by the agent |
 |---|---|---|---|---|
-| Claude Code | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Checked on `0.2.0-preview.0` only. Rerun on the RC |
-| Codex | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Untested. Skill file placement verified only |
-| Cursor | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Untested. Cursor is not installed on the test machine |
+| Claude Code | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Supported (`client_discovery`, Claude Code 2.1.295 on `0.2.0-preview.5`) |
+| Codex | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Supported (`client_discovery`, Codex 0.154.0 on `0.2.0-preview.5`) |
+| Cursor | macOS 27 arm64, Node 24, npm 11 | Supported | Supported | Untested for 0.2.0. Skill file placement verified only |
 | Any | Linux (Debian 12, Node 22 and 24, arm64 and amd64 containers) | Untested past sign-in. Install, skill install and cancelled sign-in pass | Untested | Untested |
 | Any | Windows, Node 22 and 24 | Untested live. `synthetic_fixture` passes in CI | Untested. The bundle needs WSL | Untested |
 | Any | Node 22 or 24 on macOS, Linux or Windows | `synthetic_fixture` passes in CI for every row | | |
@@ -72,6 +72,7 @@ the approvals done in the person's own signed-in browser.
 | Grant revoked on the server but still saved locally | Pass. `status` and `verify` exit 12 `login_required` / `access_revoked`, no credential printed | Pass |
 | Ingest key revoked on the server, `setup --repair` | Untested | Untested |
 | Denied npm registry access | Untested | Untested |
+| Fresh image pull with a customer's pull-only registry credential | Untested. Runs used images already cached on the machine | Not applicable |
 | `logout` | Pass. `revocation: accepted`; `verify` then `login_required` | Pass |
 
 ## Baseline
@@ -89,10 +90,28 @@ person's approvals in the earlier hosted runs. The latest hosted run's setup tim
 measure the assisted approvals, not the CLI, so they are not a baseline. Its rerun
 took under 1 s with no approval.
 
+## Skill discovery
+
+Each agent ran headless in a project where `setup` had installed the skill:
+Claude Code with only read tools, and Codex in its read-only sandbox. Each got two
+prompts:
+
+1. Which skills are available, and from which `SKILL.md` path.
+2. Which variables setup wrote and where, and the command the skill gives for
+   confirming one exact trace.
+
+| Agent | Found the project skill | Followed it |
+|---|---|---|
+| Claude Code | Yes. `metergraph` at `.claude/skills/metergraph/SKILL.md` | Yes. Named `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` in `.env`, and `metergraph verify` with its `npx` fallback. It did not open `.env` |
+| Codex | Yes. `metergraph` at `.agents/skills/metergraph/SKILL.md` | Yes, the same answers |
+
+Neither agent printed a credential. Neither could give the full `verify` flags,
+because the skill names the command without them.
+
 ## Still open before 0.2.0 is called fully verified
 
-- A coding agent finding and following the installed skill. Rerun it for Claude
-  Code, and run it for Codex and Cursor.
+- Cursor finding and following the skill. It is untested for 0.2.0.
 - Hosted and customer-local runs on Linux and Windows hosts.
-- Revoked ingest key repair, and denied npm registry access.
+- Revoked ingest key repair, denied npm registry access, and a fresh image pull
+  with a customer's pull-only registry credential.
 - `byoc` and `oss` against live deployments.
