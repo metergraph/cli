@@ -11,7 +11,7 @@ agent discovered or followed the skill.
 ```sh
 pack_dir="$(mktemp -d)"
 npm pack --json --ignore-scripts --pack-destination "$pack_dir"
-node scripts/client-parity.mjs --tarball "$pack_dir/metergraph-cli-0.2.0.tgz"
+node scripts/client-parity.mjs --tarball "$pack_dir/metergraph-cli-0.2.1.tgz"
 ```
 
 The harness requires an absolute tarball path. It installs that tarball with
@@ -51,7 +51,7 @@ scenarios. Each result is labelled with its evidence class, and the report also
 records timings and approval counts.
 
 ```sh
-node scripts/client-parity.mjs --package metergraph-cli@0.2.0 \
+node scripts/client-parity.mjs --package metergraph-cli@0.2.1 \
   --journey customer-local --url http://localhost:8080 --workspace <workspace-id> \
   --bundle-manifest /path/to/metergraph-byoc-release.json \
   --python /path/to/venv/bin/python --keep --out report.json

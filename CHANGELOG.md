@@ -1,9 +1,9 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.0`.
+`latest` stays on the last stable version, currently `0.2.1`.
 
-## Unreleased
+## 0.2.1
 
 - The bundled skills fall back to `npx --yes metergraph-cli@latest` instead of
   `@next`, which now carries prereleases only. The explicit `@latest` keeps npx from
