@@ -1,4 +1,5 @@
 import { authMessage } from "./output.js";
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 
 // Fixed text for read command reasons and notices. Reasons shared with sign
 // in and doctor fall back to their wording. Nothing here contains a value from
@@ -75,51 +76,88 @@ function table(header, rows) {
   return [line(header), ...rows.map(line)];
 }
 
-export function readText(result, message) {
+const READ_TITLES = {
+  status: "Project status",
+  context: "Workspace context",
+  capabilities: "Agent capabilities",
+  usage: "Usage",
+  routes: "Routes",
+  traces: "Traces",
+};
+
+export function readText(result, message, style = PLAIN) {
   const data = result.data;
-  const lines = [`Metergraph ${result.command} (Metadata only)`];
-  if (data.origin !== null) lines.push(`Origin: ${data.origin}`);
+  const title = `${READ_TITLES[result.command] ?? result.command}${result.ok ? "" : " could not be read"}`;
+  const lines = [
+    `${headline(style, result.ok ? "info" : toneFor(result.outcome), title, result.outcome)}  ${style.dim("Metadata only")}`,
+    "",
+  ];
+  const rows = [["Origin", data.origin]];
   if (result.command === "status") {
-    statusLines(data, lines);
+    statusRows(data, rows);
+    lines.push(...fields(style, rows));
   } else {
-    if (data.workspace !== null) lines.push(`Workspace: ${data.workspace.id}`);
-    if (result.ok) resultLines(result.command, data.result, lines);
-  }
-  const notices = data.notices.map(noticeText).filter(Boolean);
-  if (notices.length > 0) lines.push("", ...notices.map((text) => `Note: ${text}`));
-  if (!result.ok) {
-    lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
-    if (data.retry_after_seconds !== null && data.retry_after_seconds !== undefined) {
-      lines.push(`Retry after: ${data.retry_after_seconds} seconds`);
+    rows.push(["Workspace", data.workspace?.id ?? null]);
+    if (result.ok) {
+      const body = [];
+      resultLines(result.command, data.result, body);
+      // "Label: value" lines before the first blank line join the field block.
+      let split = 0;
+      while (split < body.length && body[split] !== "" && /^[A-Z][^:]{0,40}: /.test(body[split])) {
+        const at = body[split].indexOf(": ");
+        rows.push([body[split].slice(0, at), body[split].slice(at + 2)]);
+        split += 1;
+      }
+      lines.push(...fields(style, rows), "");
+      for (const line of body.slice(split)) {
+        lines.push(/^[A-Z_]+( +[A-Z_]+)*$/.test(line.trim()) && line === line.toUpperCase() && line.trim() !== ""
+          ? `  ${style.dim(line)}` : line === "" ? "" : `  ${line}`);
+      }
+    } else {
+      lines.push(...fields(style, rows));
     }
   }
-  if (data.next_action?.message) lines.push(`Next: ${data.next_action.message}`);
-  return `${lines.join("\n")}\n`;
+  const notices = data.notices.map(noticeText).filter(Boolean);
+  if (notices.length > 0) {
+    lines.push("");
+    for (const text of notices) {
+      const [first, ...rest] = paragraph(style, text, "    ");
+      lines.push(`  ${style.yellow("!")} ${first.trimStart()}`, ...rest);
+    }
+  }
+  if (!result.ok) {
+    lines.push("", ...paragraph(style, message));
+    if (data.retry_after_seconds !== null && data.retry_after_seconds !== undefined) {
+      lines.push(...fields(style, [["Retry after", `${data.retry_after_seconds} seconds`]]));
+    }
+  }
+  if (data.next_action?.message) lines.push("", ...steps(style, [["", data.next_action.message]]));
+  return render(lines);
 }
 
-function statusLines(data, lines) {
-  lines.push(
-    `Configured: ${data.configured ? "yes (.metergraph/project.json)" : "no"}`,
-    `Reachable: ${yesNo(data.reachable)}`,
-    `Authenticated: ${data.authenticated ? "yes, verified by the service" : "no"}`,
-    `Workspace: bound ${show(data.workspace.intended)}, verified ${show(data.workspace.actual)}`,
-    `Deployment profile: bound ${show(data.deployment_profile)}, reported by the service: ${
+function statusRows(data, rows) {
+  rows.push(
+    ["Configured", data.configured ? "yes (.metergraph/project.json)" : "no"],
+    ["Reachable", yesNo(data.reachable)],
+    ["Authenticated", data.authenticated ? "yes, verified by the service" : "no"],
+    ["Workspace", `bound ${show(data.workspace.intended)}, verified ${show(data.workspace.actual)}`],
+    ["Deployment profile", `bound ${show(data.deployment_profile)}, reported by the service: ${
       data.deployment_profile_verified === true
         ? "same"
         : data.deployment_profile_verified === false
           ? "different"
           : "not checked"
-    }`,
-    `Scopes: ${data.scopes.length > 0 ? data.scopes.join(" ") : "none"}`,
+    }`],
+    ["Scopes", data.scopes.length > 0 ? data.scopes.join(" ") : "none"],
   );
   if (data.capabilities !== null) {
     const flag = (name) => yesNo(data.capabilities[name]);
-    lines.push(
-      `Metadata reads: usage ${flag("usage")}, routes ${flag("routes")}, traces ${flag("trace_metadata")}`,
-      "Content, evidence and replay: not available to this grant",
+    rows.push(
+      ["Metadata reads", `usage ${flag("usage")}, routes ${flag("routes")}, traces ${flag("trace_metadata")}`],
+      ["Content and replay", "not available to this grant"],
     );
   }
-  lines.push(`Application traffic verified: no`);
+  rows.push(["Application traffic verified", "no"]);
 }
 
 function resultLines(command, report, lines) {

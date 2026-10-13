@@ -72,7 +72,7 @@ test("setup records the git remote's owner/name once and reports it", async () =
     assert.ok(fs.readFileSync(config(box)).equals(before));
 
     const human = await setup(box, server, [], { json: false });
-    assert.match(human.stdout, /^Repository: example-org\/example-app \(already set in \.metergraph\/config\.json\)$/m);
+    assert.match(human.stdout, /^ +Repository +example-org\/example-app \(already set in \.metergraph\/config\.json\)$/m);
   } finally { await server.close(); }
 });
 

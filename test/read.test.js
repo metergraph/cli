@@ -137,10 +137,10 @@ test("status keeps configured, reachable, authenticated and the verified workspa
 
     const text = await read(box, server, ["status"], { json: false });
     assert.equal(text.run.code, 0);
-    assert.match(text.run.stdout, /Configured: yes/);
-    assert.match(text.run.stdout, /Deployment profile: bound local, reported by the service: same/);
-    assert.match(text.run.stdout, /Authenticated: yes, verified by the service/);
-    assert.match(text.run.stdout, /Application traffic verified: no/);
+    assert.match(text.run.stdout, /Configured +yes/);
+    assert.match(text.run.stdout, /Deployment profile +bound local, reported by the service: same/);
+    assert.match(text.run.stdout, /Authenticated +yes, verified by the service/);
+    assert.match(text.run.stdout, /Application traffic verified +no/);
   });
 });
 
@@ -248,7 +248,7 @@ test("context prints approved workspace fields only", async () => {
     assert.ok(!run.stdout.includes("person@example.com"));
 
     const text = await read(box, server, ["context"], { json: false });
-    assert.match(text.run.stdout, /Name: Example Workspace/);
+    assert.match(text.run.stdout, /Name +Example Workspace/);
     assert.ok(!text.run.stdout.includes("person@example.com"));
   });
 });
@@ -541,7 +541,7 @@ test("status checks /v1/deployment against the bound profile before the grant is
     const text = await read(box, server, ["status"], { json: false });
     assert.equal(text.run.code, 11);
     assert.match(text.run.stdout, /reported by the service: different/);
-    assert.match(text.run.stdout, /Authenticated: no/);
+    assert.match(text.run.stdout, /Authenticated +no/);
   });
 });
 

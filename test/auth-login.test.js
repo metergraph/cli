@@ -240,8 +240,8 @@ test("a rerun on a signed in project reuses the grant without a browser or new c
 
     const text = await login(assert, box, server, [], { json: false });
     assert.equal(text.run.code, 0);
-    assert.match(text.run.stdout, /Status: already signed in/);
-    assert.match(text.run.stdout, /Scopes: agent:metadata/);
+    assert.match(text.run.stdout, /^✓ Already signed in$/m);
+    assert.match(text.run.stdout, /Scopes +agent:metadata/);
 
     // An agent's JSON rerun needs no URL, so --no-browser is not refused.
     const quiet = await login(assert, box, server, ["--no-browser"]);
@@ -401,8 +401,8 @@ test("--no-browser prints the URL for a person on stderr and waits for the callb
     checked(assert, run, { box, server, json: false });
     assert.equal(run.code, 0, run.stdout);
     assert.match(run.stderr, /Open this URL in a browser on this machine/);
-    assert.match(run.stdout, /Status: signed in/);
-    assert.match(run.stdout, /Binding: \.metergraph\/project\.json/);
+    assert.match(run.stdout, /^✓ Signed in$/m);
+    assert.match(run.stdout, /Binding +\.metergraph\/project\.json/);
     assert.equal(readBindingFile(box).workspace_id, WORKSPACE_A);
   });
 });
@@ -672,7 +672,7 @@ test("logout reports unconfirmed revocation separately from local removal", asyn
   await server.close();
   const text = await logout(assert, box, server, { json: false });
   assert.equal(text.run.code, 13);
-  assert.match(text.run.stdout, /Server revocation: unconfirmed/);
+  assert.match(text.run.stdout, /Server revocation +unconfirmed/);
   assert.match(text.run.stdout, /did not confirm/);
   assert.ok(!fs.existsSync(path.join(box.project, BINDING)));
 });
