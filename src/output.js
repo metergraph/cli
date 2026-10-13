@@ -27,6 +27,7 @@ import {
   SUPPORTED_PROFILES,
   VERSION,
 } from "./constants.js";
+import { PLAIN, fields, headline, paragraph, render, section, steps, toneFor } from "./style.js";
 
 // Every JSON result, success or failure, has the same top-level keys:
 //   schema_version, command, ok, outcome, exit_code, data, error
@@ -127,7 +128,9 @@ const LOGIN_OPTIONS = [
   {
     name: "--runtime",
     value: "RUNTIME",
-    summary: "Required. local: the browser runs on this machine. cloud and cloud-no-shell get a handoff.",
+    summary:
+      "Required. Where this terminal runs, not which Metergraph service. local: your own machine, " +
+      "including for the hosted service. cloud, cloud-no-shell: a cloud sandbox; get the connection guide.",
   },
   { name: "--url", value: "ORIGIN", summary: `Origin to sign in to. Default ${DEFAULT_ORIGIN}.` },
   {
@@ -391,7 +394,7 @@ export function helpData(topic) {
   };
 }
 
-export function helpText(topic) {
+export function helpText(topic, style = PLAIN) {
   const lines = [];
   if (topic === "doctor") {
     lines.push(
@@ -581,73 +584,87 @@ export function helpText(topic) {
   }
   lines.push("", "Exit codes:");
   for (const [outcome, code] of Object.entries(EXIT_CODES)) {
-    lines.push(`  ${String(code).padEnd(3)}${outcome.padEnd(25)}${EXIT_CODE_MEANINGS[outcome]}`);
+    lines.push(`  ${String(code).padEnd(3)}${outcome.padEnd(25)}${style.dim(EXIT_CODE_MEANINGS[outcome])}`);
   }
-  return `${lines.join("\n")}\n`;
+  // Section labels ("Usage:", "Options:", "Exit codes:") in bold.
+  return `${lines.map((line) => line.replace(/^(Usage|Options|Exit codes):/, (label) => style.bold(label))).join("\n")}\n`;
 }
 
-export function skillText(result, message) {
+export function skillText(result, message, style = PLAIN) {
   const report = result.data;
   const label = SKILL_CLIENTS[report.client]?.label ?? HANDOFF_SKILL_CLIENTS[report.client];
-  const lines = [`Metergraph ${result.command}: ${label}, ${report.runtime} runtime`];
-  if (report.path !== null) lines.push(`Path: ${report.path}`);
+  const verb = result.command === "skill update" ? "updated" : "installed";
+  const lines = [
+    result.ok
+      ? headline(style, "ok", `Metergraph skill ${report.status === "unchanged" ? "already up to date" : verb} for ${label}`)
+      : headline(style, toneFor(result.outcome), `Metergraph skill not ${verb} for ${label}`, result.outcome),
+    "",
+  ];
+  const rows = [["Runtime", report.runtime], ["Path", report.path]];
   if (result.ok) {
-    lines.push(
-      `Status: ${report.status}`,
-      `Source revision: ${report.source.revision} (sha256 ${report.source.sha256})`,
-      `Discovery: pending until ${label} loads the skill`,
-      "Authenticated: no",
-      "",
-      message,
-      `Next: ${report.next_action.message}`,
+    rows.push(
+      ["Status", report.status],
+      ["Source", `${report.source.revision} ${style.dim(`(sha256 ${report.source.sha256})`)}`],
+      ["Discovery", `pending until ${label} loads the skill`],
+      ["Authenticated", "no"],
     );
-  } else {
-    lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
-    if (report.next_action?.kind === "connection_guide") {
-      lines.push(`Connection guide: ${report.next_action.url}`);
-    }
   }
-  return `${lines.join("\n")}\n`;
+  lines.push(...fields(style, rows), "");
+  if (message) lines.push(...paragraph(style, message), "");
+  lines.push(...steps(style, [
+    ["", result.ok ? report.next_action.message : null],
+    ["Connection guide", !result.ok && report.next_action?.kind === "connection_guide" ? report.next_action.url : null],
+  ]));
+  return render(lines);
 }
 
-export function skillsText(result, message) {
+export function skillsText(result, message, style = PLAIN) {
   const report = result.data;
   const lines = [];
+  const source = report.source
+    ? ["Source", `${report.source.repository} ${style.dim(`at ${report.source.commit.slice(0, 12)}`)}`]
+    : ["Source", null];
   if (result.command === "skills list") {
-    lines.push("Metergraph skills bundled with this CLI");
-    if (report.source) lines.push(`Source: ${report.source.repository} at ${report.source.commit.slice(0, 12)}`);
-    if (!result.ok) {
-      lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
-      return `${lines.join("\n")}\n`;
-    }
+    lines.push(
+      result.ok
+        ? headline(style, "info", "Metergraph skills bundled with this CLI")
+        : headline(style, toneFor(result.outcome), "Could not list Metergraph skills", result.outcome),
+      "",
+      ...fields(style, [source]),
+    );
+    if (!result.ok) return render([...lines, "", ...paragraph(style, message)]);
     for (const skill of report.skills) {
-      lines.push("", `${skill.name} (${skill.revision})`);
-      for (const [client, state] of Object.entries(skill.installs)) {
-        lines.push(`  ${SKILL_CLIENTS[client].label.padEnd(12)}${SKILLS_STATE_LABELS[state] ?? state}`);
-      }
+      lines.push("", `${section(style, skill.name)} ${style.dim(skill.revision)}`);
+      lines.push(...fields(style, Object.entries(skill.installs).map(([client, state]) =>
+        [SKILL_CLIENTS[client].label, state === "installed" ? style.green(SKILLS_STATE_LABELS[state]) : (SKILLS_STATE_LABELS[state] ?? state)])));
     }
-    return `${lines.join("\n")}\n`;
+    return render(lines);
   }
   const label = SKILL_CLIENTS[report.client]?.label ?? HANDOFF_SKILL_CLIENTS[report.client] ?? report.client;
-  lines.push(`Metergraph ${result.command}: ${label}, ${report.runtime} runtime`);
-  if (report.source) lines.push(`Source: ${report.source.repository} at ${report.source.commit.slice(0, 12)}`);
-  for (const skill of report.skills) {
-    const status = skill.status === "failed" ? `failed (${skill.reason})` : skill.status;
-    lines.push(`  ${skill.name.padEnd(24)}${status.padEnd(12)}${skill.path}`);
+  const verb = result.command === "skills update" ? "updated" : "installed";
+  lines.push(
+    result.ok
+      ? headline(style, "ok", `Metergraph skills ${verb} for ${label}`)
+      : headline(style, toneFor(result.outcome), `Metergraph skills not ${verb} for ${label}`, result.outcome),
+    "",
+    ...fields(style, [["Runtime", report.runtime], source]),
+  );
+  if (report.skills.length > 0) {
+    lines.push("", ...fields(style, report.skills.map((skill) => {
+      const status = skill.status === "failed" ? style.red(`failed (${skill.reason})`) : skill.status;
+      return [skill.name, `${status}  ${style.dim(skill.path ?? "")}`];
+    })));
   }
   if (result.ok) {
-    lines.push(
-      `Discovery: pending until ${label} loads the skills`,
-      "Authenticated: no",
-      "",
-      `Next: ${report.next_action.message}`,
-    );
+    lines.push("", ...fields(style, [["Discovery", `pending until ${label} loads the skills`], ["Authenticated", "no"]]),
+      "", ...steps(style, [["", report.next_action.message]]));
   } else {
-    lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
-    if (report.next_action?.kind === "plugin_marketplace") lines.push(`Next: ${report.next_action.message}`);
-    if (report.next_action?.kind === "connection_guide") lines.push(`Connection guide: ${report.next_action.url}`);
+    lines.push("", ...paragraph(style, message), "", ...steps(style, [
+      ["", report.next_action?.kind === "plugin_marketplace" ? report.next_action.message : null],
+      ["Connection guide", report.next_action?.kind === "connection_guide" ? report.next_action.url : null],
+    ]));
   }
-  return `${lines.join("\n")}\n`;
+  return render(lines);
 }
 
 export function versionData() {
@@ -693,35 +710,48 @@ export function doctorMessage(outcome, reason) {
   return `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`;
 }
 
-export function doctorText(result) {
+const CHECK_MARKS = { pass: ["✓", "green"], fail: ["✗", "red"], skipped: ["-", "dim"] };
+
+export function doctorText(result, style = PLAIN) {
   const report = result.data;
-  const lines = ["Metergraph doctor (read only, no credentials sent)", `Origin: ${report.origin}`, ""];
+  const title = result.outcome === "authentication_required"
+    ? "Service is reachable and requires sign in"
+    : result.ok ? "Service is healthy" : "Service check failed";
+  const lines = [
+    headline(style, toneFor(result.outcome), title, result.outcome),
+    "",
+    ...fields(style, [["Origin", report.origin]]),
+    `  ${style.dim("Read only, no credentials sent")}`,
+    "",
+  ];
+  const width = Math.max(...report.checks.map((check) => CHECK_LABELS[check.name].length));
   for (const check of report.checks) {
-    let line = `  ${check.result.padEnd(8)}${CHECK_LABELS[check.name]} (${check.path})`;
+    const [mark, color] = CHECK_MARKS[check.result] ?? ["?", "dim"];
+    let line = `  ${style[color](mark)} ${CHECK_LABELS[check.name].padEnd(width)}  ${style.dim(check.path)}`;
     if (check.name === "deployment" && report.deployment_profile !== null) {
-      line += `: ${report.deployment_profile}`;
+      line += `  ${report.deployment_profile}`;
     } else if (check.reason !== null) {
-      line += `: ${REASON_TEXT[check.reason] ?? check.reason}`;
+      line += `  ${REASON_TEXT[check.reason] ?? check.reason}`;
     }
     lines.push(line);
   }
-  lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`);
-  if (result.error !== null) lines.push(result.error.message);
+  if (result.error !== null) lines.push("", ...paragraph(style, result.error.message));
   if (result.outcome === "authentication_required") {
-    lines.push(
-      "Doctor sends no credentials. To connect an application, follow the connection guide:",
-      CONNECTION_GUIDE_URL,
-    );
+    lines.push("", ...steps(style, [
+      ["Sign in from this machine", "metergraph login --runtime local"],
+      ["Connect an application", CONNECTION_GUIDE_URL],
+    ]));
   }
-  return `${lines.join("\n")}\n`;
+  return render(lines);
 }
 
 // Fixed text for every login, logout and session reason. Reasons shared
 // with doctor fall back to its wording.
 const AUTH_MESSAGES = {
   runtime_not_supported:
-    "Sign in needs a browser on the same machine as the CLI, so cloud runtimes cannot complete it. " +
-    "Follow the connection guide instead. Nothing was written.",
+    "--runtime says where this terminal runs, not which Metergraph service you sign in to. " +
+    "A cloud runtime is a remote sandbox, and sign in needs a browser on the same machine as the CLI, " +
+    "so it cannot finish there. Nothing was written.",
   ssh_session:
     "This is a remote shell session. A browser on your own machine cannot reach this machine's loopback " +
     "address, so sign in cannot finish here. Run login where your browser runs. Nothing was written.",
@@ -823,36 +853,67 @@ export function authMessage(outcome, reason) {
   return AUTH_MESSAGES[reason] ?? doctorMessage(outcome, reason);
 }
 
-export function authText(result, message) {
+// Short headlines for the reasons people meet most. Others use a generic one.
+const AUTH_TITLES = {
+  runtime_not_supported: "Sign in cannot run from a cloud runtime",
+  ssh_session: "Sign in cannot run over SSH",
+  cloud_workspace: "Sign in cannot run in a cloud development environment",
+  ci_environment: "Sign in cannot run in CI",
+  browser_approval_required: "Waiting for approval in the browser",
+  access_denied: "Sign in was declined in the browser",
+  timeout: "Sign in timed out",
+  cancelled: "Sign in was cancelled",
+  bound_to_other_origin: "This project is bound to a different origin",
+  bound_to_other_workspace: "This project is bound to a different workspace",
+  not_signed_in: "This project is not signed in",
+  revocation_unconfirmed: "Signed out locally; revocation not confirmed",
+};
+
+export function authText(result, message, style = PLAIN) {
   const report = result.data;
-  const lines = [`Metergraph ${result.command}`];
-  if (report.origin !== null) lines.push(`Origin: ${report.origin}`);
-  if (report.deployment_profile) lines.push(`Deployment profile: ${report.deployment_profile}`);
-  if (report.workspace !== null) lines.push(`Workspace: ${report.workspace.id}`);
-  if (result.command === "login") {
-    if (result.ok) {
-      const status = { signed_in: "signed in", reused: "already signed in", reconnected: "reconnected" }[report.status];
-      lines.push(
-        `Status: ${status}`,
-        `Scopes: ${report.scopes.join(" ")}`,
-        `Binding: ${report.binding}`,
-        `Grant storage: ${report.credential_protection === "dpapi" ? "Windows DPAPI, current user" : "owner-only file"}`,
-      );
-      if (report.previous_grant_revocation === "unconfirmed") {
-        lines.push("The previous grant was removed locally; the service did not confirm its revocation.");
-      }
-    }
+  const login = result.command === "login";
+  const reason = result.error?.reason ?? null;
+  let title;
+  if (result.ok && login) {
+    title = { signed_in: "Signed in", reused: "Already signed in", reconnected: "Reconnected" }[report.status];
+  } else if (result.ok) {
+    title = report.binding === "none" ? "This project was not signed in" : "Signed out";
   } else {
-    lines.push(
-      `Saved grant: ${report.local_credentials}`,
-      `Binding: ${report.binding}`,
-      `Server revocation: ${report.revocation.replace("_", " ")}`,
-    );
-    if (result.ok && report.binding === "none") lines.push("This project was not signed in.");
+    title = AUTH_TITLES[reason] ?? (login ? "Sign in did not complete" : "Sign out did not complete");
   }
-  if (!result.ok) lines.push("", `Result: ${result.outcome} (exit ${result.exit_code})`, message);
+  const lines = [headline(style, toneFor(result.outcome), title, result.outcome), ""];
+  const rows = [
+    ["Origin", report.origin],
+    ["Workspace", report.workspace?.id ?? null],
+    ["Profile", report.deployment_profile || null],
+  ];
+  if (login && result.ok) {
+    rows.push(
+      ["Scopes", report.scopes.join(" ")],
+      ["Binding", report.binding],
+      ["Grant storage", report.credential_protection === "dpapi" ? "Windows DPAPI, current user" : "owner-only file"],
+    );
+  } else if (!login) {
+    rows.push(
+      ["Saved grant", report.local_credentials],
+      ["Binding", report.binding],
+      ["Server revocation", report.revocation.replace("_", " ")],
+    );
+  }
+  lines.push(...fields(style, rows), "");
+  if (login && result.ok && report.previous_grant_revocation === "unconfirmed") {
+    lines.push(...paragraph(style, "The previous grant was removed locally; the service did not confirm its revocation."), "");
+  }
+  if (!result.ok) lines.push(...paragraph(style, message), "");
   const next = report.next_action;
-  if (next?.message) lines.push(`Next: ${next.message}`);
-  if (next?.url) lines.push(`Connection guide: ${next.url}`);
-  return `${lines.join("\n")}\n`;
+  const guide = next?.url ?? null;
+  if (reason === "runtime_not_supported") {
+    lines.push(...steps(style, [
+      ["Signing in from this machine?", style.bold("metergraph login --runtime local")],
+      ["Connecting a cloud agent?", guide],
+    ]));
+  } else {
+    lines.push(...steps(style, [["", next?.message ?? null], ["Connection guide", guide]]));
+  }
+  return render(lines);
 }

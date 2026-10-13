@@ -1,3 +1,5 @@
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
+
 const MESSAGES = Object.freeze({
   invalid_trace_identity: "Provide exactly one exact trace or request ID from your application run.",
   invalid_invocation_window: "Provide the start and end timestamps of that application invocation.",
@@ -19,18 +21,26 @@ export function verifyMessage(outcome, reason) {
   return MESSAGES[reason] ?? `Trace verification stopped (${outcome}). No application traffic claim was made.`;
 }
 
-export function verifyText(result) {
+export function verifyText(result, style = PLAIN) {
   const data = result.data;
-  const lines = ["Metergraph exact trace verification", `Outcome: ${result.outcome} (exit ${result.exit_code})`];
+  const title = result.ok ? "Trace verified" : "Trace not verified";
+  const lines = [headline(style, toneFor(result.outcome), title, result.outcome), ""];
   if (data) {
-    lines.push(`Workspace: ${data.workspace.id}`, `Deployment: ${data.deployment_profile}`,
-      `Invocation source: ${data.invocation.source}`, `Attempts: ${data.attempts}`,
-      `Processed: ${data.readiness.processed}`, `Metadata available: ${data.readiness.metadata_available}`,
-      `Application traffic verified: ${data.application_traffic_verified}`);
-    if (data.trace) lines.push(`Trace ID: ${data.trace.trace_id}`);
-    if (data.app_url) lines.push(`Dashboard link${data.link_workspace_bound ? " (workspace bound)" : " (select the correct workspace)"}: ${data.app_url}`);
-    if (data.browser) lines.push(`Browser: ${data.browser}`);
+    lines.push(...fields(style, [
+      ["Workspace", data.workspace.id],
+      ["Deployment", data.deployment_profile],
+      ["Trace ID", data.trace?.trace_id ?? null],
+      ["Invocation source", data.invocation.source],
+      ["Attempts", data.attempts],
+      ["Processed", data.readiness.processed],
+      ["Metadata available", data.readiness.metadata_available],
+      ["Application traffic verified", data.application_traffic_verified],
+      ["Browser", data.browser ?? null],
+    ]), "");
   }
-  if (result.error) lines.push(result.error.message);
-  return `${lines.join("\n")}\n`;
+  if (result.error) lines.push(...paragraph(style, result.error.message), "");
+  if (data?.app_url) {
+    lines.push(...steps(style, [[data.link_workspace_bound ? "Dashboard" : "Dashboard (select the correct workspace)", data.app_url]]));
+  }
+  return render(lines);
 }

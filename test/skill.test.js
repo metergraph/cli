@@ -220,9 +220,9 @@ test("prints a truthful text summary without --json", async () => {
   );
   assert.equal(run.code, 0);
   assert.equal(run.stderr, "");
-  assert.match(run.stdout, /Path: \.cursor\/skills\/metergraph\/SKILL\.md/);
-  assert.match(run.stdout, /Discovery: pending until Cursor loads the skill/);
-  assert.match(run.stdout, /Authenticated: no/);
+  assert.match(run.stdout, /Path +\.cursor\/skills\/metergraph\/SKILL\.md/);
+  assert.match(run.stdout, /Discovery +pending until Cursor loads the skill/);
+  assert.match(run.stdout, /Authenticated +no/);
   assert.match(run.stdout, /does not sign in, connect a workspace or configure MCP/);
   assert.ok(!run.stdout.includes(dir));
 });

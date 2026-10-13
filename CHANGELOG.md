@@ -3,6 +3,16 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.2.1`.
 
+## Unreleased
+
+- Human output (without `--json`) has a status headline with an icon, aligned fields
+  and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
+  and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line
+  per message. `--json` output is unchanged.
+- `login --runtime cloud` now explains that `--runtime` names where the terminal runs,
+  not which Metergraph service, and prints `metergraph login --runtime local` as the
+  command to sign in from your own machine.
+
 ## 0.2.1
 
 - The bundled skills fall back to `npx --yes metergraph-cli@latest` instead of

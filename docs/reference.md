@@ -256,7 +256,7 @@ metergraph logout
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `--runtime RUNTIME` | required | `local`: the browser runs on this machine. `cloud` and `cloud-no-shell` get a handoff to the [connection guide](https://www.metergraph.dev/docs/guides/agent-access/) with exit code 6. |
+| `--runtime RUNTIME` | required | Where this terminal runs, not which Metergraph service you sign in to. `local`: your own machine, where the browser runs; use it for the hosted service too. `cloud` and `cloud-no-shell`: a remote cloud sandbox, which gets a handoff to the [connection guide](https://www.metergraph.dev/docs/guides/agent-access/) with exit code 6. |
 | `--url ORIGIN` | `https://app.metergraph.dev` | Bare origin only, see [Safe origins](#safe-origins). |
 | `--workspace UUID` | none | The workspace you expect. Sign in fails unless the browser grants exactly this one. Without it, the workspace you choose in the browser is used after the service confirms it. |
 | `--project DIR` | current directory | Existing project directory to bind. |

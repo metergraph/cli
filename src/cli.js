@@ -20,6 +20,7 @@ import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
 import { containsKnownCredential, preflightNonHostedSetup, prerequisiteGuide, resumeNonHostedRoute } from "./setup-deployment.js";
 import { VERSION } from "./constants.js";
+import { createStyle, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 import { runVerify } from "./verify.js";
 import { verifyMessage, verifyText } from "./verify-output.js";
 
@@ -46,6 +47,7 @@ export async function main(argv, { stdout, stderr }) {
 
 async function run(argv, { stdout, stderr }) {
   const parsed = parseArgs(argv);
+  const style = createStyle(stdout);
 
   if (!parsed.ok) {
     const result = envelope({
@@ -55,13 +57,13 @@ async function run(argv, { stdout, stderr }) {
       message: parsed.message,
     });
     if (parsed.json) stdout.write(toJsonLine(result));
-    else stderr.write(`Error: ${parsed.message}\n`);
+    else stderr.write(`${createStyle(stderr).red("Error:")} ${parsed.message}\n`);
     return result;
   }
 
   if (parsed.command === "help") {
     const result = envelope({ command: "help", outcome: "ok", data: helpData(parsed.topic) });
-    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic));
+    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic, style));
     return result;
   }
 
@@ -87,7 +89,7 @@ async function run(argv, { stdout, stderr }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : authText(result, message));
+    stdout.write(parsed.json ? toJsonLine(result) : authText(result, message, style));
     return result;
   }
 
@@ -110,11 +112,7 @@ async function run(argv, { stdout, stderr }) {
     if (containsKnownCredential(result, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
     }
-    const receipt = result.data?.receipt;
-    const summary = receipt ? `Workspace: ${receipt.workspace_id}\nDeployment: ${receipt.deployment_profile} at ${receipt.origin}\nCompleted: ${receipt.completed_steps.join(", ")}\nPending: ${receipt.pending_steps.join(", ")}\n` : "";
-    const identity = repositoryLine(result.data?.repository);
-    const guide = handoffLines(result.data);
-    const human = `Metergraph setup: ${result.data?.status ?? "not_ready"}\n${summary}${identity}${guide}Application traffic verified: no\n${result.ok ? "Next: instrument your application and verify an exact trace.\n" : `Result: ${result.outcome} (${result.error.reason})\n`}`;
+    const human = setupText(result, style);
     if (containsKnownCredential(human, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
       stdout.write(parsed.json ? toJsonLine(result) : "Setup stopped.\n");
@@ -134,7 +132,7 @@ async function run(argv, { stdout, stderr }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : readText(result, message));
+    stdout.write(parsed.json ? toJsonLine(result) : readText(result, message, style));
     return result;
   }
 
@@ -142,7 +140,7 @@ async function run(argv, { stdout, stderr }) {
     const { outcome, reason, data } = await runVerify(parsed);
     const message = verifyMessage(outcome, reason);
     const result = envelope({ command: "verify", outcome, reason, data, message: outcome === "ok" ? null : message });
-    stdout.write(parsed.json ? toJsonLine(result) : verifyText(result));
+    stdout.write(parsed.json ? toJsonLine(result) : verifyText(result, style));
     return result;
   }
 
@@ -155,7 +153,7 @@ async function run(argv, { stdout, stderr }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : skillText(result, message));
+    stdout.write(parsed.json ? toJsonLine(result) : skillText(result, message, style));
     return result;
   }
 
@@ -169,7 +167,7 @@ async function run(argv, { stdout, stderr }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : skillsText(result, message));
+    stdout.write(parsed.json ? toJsonLine(result) : skillsText(result, message, style));
     return result;
   }
 
@@ -184,7 +182,7 @@ async function run(argv, { stdout, stderr }) {
     data: report,
     message: doctorMessage(outcome, reason),
   });
-  stdout.write(parsed.json ? toJsonLine(result) : doctorText(result));
+  stdout.write(parsed.json ? toJsonLine(result) : doctorText(result, style));
   return result;
 }
 
@@ -209,39 +207,74 @@ function announcer(parsed, stdout, screen) {
   return pending;
 }
 
-// What an operator handoff is waiting for, in fixed text: the route, each
-// unconfirmed prerequisite with its guidance, and the next action.
-function handoffLines(data) {
-  if (data?.status !== "operator_handoff") return "";
-  let text = data.origin ? `Deployment: ${data.deployment_profile} at ${data.origin}\n` : "";
-  if (data.workspace_id) text += `Workspace: ${data.workspace_id}\n`;
-  if (data.pending_prerequisites.length > 0) {
-    text += "Confirm each prerequisite, then rerun with --confirm-prerequisites:\n";
-    for (const name of data.pending_prerequisites) {
-      text += `  - ${name}: ${prerequisiteGuide(name, data.deployment_profile) ?? "see the guide"}\n`;
-    }
+const SETUP_TITLES = {
+  ready_for_instrumentation: "Setup complete, ready to instrument",
+  operator_handoff: "Setup is waiting on the operator",
+};
+
+function setupText(result, style) {
+  const data = result.data;
+  const status = data?.status ?? "not_ready";
+  const title = SETUP_TITLES[status] ?? (result.ok ? `Setup: ${status}` : "Setup did not complete");
+  const tone = status === "operator_handoff" ? "warn" : toneFor(result.outcome);
+  const lines = [headline(style, tone, title, result.outcome), ""];
+  const receipt = data?.receipt;
+  const rows = [];
+  if (receipt) {
+    rows.push(
+      ["Workspace", receipt.workspace_id],
+      ["Deployment", `${receipt.deployment_profile} at ${receipt.origin}`],
+      ["Completed", receipt.completed_steps.join(", ") || "none"],
+      ["Pending", receipt.pending_steps.join(", ") || "none"],
+    );
   }
-  const next = data.next_action;
-  if (next?.message && !(next.kind === "complete_prerequisite" && data.pending_prerequisites.includes(next.prerequisite))) {
-    text += `Next: ${next.message}\n`;
+  const repository = repositoryValue(data?.repository);
+  if (repository !== null) rows.push(["Repository", repository]);
+  if (status === "operator_handoff") {
+    if (data.origin) rows.push(["Deployment", `${data.deployment_profile} at ${data.origin}`]);
+    if (data.workspace_id) rows.push(["Workspace", data.workspace_id]);
   }
-  if (next?.url) text += `Guide: ${next.url}\n`;
-  return text;
+  rows.push(["Application traffic verified", "no"]);
+  lines.push(...fields(style, rows), "");
+  if (!result.ok) lines.push(...paragraph(style, result.error.message), `  ${style.dim(`Reason: ${result.error.reason}`)}`, "");
+  lines.push(...handoffLines(data, style));
+  if (result.ok) lines.push(...steps(style, [["", "Instrument your application and verify an exact trace."]]));
+  return render(lines);
 }
 
-// One line on the repository identity setup found or recorded. The value is
-// owner/name only; a remote URL is never shown.
-function repositoryLine(repository) {
-  if (!repository) return "";
+// What an operator handoff is waiting for, in fixed text: each unconfirmed
+// prerequisite with its guidance, and the next action.
+function handoffLines(data, style) {
+  if (data?.status !== "operator_handoff") return [];
+  const lines = [];
+  if (data.pending_prerequisites.length > 0) {
+    lines.push("Confirm each prerequisite, then rerun with --confirm-prerequisites:");
+    for (const name of data.pending_prerequisites) {
+      lines.push(`  ${style.yellow("•")} ${style.bold(name)}`,
+        ...paragraph(style, prerequisiteGuide(name, data.deployment_profile) ?? "See the guide.", "    "));
+    }
+    lines.push("");
+  }
+  const next = data.next_action;
+  const message = next?.message && !(next.kind === "complete_prerequisite" && data.pending_prerequisites.includes(next.prerequisite))
+    ? next.message : null;
+  lines.push(...steps(style, [["", message], ["Guide", next?.url ?? null]]), "");
+  return lines;
+}
+
+// The repository identity setup found or recorded. The value is owner/name
+// only; a remote URL is never shown.
+function repositoryValue(repository) {
+  if (!repository) return null;
   const where = repository.path ? ` in ${repository.path}` : repository.source === "env_file" ? " in the env file" : "";
   switch (repository.status) {
-    case "written": return `Repository: ${repository.repository} (recorded${where}; commit it)\n`;
+    case "written": return `${repository.repository} (recorded${where}; commit it)`;
     case "existing": return repository.repository === null
-      ? `Repository: already set${where}\n` : `Repository: ${repository.repository} (already set${where})\n`;
-    case "mismatch": return `Repository: ${repository.repository} (already set${where}; differs from ${repository.expected}, left unchanged)\n`;
-    case "invalid_config": return `Repository: not recorded (${repository.path} is not a usable config; left unchanged)\n`;
-    case "skipped": return "Repository: not recorded (--no-repository)\n";
-    case "write_failed": return `Repository: not recorded (could not write ${repository.path})\n`;
-    default: return "Repository: not recorded (no owner/name git remote; pass --repository OWNER/NAME)\n";
+      ? `already set${where}` : `${repository.repository} (already set${where})`;
+    case "mismatch": return `${repository.repository} (already set${where}; differs from ${repository.expected}, left unchanged)`;
+    case "invalid_config": return `not recorded (${repository.path} is not a usable config; left unchanged)`;
+    case "skipped": return "not recorded (--no-repository)";
+    case "write_failed": return `not recorded (could not write ${repository.path})`;
+    default: return "not recorded (no owner/name git remote; pass --repository OWNER/NAME)";
   }
 }

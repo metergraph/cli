@@ -208,8 +208,8 @@ test("OSS checks the MG_AGENT_TOKENS credential and hands ingest to the operator
   assert.deepEqual(projectFiles(box), [], "no env file, binding or setup state");
 
   const human = await cli(box, args, { json: false });
-  assert.match(human.stdout, /Metergraph setup: operator_handoff/);
-  assert.match(human.stdout, /Next: Ask the open source server operator/);
+  assert.match(human.stdout, /^! Setup is waiting on the operator/m);
+  assert.match(human.stdout, /→ Ask the open source server operator/);
   assert.ok(!human.stdout.includes(AGENT_TOKEN));
 });
 
@@ -226,9 +226,9 @@ test("a handoff names each unconfirmed prerequisite with fixed guidance and send
 
   const human = await cli(box, args, { json: false });
   assert.match(human.stdout, /Confirm each prerequisite, then rerun with --confirm-prerequisites:/);
-  assert.match(human.stdout, /registry_invitation: .*never give it to this CLI/);
-  assert.match(human.stdout, /bundle_started_verified: Start the bundle with bin\/start/);
-  assert.match(human.stdout, /Guide: https:\/\//);
+  assert.match(human.stdout, /registry_invitation\n.*never give it to this CLI/);
+  assert.match(human.stdout, /bundle_started_verified\n +Start the bundle with bin\/start/);
+  assert.match(human.stdout, /Guide +https:\/\//);
   assert.equal(server.requests.length, 0);
   assert.deepEqual(projectFiles(box), []);
 });
