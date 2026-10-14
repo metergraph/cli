@@ -5,9 +5,11 @@
 
 ## Unreleased
 
-- A budget refusal met by the `--json --no-browser` background waiter is no longer lost: setup
-  records it in `.metergraph/setup-refusal.json`, and the agent's rerun reports `retry_later` or
-  `revoke_keys` instead of asking the person for another approval at once.
+- A budget refusal met by the `--json --no-browser` background waiter is no longer lost. The
+  waiter records what it is doing with an approval in `.metergraph/setup-refusal.json`; the agent's
+  rerun waits while it is still redeeming (`setup_in_progress`) and then reports `retry_later` or
+  `revoke_keys` instead of asking the person for another approval. Foreground runs report refusals
+  directly and record nothing, and any successful run clears the record.
 - Setup treats a partially numeric `Retry-After` (such as `60junk` or `1.5`) as unusable and does not
   wait on it.
 - `setup` handles the service's ingest-key issuance budget. A short `Retry-After` is waited out

@@ -1,35 +1,49 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-// The last ingest-key issuance refusal for this project's setup family, so a
-// rerun can report it instead of asking for another approval at once. With
-// --json --no-browser the refusal happens in the detached waiter after the
-// command has printed its only line, so without this record it would be lost.
+// What the --json --no-browser background waiter is doing with an approval
+// it received, so the agent's rerun can report it instead of asking the
+// person for another approval. The waiter is the only writer: a foreground
+// run reports a refusal directly and never records one.
 //
-// It is a separate file, not a field of setup.json, so an older CLI that
-// validates setup.json strictly keeps reading the project. It holds no
-// credential: the family ID, a fixed reason and, for the rate budget, when
-// the refusal stops applying. Any read problem is treated as no record.
+//   redeeming  the waiter holds an approval and is redeeming it (possibly
+//              waiting out a short Retry-After). A rerun waits for it.
+//   refused    the service refused the redemption: the rate budget until
+//              retry_at, or the workspace's key cap. A rerun reports it.
+//
+// The record names the setup family, the waiter's process and the approval
+// it came from. It holds no credential. It is a separate file, not a field of
+// setup.json, so an older CLI that validates setup.json strictly keeps
+// reading the project. Any read problem is treated as no record.
 const FILE = "setup-refusal.json";
-const MAX_BYTES = 512;
+const MAX_BYTES = 1024;
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const KEYS = "approval_id,expires_at,family_id,pid,reason,retry_at,schema_version,state";
 export const REFUSAL_REASONS = Object.freeze(["setup_rate_limited", "setup_key_limit"]);
-// A rate refusal is reported for at most this long; the service's windows
-// are one minute.
+// A redeeming record outlives no waiter: redemption plus two Retry-After
+// waits takes well under this. A rate refusal is reported for at most this.
+const MAX_RECORD_MS = 10 * 60 * 1000;
 const MAX_RATE_WAIT_MS = 5 * 60 * 1000;
 
 const fileFor = (root) => path.join(root, ".metergraph", FILE);
+const isTime = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 
 function valid(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).sort().join() === "family_id,reason,retry_at,schema_version" &&
-    value.schema_version === 1 && UUID.test(value.family_id) && REFUSAL_REASONS.includes(value.reason) &&
-    (value.retry_at === null || (typeof value.retry_at === "string" && Number.isFinite(Date.parse(value.retry_at))));
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).sort().join() !== KEYS || value.schema_version !== 2 ||
+      !UUID.test(value.family_id) || !UUID.test(value.approval_id) ||
+      !Number.isInteger(value.pid) || value.pid < 1 || !isTime(value.expires_at)) return false;
+  if (value.state === "redeeming") return value.reason === null && value.retry_at === null;
+  if (value.state === "refused") {
+    return REFUSAL_REASONS.includes(value.reason) &&
+      (value.reason === "setup_key_limit" ? value.retry_at === null : isTime(value.retry_at));
+  }
+  return false;
 }
 
-export function readSetupRefusal(root) {
+function read(root) {
   const file = fileFor(root);
   let fd;
   try {
@@ -47,13 +61,9 @@ export function readSetupRefusal(root) {
   }
 }
 
-// Best effort: a record that cannot be written only means a rerun asks for
-// a new approval, as before.
-export function writeSetupRefusal(root, familyId, reason, retryAfterSeconds = null, now = Date.now()) {
-  const retryAt = reason === "setup_rate_limited"
-    ? new Date(now + Math.min((retryAfterSeconds ?? 60) * 1000, MAX_RATE_WAIT_MS)).toISOString()
-    : null;
-  const value = { schema_version: 1, family_id: familyId, reason, retry_at: retryAt };
+// Best effort: a record that cannot be written only means a rerun asks for a
+// new approval, as it did before records existed.
+function write(root, value) {
   if (!valid(value)) return false;
   const dir = path.join(root, ".metergraph");
   const temp = path.join(dir, `.refusal.${randomBytes(8).toString("hex")}.tmp`);
@@ -77,13 +87,54 @@ export function clearSetupRefusal(root) {
   } catch { /* nothing to clear */ }
 }
 
-// What a rerun should report for a recorded refusal of this family, or null
-// to proceed. A rate refusal applies until its retry time; a key-limit
-// refusal is reported once, so the rerun after the person revokes keys asks
-// for a new approval.
-export function pendingRefusal(root, familyId, now = Date.now()) {
-  const record = readSetupRefusal(root);
-  if (record === null || record.family_id !== familyId) return null;
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// The waiter's handle on one approval it received. Every method is best
+// effort and only ever touches this approval's own record.
+export function waiterRecord(root, familyId, now = Date.now) {
+  const approvalId = randomUUID();
+  const base = () => ({ schema_version: 2, family_id: familyId, approval_id: approvalId, pid: process.pid,
+    expires_at: new Date(now() + MAX_RECORD_MS).toISOString() });
+  return {
+    redeeming: () => write(root, { ...base(), state: "redeeming", reason: null, retry_at: null }),
+    refused: (reason, retryAfterSeconds = null) => write(root, { ...base(), state: "refused", reason,
+      retry_at: reason === "setup_rate_limited"
+        ? new Date(now() + Math.min((retryAfterSeconds ?? 60) * 1000, MAX_RATE_WAIT_MS)).toISOString()
+        : null }),
+    // Any other outcome: drop a redeeming record this waiter left behind.
+    settle: () => {
+      const record = read(root);
+      if (record?.approval_id === approvalId && record.state === "redeeming") clearSetupRefusal(root);
+    },
+  };
+}
+
+// What a run should report before asking for an approval, or null to
+// proceed. familyId and delivered describe the saved setup state; a refusal
+// for another family, or for one already delivered, no longer applies.
+export function pendingRefusal(root, { familyId, delivered }, now = Date.now()) {
+  const record = read(root);
+  if (record === null) return null;
+  if (Date.parse(record.expires_at) <= now) {
+    clearSetupRefusal(root);
+    return null;
+  }
+  if (record.state === "redeeming") {
+    if (record.pid !== process.pid && alive(record.pid)) return { reason: "setup_in_progress", retryAfter: 5 };
+    clearSetupRefusal(root);
+    return null;
+  }
+  if (record.family_id !== familyId || delivered) {
+    clearSetupRefusal(root);
+    return null;
+  }
   if (record.reason === "setup_rate_limited") {
     const remaining = Math.ceil((Date.parse(record.retry_at) - now) / 1000);
     if (remaining > 0) return { reason: record.reason, retryAfter: remaining };

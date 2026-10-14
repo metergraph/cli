@@ -469,14 +469,20 @@ action carrying `retry_after_seconds`. At the cap, setup exits `conflict` (8)
 with reason `setup_key_limit` and a `revoke_keys` next action whose `url` is
 the Keys page. Neither refusal issues a key or writes `.env`.
 
-Setup records the refusal in `.metergraph/setup-refusal.json` (the family ID,
-the reason and, for the rate budget, when it stops applying; never a
-credential). This matters for `--json --no-browser`, where the background
-waiter meets the refusal after the command has exited. The next run reports
-the recorded refusal instead of asking for another approval: a rate refusal
-until its retry time, and a key-limit refusal once, so the run after unused
-keys are revoked asks for a new approval. A successful delivery removes the
-record. Older CLIs ignore the file.
+A foreground run reports a refusal directly and records nothing, so the run
+after the person waits or revokes keys proceeds. With `--json --no-browser`
+the background waiter meets the redemption after the command has exited, so
+the waiter alone records what it is doing in `.metergraph/setup-refusal.json`
+(the family, the waiter's process, the approval it came from and a reason;
+never a credential). As soon as it receives an approval it records that it is
+redeeming; a rerun while that process is alive exits `conflict`
+(`setup_in_progress`) with a `retry_later` next action instead of asking for
+another approval. If the service refuses the redemption, the waiter records
+the refusal, and the next run reports it: a rate refusal until its retry
+time, a key-limit refusal once. Any successful run, including one that reuses
+a verified key, removes the record, and a record for another family, an
+already delivered family, a dead process or past its expiry is ignored and
+removed. Older CLIs ignore the file.
 
 `METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
 appends `/v1/ingest` itself. A setup rerun with a verified

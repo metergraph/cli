@@ -13,7 +13,8 @@ import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-e
 import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
 import { runSkill } from "./skill.js";
 import { handoffPages } from "./environment.js";
-import { REFUSAL_REASONS, clearSetupRefusal, pendingRefusal, writeSetupRefusal } from "./setup-refusal.js";
+import { REFUSAL_REASONS, clearSetupRefusal, pendingRefusal, waiterRecord } from "./setup-refusal.js";
+import { isApprovalWaiter } from "./approval-handoff.js";
 import { ensureRepositoryIdentity, envRepository } from "./repository-identity.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
@@ -74,6 +75,11 @@ export async function runSetup(options, progress = () => {}) {
   const stop = (outcome, reason, status = "not_ready", next = null) =>
     fail(outcome, reason, status, currentReceipt(), next);
   let announced = false;
+  // Only the --json --no-browser background waiter records what it does with
+  // an approval; a foreground run reports directly.
+  const waiter = Boolean(options.announce) && isApprovalWaiter();
+  let record = null;
+  let refusalRecorded = false;
   const announce = options.announce ? (status, next) => {
     announced = true;
     options.announce(fail("action_required", "browser_approval_required", status, currentReceipt(), next).data);
@@ -85,6 +91,15 @@ export async function runSetup(options, progress = () => {}) {
     const bound = readBinding(root)?.binding ?? null;
     const intendedOrigin = options.originExplicit ? options.origin : bound?.origin ?? saved?.value.origin ?? options.origin;
     const intendedWorkspace = options.workspace ?? saved?.value.workspace_id ?? null;
+    // What an earlier --json --no-browser waiter is doing with an approval it
+    // received: still redeeming it, or refused by the service's budget. The
+    // rerun reports that instead of asking the person for another approval.
+    const pending = pendingRefusal(root, { familyId: saved?.value.family_id ?? null,
+      delivered: saved?.value.phase === "delivered" });
+    if (pending !== null) {
+      return stop(pending.reason === "setup_rate_limited" ? "rate_limited" : "conflict", pending.reason,
+        "delivery_pending", redeemNext(pending, intendedOrigin));
+    }
     // A family already tied to a workspace cannot be carried across a
     // reconnect. Refuse before login changes the Metadata binding or the env.
     if (saved && (saved.value.origin !== intendedOrigin || saved.value.workspace_id !== intendedWorkspace ||
@@ -108,6 +123,9 @@ export async function runSetup(options, progress = () => {}) {
     if (!signedIn.ok && signedIn.outcome === "login_required") {
       const familyId = randomUUID();
       const ingestSetup = saved || options.repair ? null : { familyId,
+        // In the waiter, record the approval before anything else happens,
+        // so an immediate rerun waits instead of asking for another one.
+        onApproved: () => { if (waiter) record = waiterRecord(root, familyId); record?.redeeming(); },
         supported: async (origin, profile, cancel) => {
           const discovered = await discoverSetup(origin, profile, cancel);
           return discovered.ok && discovered.loginSetup;
@@ -198,14 +216,6 @@ export async function runSetup(options, progress = () => {}) {
     // must open an approval URL, unless the sign in approved the key too. A
     // run that already announced its sign in URL has used its one JSON line,
     // so it stops here and the rerun continues.
-    // A budget refusal of this family's last redemption is reported, not
-    // answered with a new approval at once. It matters most for --json
-    // --no-browser, whose waiter hit the refusal after the command exited.
-    const refused = previous === null ? null : pendingRefusal(root, previous.value.family_id);
-    if (refused !== null) {
-      return stop(refused.reason === "setup_key_limit" ? "conflict" : "rate_limited", refused.reason,
-        "delivery_pending", redeemNext(refused, origin));
-    }
     if (announced && combined === null) return stop("action_required", "browser_approval_required", "approval_pending");
     const setup = await discoverSetup(origin, profile, trap.signal);
     if (!setup.ok) return stop(setup.outcome, setup.reason);
@@ -230,6 +240,10 @@ export async function runSetup(options, progress = () => {}) {
       approval = await approveInBrowser({ origin, setup, workspaceId, state, intent, options, announce, progress,
         cancel: trap.signal });
       if (!approval.ok) return stop(approval.outcome, approval.reason);
+      if (waiter) {
+        record = waiterRecord(root, state.family_id);
+        record.redeeming();
+      }
     }
 
     // Persist the ambiguity boundary before a single-use receipt is sent.
@@ -245,8 +259,8 @@ export async function runSetup(options, progress = () => {}) {
       redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal, progress);
     if (!redeemed.ok) {
-      if (REFUSAL_REASONS.includes(redeemed.reason)) {
-        writeSetupRefusal(root, state.family_id, redeemed.reason, redeemed.retryAfter ?? null);
+      if (record !== null && REFUSAL_REASONS.includes(redeemed.reason)) {
+        refusalRecorded = record.refused(redeemed.reason, redeemed.retryAfter ?? null);
       }
       return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
     }
@@ -257,12 +271,14 @@ export async function runSetup(options, progress = () => {}) {
     if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
     credentialVerified = true;
     writeSetupState(root, withSetupState(previous.value, { key_id: redeemed.keyId, phase: "delivered" }), previous);
-    clearSetupRefusal(root);
     return finishSkill(root, options, written.receipt.file);
   } catch (error) {
     if (error instanceof Stop) return stop(error.outcome, error.reason);
     throw error;
-  } finally { trap.release(); }
+  } finally {
+    if (record !== null && !refusalRecorded) record.settle();
+    trap.release();
+  }
 }
 
 // The ingest-only approval at the setup authorization endpoint: the only
@@ -309,6 +325,9 @@ async function approveInBrowser({ origin, setup, workspaceId, state, intent, opt
 }
 
 function finishSkill(root, options, envStatus) {
+  // Reached only with a verified, delivered credential, whether just issued
+  // or reused: no earlier refusal or redemption still applies.
+  clearSetupRefusal(root);
   let previous = readSetupState(root);
   if (previous === null || previous.value.phase !== "delivered") return fail("conflict", "setup_state_changed");
   if (previous.value.selected_client !== options.client) {
@@ -448,6 +467,11 @@ function pause(ms, cancel) {
 // The next action for a budget refusal. Nothing was issued, and a rerun asks
 // for a new approval.
 function redeemNext(result, origin) {
+  if (result.reason === "setup_in_progress") {
+    return { kind: "retry_later", retry_after_seconds: result.retryAfter ?? null,
+      message: "An earlier setup run for this project is still finishing an approval it received. Wait a " +
+        "few seconds, then run setup again; do not ask for another approval." };
+  }
   if (result.reason === "setup_rate_limited") {
     return { kind: "retry_later", retry_after_seconds: result.retryAfter ?? null,
       message: "The service limits how many ingest keys setup can issue each minute for one person and one " +
