@@ -52,7 +52,7 @@ export async function runSetup(options, progress = () => {}) {
   const environment = options.environment ?? classifyEnvironment();
   if (options.runtime !== "local" || environment.remote) {
     const where = options.runtime !== "local" ? { kind: "declared_cloud" } : environment;
-    return fail("unsupported", "run_on_local_machine", "not_ready", null, remoteSetupAction(where, options.origin));
+    return fail("unsupported", "run_on_local_machine", "not_ready", null, remoteSetupAction(where, options.origin, options));
   }
   const trap = trapSignals();
   let receipt = null;
@@ -69,7 +69,8 @@ export async function runSetup(options, progress = () => {}) {
     }
     return current;
   };
-  const stop = (outcome, reason, status = "not_ready") => fail(outcome, reason, status, currentReceipt());
+  const stop = (outcome, reason, status = "not_ready", next = null) =>
+    fail(outcome, reason, status, currentReceipt(), next);
   let announced = false;
   const announce = options.announce ? (status, next) => {
     announced = true;
@@ -112,7 +113,9 @@ export async function runSetup(options, progress = () => {}) {
       const login = await runLogin({ ...options, origin: intendedOrigin, workspace: intendedWorkspace,
         project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null, ingestSetup,
         announce: announce && ((data) => announce("login_pending", data.next_action)) }, progress);
-      if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending");
+      // Login's own next action (for example no_browser with a Metadata key
+      // alternative in a local container) is passed through.
+      if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending", login.data?.next_action ?? null);
       if (login.ingestSetup && login.ingestSetup.familyId === familyId && RECEIPT.test(login.ingestSetup.code)) {
         combined = login.ingestSetup;
       }

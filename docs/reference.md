@@ -561,6 +561,7 @@ The `use_agent_key` next action is the handoff a person completes on their own d
   "kind": "use_agent_key",
   "environment": "ssh_session",
   "credential_env": "METERGRAPH_AGENT_TOKEN",
+  "origin": "https://app.metergraph.dev",
   "person_steps": [
     { "action": "sign_up_or_sign_in", "url": "https://app.metergraph.dev/v1/auth/signup?return_to=%2F%23api-keys" },
     { "action": "create_metadata_key", "url": "https://app.metergraph.dev/#api-keys" },
@@ -575,7 +576,11 @@ The `use_agent_key` next action is the handoff a person completes on their own d
 
 The person chooses the workspace by creating the key in it. For a deployment other
 than the hosted service there is no sign up page: the first step is
-`request_invitation`, and the agent also sets `METERGRAPH_URL` (or passes `--url`).
+`request_invitation`, and `then_run` passes `--url ORIGIN` so the key is only ever
+sent to that deployment. On the open-source server the operator provides an
+`MG_AGENT_TOKENS` value instead of a Keys page key. `setup`'s `run_on_local_machine`
+next action repeats the caller's `--deployment`, `--url`, `--workspace` and
+`--client` (or `--skip-skill`) so its `command` runs as given.
 The CLI never claims a browser step happened: the next run verifies the result with
 the service.
 

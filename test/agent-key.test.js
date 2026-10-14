@@ -12,7 +12,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 
 import { classifyEnvironment } from "../src/environment.js";
-import { LOCAL_ENV, checked, filesUnder, isWindows, login, sandboxes } from "./auth-helpers.js";
+import { BROWSER, LOCAL_ENV, checked, filesUnder, isWindows, login, sandboxes } from "./auth-helpers.js";
 import { runCli } from "./helpers.js";
 import { WORKSPACE_A, WORKSPACE_B, startOAuthServer } from "./fixtures/oauth-server.js";
 
@@ -130,6 +130,8 @@ test("routes, traces, context, capabilities and status work with a key, and reru
     assert.equal(result.data.credential, "agent_key");
     assert.equal(result.data.authenticated, true);
     assert.deepEqual(result.data.workspace, { intended: null, actual: WORKSPACE_A, match: null });
+    // A key alone binds nothing, so the project is not configured.
+    assert.equal(result.data.configured, false);
     assert.equal(result.data.deployment_profile_verified, true);
     assert.equal(result.data.content_access, false);
     assert.deepEqual(filesUnder(box.project), []);
@@ -212,6 +214,11 @@ test("a malformed key or origin variable stops before any request and never echo
       assert.equal(result.error.reason, "agent_token_malformed");
       assert.equal(result.data.next_action.kind, "fix_agent_key");
     }
+    // status probes the origin unauthenticated first; a malformed key still
+    // stops before that.
+    const status = await read(box, ["status"], keyed(server, { METERGRAPH_AGENT_TOKEN: `Bearer ${KEY}` }));
+    assert.equal(status.run.code, 2);
+    assert.equal(status.result.error.reason, "agent_token_malformed");
     const { run, result } = await read(box, ["usage"], keyed(server, { METERGRAPH_URL: "http://hunter2.example.com" }));
     assert.equal(run.code, 2);
     assert.equal(result.error.reason, "metergraph_url_invalid");
@@ -317,4 +324,45 @@ test("with no sign in and no key, the next action follows the environment", asyn
   const { result } = checked(assert, run, { box });
   assert.equal(result.data.next_action.kind, "login");
   assert.equal(result.data.next_action.alternative.kind, "use_agent_key");
+});
+
+test("in a local container, login and setup offer the key path when the browser cannot open", async () => {
+  await withServer({}, async (server) => {
+    const container = { REMOTE_CONTAINERS: "true", METERGRAPH_TEST_BROWSER: "unavailable" };
+    const box = sandbox();
+    const signIn = await login(assert, box, server, [], { browser: "unavailable", env: { REMOTE_CONTAINERS: "true" } });
+    assert.equal(signIn.run.code, 10);
+    assert.equal(signIn.result.data.environment, "local_container");
+    assert.equal(signIn.result.data.next_action.kind, "no_browser");
+    assert.equal(signIn.result.data.next_action.alternative.kind, "use_agent_key");
+
+    // setup's own sign in passes the same next action through.
+    const setupBox = sandbox();
+    const run = await runCli(["--json", "setup", "--runtime", "local", "--skip-skill", "--deployment", "customer-local",
+      "--confirm-prerequisites", "--url", server.origin, "--workspace", WORKSPACE_A,
+      "--project", setupBox.project, "--config-dir", setupBox.config],
+    { imports: [BROWSER], env: { ...LOCAL_ENV, ...container } });
+    const { result } = checked(assert, run, { box: setupBox, server });
+    assert.equal(result.error.reason, "browser_unavailable");
+    assert.equal(result.data.next_action.kind, "no_browser");
+    assert.equal(result.data.next_action.alternative.kind, "use_agent_key");
+  });
+});
+
+test("handoff commands never carry shell syntax from an origin, binding or option", async () => {
+  const { shellArg, agentKeyAction, remoteSetupAction } = await import("../src/environment.js");
+  const { parseOrigin } = await import("../src/origin.js");
+  // Hosts the URL parser accepts but no deployment uses are refused outright,
+  // so they can reach neither a binding nor a command.
+  for (const host of ["a;id", "a$(id)", "a`id`", "x&y", "a'b", "a(b)"]) {
+    assert.equal(parseOrigin(`https://${host}.example.com`), null, host);
+  }
+  assert.equal(shellArg("https://metergraph.example.com"), "https://metergraph.example.com");
+  assert.equal(shellArg("http://[::1]:8080"), "'http://[::1]:8080'");
+  assert.equal(shellArg("a'b;c"), "'a'\\''b;c'");
+  const local = agentKeyAction({ kind: "ssh_session", remote: true }, "http://[::1]:8080");
+  assert.deepEqual(local.then_run, ["metergraph status --url 'http://[::1]:8080' --json", "metergraph usage --url 'http://[::1]:8080' --json"]);
+  // No placeholder with < | > that a shell would treat as redirection.
+  const setup = remoteSetupAction({ kind: "ci", remote: true }, "https://app.metergraph.dev", {});
+  assert.equal(setup.command, "metergraph setup --runtime local --skip-skill");
 });
