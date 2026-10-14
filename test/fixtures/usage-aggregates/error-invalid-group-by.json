@@ -1,0 +1,10 @@
+{
+  "body": {
+    "error": {
+      "code": "invalid_argument",
+      "message": "group_by accepts at most one metadata.<key> entry"
+    },
+    "schema_version": "metergraph.agent-access/v1"
+  },
+  "status": 422
+}

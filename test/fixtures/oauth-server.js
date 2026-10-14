@@ -6,7 +6,10 @@
 // endpoint stands in for a signed in person who consents in the browser.
 // Every value is synthetic. Tests change behavior through server.behavior.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const WORKSPACE_A = "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01";
 export const WORKSPACE_B = "6f1e2d3c-4b5a-4968-8776-655443322110";
@@ -414,7 +417,16 @@ export async function startOAuthServer(initial = {}) {
         return response.end(JSON.stringify({ error: "refused", detail: "SYNTHETIC_BODY_MARKER" }));
       }
       const { name, build } = READ_DOCUMENTS[path];
-      served.read = behavior[name](build(provenance, query), query);
+      const built = build(provenance, query);
+      if (built === null) {
+        // No recorded document answers this query: refuse it as the service
+        // refuses arguments it cannot read.
+        return send(response, 422, {
+          schema_version: CONTRACT_VERSION,
+          error: { code: "invalid_argument", message: "SYNTHETIC_BODY_MARKER" },
+        });
+      }
+      served.read = behavior[name](built, query);
       return send(response, 200, served.read);
     }
     served.capabilities = behavior.capabilities(capabilitiesDocument(provenance));
@@ -743,7 +755,7 @@ export function tracesDocument(provenance, query) {
 
 // GET /v1/agent/usage/aggregates for one metadata.<key> dimension. The null
 // group holds the calls without an eligible value, so groups add up to totals.
-export function usageAggregatesDocument(provenance, query) {
+function syntheticMetadataAggregates(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
   const dimension = query.get("group_by");
@@ -772,7 +784,8 @@ export function usageAggregatesDocument(provenance, query) {
     provenance,
     window: {
       days,
-      since: new Date(Date.now() - days * DAY_MS).toISOString(),
+      // The current UTC day so far and the days - 1 whole UTC days before it.
+      since: new Date(Math.floor(Date.now() / DAY_MS) * DAY_MS - (days - 1) * DAY_MS).toISOString(),
       until: new Date().toISOString(),
       preset: "utc_days",
       until_is_request_time: true,
@@ -805,12 +818,65 @@ export function usageAggregatesDocument(provenance, query) {
       level: "call", cost_basis: "call", per_provider_exact: true, mixed_provider_rows: 0, mixed_model_rows: 0,
     },
     content_included: false,
+    metadata_groups: {
+      key: dimension.slice("metadata.".length),
+      unlisted: {
+        other_values: {
+          groups: groups.slice(limit).filter((group) => group.value !== null).length,
+          calls: sum(groups.slice(limit).filter((group) => group.value !== null), "calls"),
+          cost_usd: sum(groups.slice(limit).filter((group) => group.value !== null), "cost_usd"),
+        },
+        missing_key: { calls: 7, cost_usd: 0.007 },
+        ineligible_value: { calls: 0, cost_usd: 0 },
+      },
+    },
     group_by: [dimension],
     items: listed.map((group) => ({
       [dimension]: group.value,
       ...metrics(group.calls, group.cost_usd),
       pricing: PRICED(group.calls),
     })),
+  };
+}
+
+// Grouped usage replays documents the service returned for one synthetic
+// dataset (test/fixtures/usage-aggregates, recorded over HTTP with the MCP
+// tool returning the same document). parity.json maps each recorded query to
+// its document. The bound workspace and profile replace the recorded ones.
+const AGGREGATE_FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "usage-aggregates");
+export const aggregateFixture = (name) =>
+  JSON.parse(fs.readFileSync(path.join(AGGREGATE_FIXTURES, `${name}.json`), "utf8"));
+const AGGREGATE_PARITY = aggregateFixture("parity");
+
+function sameAggregateQuery(recorded, query) {
+  const instant = (value) => (value === undefined || value === null ? null : Date.parse(value));
+  const list = (value) => (value === undefined ? [] : String(value).split(",")).sort().join(",");
+  const many = (key) => [...query.getAll(key)].sort().join(",");
+  return (
+    [recorded.group_by].flat().join("\u0000") === query.getAll("group_by").join("\u0000") &&
+    (recorded.days === undefined ? null : String(recorded.days)) === query.get("days") &&
+    instant(recorded.since) === instant(query.get("since")) &&
+    instant(recorded.until) === instant(query.get("until")) &&
+    String(recorded.limit) === query.get("limit") &&
+    JSON.stringify(recorded.metadata === undefined ? null : JSON.parse(recorded.metadata)) ===
+      JSON.stringify(query.has("metadata") ? JSON.parse(query.get("metadata")) : null) &&
+    ["route", "provider", "model", "environment"].every((key) => list(recorded[key]) === many(key))
+  );
+}
+
+export function usageAggregatesDocument(provenance, query) {
+  const entry = AGGREGATE_PARITY.find((recorded) => sameAggregateQuery(recorded.http_query, query));
+  if (entry === undefined) {
+    // A metadata grouping without a recorded document: the synthetic one.
+    const dimensions = query.getAll("group_by");
+    return dimensions.length === 1 && dimensions[0].startsWith("metadata.")
+      ? syntheticMetadataAggregates(provenance, query)
+      : null;
+  }
+  const doc = aggregateFixture(entry.fixture);
+  return {
+    ...doc,
+    provenance: { ...doc.provenance, workspace_id: provenance.workspace_id, deployment_profile: provenance.deployment_profile },
   };
 }
 

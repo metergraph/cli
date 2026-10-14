@@ -2,7 +2,7 @@ import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
 import { Stop, openStore, resolveConfigDir } from "./auth-store.js";
-import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_PATHS } from "./constants.js";
+import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
   metadataQueryValue,
@@ -10,9 +10,11 @@ import {
   capabilitySummary,
   routesReport,
   tracesReport,
+  usageAggregatesReport,
   usageReport,
   workspaceContext,
 } from "./read-contract.js";
+import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
@@ -30,12 +32,10 @@ const READS = Object.freeze({
   routes: { capability: "routes", path: READ_PATHS.routes, validate: routesReport },
   traces: { capability: "trace_metadata", path: READ_PATHS.traces, validate: tracesReport },
 });
-// usage --group-by-metadata groups server-side on the aggregates read; the
-// same usage validator checks it and the same output code prints it.
 const GROUPED_USAGE = Object.freeze({
   capability: "usage_aggregates",
   path: READ_PATHS.usageAggregates,
-  validate: usageReport,
+  validate: usageAggregatesReport,
 });
 
 export async function runRead(options) {
@@ -57,10 +57,13 @@ export async function runRead(options) {
   const limit = deadline(options.timeoutMs, trap.signal);
   // Token values this run holds. Filled after the session is verified.
   let known = [];
-  const build = (outcome, report) =>
-    options.command === "status" ? statusData(ctx, notices, outcome) : readData(ctx, report, notices, outcome);
+  const grouped = options.command === "usage" && options.grouped !== undefined && options.grouped !== null;
+  const build = (outcome, report, reason = null) =>
+    options.command === "status"
+      ? statusData(ctx, notices, outcome)
+      : readData(ctx, report, notices, outcome, nextAction(outcome, reason, { grouped, options, report }));
   const end = (outcome, reason, report = null) => {
-    const data = build(outcome, report);
+    const data = build(outcome, report, reason);
     // Validated metadata can still be any string the service chose. If any
     // printed string holds a credential this run knows, nothing is printed.
     if (holdsKnown(data, known)) {
@@ -68,7 +71,7 @@ export async function runRead(options) {
       return {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
-        data: build("verification_failed", null),
+        data: build("verification_failed", null, "credential_in_metadata_response"),
       };
     }
     return { outcome, reason, data };
@@ -148,9 +151,11 @@ export async function runRead(options) {
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
 
-    const read = options.command === "usage" && options.groupByMetadata ? GROUPED_USAGE : READS[options.command];
+    const read = grouped ? GROUPED_USAGE : READS[options.command];
     const entry = capabilities.value.agent[read.capability];
-    if (entry === null || entry.available !== true) return end("capability_unavailable", "capability_unavailable");
+    if (entry === null || entry.available !== true) {
+      return end("capability_unavailable", grouped ? "usage_aggregates_unavailable" : "capability_unavailable");
+    }
     // The service's own bounds; a request beyond them is refused, never
     // clamped into a different question.
     const { bounds } = capabilities.value;
@@ -158,14 +163,42 @@ export async function runRead(options) {
       return end("unsupported", "exceeds_service_bounds");
     }
 
-    const response = await fetchRead(session.session, read.path, queryFor(options), limit.signal);
-    if (!response.ok) {
-      const settled = settle(response);
-      return end(settled.outcome, settled.reason, response.retryAfter === undefined ? null : { retry_after_seconds: response.retryAfter });
+    const fetchOne = async (query, request, into) => {
+      const response = await fetchRead(session.session, read.path, query, limit.signal);
+      if (!response.ok) {
+        const settled = settle(response);
+        return {
+          ok: false,
+          ...settled,
+          detail: response.retryAfter === undefined ? null : { retry_after_seconds: response.retryAfter },
+        };
+      }
+      return read.validate(response.body, ctx, request, into);
+    };
+    if (!grouped) {
+      const report = await fetchOne(queryFor(options), requestOf(options), notices);
+      if (!report.ok) return end(report.outcome, report.reason, report.detail ?? null);
+      return end("ok", null, report.value);
     }
-    const report = read.validate(response.body, ctx, requestOf(options), notices);
-    if (!report.ok) return end(report.outcome, report.reason);
-    return end("ok", null, report.value);
+
+    // Grouped usage: the current window, then for --compare the prior
+    // window computed from the window the service actually read.
+    const request = groupedRequest(options);
+    const current = await fetchOne(groupedQuery(options, request), request, notices);
+    if (!current.ok) return end(current.outcome, current.reason, current.detail ?? null);
+    let report = rankReport(current.value, options.grouped.sort, notices);
+    if (options.grouped.compare !== null) {
+      const window = priorWindow(current.value.window, options.grouped.compare);
+      const priorRequest = { ...request, days: null, since: window.since, until: window.until, limit: options.limit };
+      // The prior read's own coverage notices describe the prior window; they
+      // are kept apart and summarised by the comparison.
+      const priorNotices = new Set();
+      const prior = await fetchOne(groupedQuery(options, priorRequest), priorRequest, priorNotices);
+      if (!prior.ok) return end(prior.outcome, prior.reason, prior.detail ?? null);
+      for (const token of priorNotices) if (token !== "current_day_partial") notices.add(`prior_${token}`);
+      report = { ...report, comparison: compareReports(current.value, prior.value, options.grouped.compare, notices) };
+    }
+    return end("ok", null, report);
   } catch (error) {
     if (error instanceof Stop) {
       const settled = settle(error);
@@ -189,6 +222,39 @@ function requestOf(options) {
   };
 }
 
+// What a grouped usage document must echo back.
+function groupedRequest(options) {
+  const { groupBy, filters, since, until } = options.grouped;
+  return {
+    days: options.days,
+    since,
+    until,
+    limit: options.limit,
+    groupBy,
+    filters,
+    metadata: options.metadata ?? null,
+  };
+}
+
+// Grouped usage query: one group_by parameter per dimension (a metadata key
+// is sent whole, never split on a comma), a preset or an explicit window, and
+// one repeated parameter per exact filter value.
+function groupedQuery(options, request) {
+  const query = new URLSearchParams();
+  for (const dimension of request.groupBy) query.append("group_by", dimension);
+  if (request.days !== null) query.set("days", String(request.days));
+  else {
+    query.set("since", request.since);
+    if (request.until !== null) query.set("until", request.until);
+  }
+  query.set("limit", String(request.limit));
+  for (const key of ["route", "provider", "model", "environment"]) {
+    for (const value of request.filters[key] ?? []) query.append(key, value);
+  }
+  if (request.metadata) query.set("metadata", metadataQueryValue(request.metadata));
+  return query;
+}
+
 // The query string is built here from validated options only. The routes
 // endpoint takes none.
 function queryFor(options) {
@@ -196,9 +262,6 @@ function queryFor(options) {
   const query = new URLSearchParams();
   query.set("days", String(options.days));
   query.set("limit", String(options.limit));
-  if (options.command === "usage" && options.groupByMetadata) {
-    query.set("group_by", `metadata.${options.groupByMetadata}`);
-  }
   if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
   if (options.command === "traces") {
     if (options.route !== null) query.set("route", options.route);
@@ -243,6 +306,14 @@ function holdsKnown(value, known) {
   return false;
 }
 
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function retryAfterOf(response) {
+  const header = response.headers["retry-after"];
+  const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
+  return seconds !== null && seconds <= 86400 ? seconds : null;
+}
+
 // One GET with the session's access token. A refused token is never
 // refreshed and retried here: the grant was valid moments ago, so a refusal
 // means it was revoked or access was lost.
@@ -265,16 +336,18 @@ async function fetchRead(session, path, query, signal) {
       return { ok: false, outcome: "permission_denied", reason: scope ? "insufficient_scope" : "forbidden" };
     }
     if (status === 429) {
-      const header = response.headers["retry-after"];
-      const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
-      return {
-        ok: false,
-        outcome: "rate_limited",
-        reason: "rate_limited",
-        retryAfter: seconds !== null && seconds <= 86400 ? seconds : null,
-      };
+      return { ok: false, outcome: "rate_limited", reason: "rate_limited", retryAfter: retryAfterOf(response) };
     }
     if (status === 404) return { ok: false, outcome: "unsupported", reason: "endpoint_unavailable" };
+    if (status === 413) return { ok: false, outcome: "unsupported", reason: "response_too_large" };
+    if (status === 503) {
+      // The service's read budget (time or pool) was exceeded. Nothing is
+      // retried here; the result says when to retry and how to narrow it.
+      const body = parseJsonObject(response);
+      if (isObject(body?.error) && body.error.code === "temporarily_unavailable") {
+        return { ok: false, outcome: "unhealthy", reason: "temporarily_unavailable", retryAfter: retryAfterOf(response) };
+      }
+    }
     if (status === 400 || status === 422) return { ok: false, outcome: "unsupported", reason: "request_rejected" };
   }
   const failure = failureOf(response);
@@ -286,7 +359,7 @@ async function fetchRead(session, path, query, signal) {
 }
 
 // The shape shared by context, capabilities, usage, routes and traces.
-function readData(ctx, report, notices, outcome) {
+function readData(ctx, report, notices, outcome, action) {
   return {
     origin: ctx.origin,
     workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
@@ -294,9 +367,10 @@ function readData(ctx, report, notices, outcome) {
     authenticated: ctx.authenticated,
     scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
     result: outcome === "ok" ? report : null,
-    retry_after_seconds: outcome === "rate_limited" ? report?.retry_after_seconds ?? null : null,
+    retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
+      ? report?.retry_after_seconds ?? null : null,
     notices: [...notices].sort(),
-    next_action: nextAction(outcome),
+    next_action: action,
   };
 }
 
@@ -330,10 +404,50 @@ function statusData(ctx, notices, outcome) {
   };
 }
 
-function nextAction(outcome) {
+const NARROW =
+  "Narrow the read: a shorter --days or --since/--until window, exact --route, --provider or --model filters, " +
+  "fewer --group-by dimensions or a lower --limit.";
+
+// A structured next step for outcomes a person or agent can act on. Fixed
+// text only, except a window and limit the CLI computed from validated values.
+function nextAction(outcome, reason = null, { grouped = false, options = null, report = null } = {}) {
   if (outcome === "login_required") {
     return { kind: "login", message: 'Run "metergraph login --runtime local" in this project to sign in again.' };
   }
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
+  if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
+    return {
+      kind: "use_supported_read",
+      message:
+        "This deployment does not offer grouped usage yet. \"metergraph usage --days N\" still lists cost per route " +
+        "and UTC day, and \"metergraph usage --group-by-metadata KEY\" groups by a metadata key where the service " +
+        "supports it. Grouping by provider, model or day needs a service update; nothing was read.",
+      command: "metergraph usage --days 7 --json",
+    };
+  }
+  if (grouped && reason === "temporarily_unavailable") {
+    return { kind: "retry_later", message: `The service stopped the read at its time budget. Wait, then retry. ${NARROW}` };
+  }
+  if (grouped && reason === "response_too_large") return { kind: "narrow_read", message: NARROW };
+  if (outcome === "ok" && report?.sort && !report.sort.complete && report.matched_groups !== null) {
+    const needed = report.matched_groups;
+    return needed <= READ_MAX_LIMIT
+      ? {
+          kind: "raise_limit",
+          message: `The ranking covers the ${report.rows} highest-cost groups of ${needed}. ` +
+            `Run the same command with --limit ${needed} to rank every group.`,
+        }
+      : { kind: "narrow_read", message: `The ranking covers the ${report.rows} highest-cost groups of ${needed}. ${NARROW}` };
+  }
+  if (outcome === "ok" && report?.comparison?.partial_day_compared_with_full) {
+    const window = report.comparison.like_for_like_window;
+    return {
+      kind: "compare_like_for_like",
+      message:
+        "The current window ends part way through today (UTC) and the prior period is whole days. " +
+        "For equal lengths, run the same command with --compare previous-same-time " +
+        `(prior window ${window.since} to ${window.until}).`,
+    };
+  }
   return null;
 }

@@ -1,0 +1,592 @@
+[
+  {
+    "fixture": "route-today",
+    "groups": 3,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 1,
+      "group_by": [
+        "route"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 1,
+      "group_by": [
+        "route"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Most expensive route today (and the current window of a comparison)",
+    "totals": {
+      "calls": 4,
+      "cost_usd": 1.12,
+      "error_calls": 1
+    },
+    "window": {
+      "days": 1,
+      "preset": "utc_days",
+      "since": "2026-10-14T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.267044+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "provider-spend",
+    "groups": 1,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50,
+      "provider": "provider-a"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50,
+      "provider": [
+        "provider-a"
+      ]
+    },
+    "mcp_is_error": false,
+    "question": "Spend with one provider",
+    "totals": {
+      "calls": 7,
+      "cost_usd": 2.8,
+      "error_calls": 1
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.323169+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "model-spend",
+    "groups": 3,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "model"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "model"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Spend by model",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.365378+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "route-daily",
+    "groups": 5,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "day"
+      ],
+      "limit": 50,
+      "route": "support"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "day"
+      ],
+      "limit": 50,
+      "route": [
+        "support"
+      ]
+    },
+    "mcp_is_error": false,
+    "question": "One route's daily trend",
+    "totals": {
+      "calls": 6,
+      "cost_usd": 1.9,
+      "error_calls": 1
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.410790+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "compare-prior",
+    "groups": 3,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "since": "2026-10-13T00:00:00+00:00",
+      "until": "2026-10-14T00:00:00+00:00"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "since": "2026-10-13T00:00:00+00:00",
+      "until": "2026-10-14T00:00:00+00:00"
+    },
+    "mcp_is_error": false,
+    "question": "Comparison with the prior period: the whole prior UTC day",
+    "totals": {
+      "calls": 5,
+      "cost_usd": 1.29,
+      "error_calls": 1
+    },
+    "window": {
+      "days": null,
+      "preset": null,
+      "since": "2026-10-13T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T00:00:00+00:00",
+      "until_is_request_time": false
+    }
+  },
+  {
+    "fixture": "compare-prior-same-time",
+    "groups": 3,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "since": "2026-10-13T00:00:00+00:00",
+      "until": "2026-10-13T16:30:57.267044+00:00"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "since": "2026-10-13T00:00:00+00:00",
+      "until": "2026-10-13T16:30:57.267044+00:00"
+    },
+    "mcp_is_error": false,
+    "question": "Comparison with the prior period: the prior UTC day to the same elapsed time",
+    "totals": {
+      "calls": 3,
+      "cost_usd": 1.27,
+      "error_calls": 0
+    },
+    "window": {
+      "days": null,
+      "preset": null,
+      "since": "2026-10-13T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-13T16:30:57.267044+00:00",
+      "until_is_request_time": false
+    }
+  },
+  {
+    "fixture": "provider-all",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Spend by provider (and the current window of a week comparison)",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.526795+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "compare-week-prior",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50,
+      "since": "2026-10-01T00:00:00+00:00",
+      "until": "2026-10-08T00:00:00+00:00"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50,
+      "since": "2026-10-01T00:00:00+00:00",
+      "until": "2026-10-08T00:00:00+00:00"
+    },
+    "mcp_is_error": false,
+    "question": "Comparison with the prior period: the previous 7 whole UTC days",
+    "totals": {
+      "calls": 2,
+      "cost_usd": 0.11,
+      "error_calls": 0
+    },
+    "window": {
+      "days": null,
+      "preset": null,
+      "since": "2026-10-01T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-08T00:00:00+00:00",
+      "until_is_request_time": false
+    }
+  },
+  {
+    "fixture": "provider-model-truncated",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "provider",
+        "model"
+      ],
+      "limit": 2
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "provider",
+        "model"
+      ],
+      "limit": 2
+    },
+    "mcp_is_error": false,
+    "question": "Top groups cut by limit",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.602995+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "provider-prod-key",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "provider"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Environment-restricted key",
+    "totals": {
+      "calls": 12,
+      "cost_usd": 3.17,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.639947+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "environment-filter",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "environment": "staging",
+      "group_by": [
+        "route"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "environment": [
+        "staging"
+      ],
+      "group_by": [
+        "route"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Environment filter",
+    "totals": {
+      "calls": 2,
+      "cost_usd": 0.5,
+      "error_calls": 0
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.678399+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "prompt-cost",
+    "groups": 4,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "metadata.prompt_id"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "metadata.prompt_id"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Cost ranked by a prompt metadata key",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.714365+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "prompt-cost-truncated",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "metadata.prompt_id"
+      ],
+      "limit": 2
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "metadata.prompt_id"
+      ],
+      "limit": 2
+    },
+    "mcp_is_error": false,
+    "question": "Prompt cost ranking cut by limit",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.752806+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "route-prompt",
+    "groups": 5,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "route",
+        "metadata.prompt_id"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "route",
+        "metadata.prompt_id"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Prompt cost within each route",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.787440+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "prompt-filter",
+    "groups": 1,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "metadata": "{\"prompt_id\": \"reply-v3\"}"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "route"
+      ],
+      "limit": 50,
+      "metadata": {
+        "prompt_id": "reply-v3"
+      }
+    },
+    "mcp_is_error": false,
+    "question": "Spend for one prompt ID, by route",
+    "totals": {
+      "calls": 4,
+      "cost_usd": 1.2,
+      "error_calls": 0
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.823407+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "empty",
+    "groups": 0,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "model"
+      ],
+      "limit": 50,
+      "provider": "provider-none"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "model"
+      ],
+      "limit": 50,
+      "provider": [
+        "provider-none"
+      ]
+    },
+    "mcp_is_error": false,
+    "question": "No matching calls",
+    "totals": {
+      "calls": 0,
+      "cost_usd": 0.0,
+      "error_calls": 0
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:30:57.855712+00:00",
+      "until_is_request_time": true
+    }
+  }
+]

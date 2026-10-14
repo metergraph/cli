@@ -228,7 +228,7 @@ const limitOption = (fallback, extra = "") => ({
 const READ_BASE_USAGE = "[--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
 const REFUSED_NOTE =
   "--environment, --workload, --since, --until, --sql, --query, --content, --include-content, --debug and --replay " +
-  "are recognized and refused with exit code 6 before any request.";
+  "are recognized and refused with exit code 6 before any request, except --environment, --since and --until on usage.";
 
 // The read commands. Each uses the project's saved Metadata grant, makes GET
 // requests to fixed paths on the bound origin and never opens a browser.
@@ -257,23 +257,77 @@ export const READ_HELP = Object.freeze([
   {
     name: "usage",
     usage:
-      `metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] ` +
-      `[--group-by-metadata KEY] ${READ_BASE_USAGE}`,
+      `metergraph usage [--days N | --today | --since TIME [--until TIME]] [--group-by DIMS] ` +
+      `[--route NAME]... [--provider NAME]... [--model NAME]... [--environment NAME]... ` +
+      `[--sort ORDER] [--compare previous|previous-same-time] [--limit N] ` +
+      `[--metadata KEY=VALUE]... [--metadata-json JSON] [--group-by-metadata KEY] ${READ_BASE_USAGE}`,
     summary:
-      "Show daily calls, errors, cost, tokens and latency per route for a recent window, or group the window " +
-      "by one metadata key. Metadata only. A route is not a prompt: one route can carry several prompt IDs, " +
-      'so "metergraph usage --group-by-metadata prompt_id" splits cost by prompt.',
+      "Show calls, errors, cost, tokens and latency. With --group-by, a filter, a UTC window, --sort or --compare " +
+      "it reads grouped usage: cost by provider, model, route or UTC day, computed per call by the service, with " +
+      "totals over every matching call and coverage, pricing and attribution evidence. Without them it lists cost " +
+      "per route and day for the last N days. A route is not a prompt: one route can carry several prompt IDs, " +
+      'so "metergraph usage --group-by metadata.prompt_id" splits cost by prompt. "metergraph routes" lists ' +
+      "route definitions, not their cost.",
+    examples: [
+      ["Most expensive route today", "metergraph usage --group-by route --today"],
+      ["Spend with one provider this week", "metergraph usage --group-by provider --provider NAME --days 7"],
+      ["Spend by model", "metergraph usage --group-by model --days 7"],
+      ["One route's daily trend", "metergraph usage --route NAME --group-by day --days 14"],
+      ["Cost by prompt ID", "metergraph usage --group-by metadata.prompt_id --days 7"],
+      ["Today against yesterday", "metergraph usage --group-by route --today --compare previous"],
+    ],
     options: [
       ...READ_BASE_OPTIONS,
-      DAYS_OPTION,
-      limitOption(READ_DEFAULT_LIMIT, " With --group-by-metadata it caps the listed values."),
+      {
+        name: "--days",
+        value: "N",
+        summary:
+          `Window, 1 to ${READ_MAX_DAYS}. Default ${READ_DEFAULT_DAYS}. Grouped: the current UTC day so far and the ` +
+          "N - 1 whole UTC days before it. Otherwise the last N days.",
+      },
+      { name: "--today", value: null, summary: "Grouped: the current UTC day so far (--days 1)." },
+      {
+        name: "--since",
+        value: "TIME",
+        summary:
+          "Grouped: window start, inclusive. A UTC date (YYYY-MM-DD, 00:00 UTC) or an ISO 8601 timestamp with Z " +
+          `or an offset. At most ${READ_MAX_DAYS} days before --until.`,
+      },
+      { name: "--until", value: "TIME", summary: "Grouped: window end, exclusive, in the same form. Default now." },
+      {
+        name: "--group-by",
+        value: "DIMS",
+        summary: "Comma-separated, in order: provider, model, route, day (UTC calendar day). Default provider,model.",
+      },
+      { name: "--route", value: "NAME", summary: "Grouped: only this route, exactly. Repeat for up to 20; (unrouted) selects calls without one." },
+      { name: "--provider", value: "NAME", summary: "Grouped: only this provider, exactly. Repeat for up to 20." },
+      { name: "--model", value: "NAME", summary: "Grouped: only this model, exactly. Repeat for up to 20." },
+      { name: "--environment", value: "NAME", summary: "Grouped: only this environment. Repeat for several. A restricted grant reads its own environments only." },
+      {
+        name: "--sort",
+        value: "ORDER",
+        summary:
+          "cost (default), cost-per-call, calls, errors, avg-latency (mean over calls that reported latency), " +
+          "p95-latency (estimated from a fixed histogram) or day (oldest first; the default for --group-by day). " +
+          "The service returns the highest-cost groups, so another order over a cut list is marked partial.",
+      },
+      {
+        name: "--compare",
+        value: "MODE",
+        summary:
+          "Also read the period before and show the change per group. previous: the whole prior period, which is " +
+          "longer than a window ending part way through today (a warning says so). previous-same-time: the prior " +
+          "period to the same elapsed time. Not with --group-by day.",
+      },
+      limitOption(READ_DEFAULT_LIMIT, " Grouped: the most groups listed; totals still cover every call."),
       ...METADATA_OPTIONS,
       {
         name: "--group-by-metadata",
         value: "KEY",
         summary:
-          "Group by one metadata key, highest cost first, using the service's usage aggregates. Calls without " +
-          "the key or with a non-string value form one group with no value; window totals cover every call.",
+          "Group by one metadata key: the same as ending --group-by with metadata.KEY, and the way to give a key " +
+          "that holds a comma. Calls without the key or with a non-string value are one group with no value, and " +
+          "the spend not attributed to any value is totalled.",
       },
       JSON_OPTION,
     ],
@@ -424,7 +478,12 @@ export function helpData(topic) {
         summary: "Poll Metadata for one exact trace in an explicit invocation window. Never sends application traffic.",
         options: VERIFY_OPTIONS,
       },
-      ...READ_HELP.map(({ name, summary, options }) => ({ name, summary, options })),
+      ...READ_HELP.map(({ name, summary, options, examples }) => ({
+        name,
+        summary,
+        options,
+        ...(examples ? { examples: examples.map(([question, command]) => ({ question, command })) } : {}),
+      })),
     ],
     skill_clients: Object.keys(SKILL_CLIENTS),
     skill_runtimes: [...SKILL_RUNTIMES],
@@ -521,6 +580,10 @@ export function helpText(topic, style = PLAIN) {
       "Options:",
     );
     lines.push(...optionLines(entry.options, 18));
+    if (entry.examples) {
+      lines.push("", "Examples (add --json for one JSON line):");
+      for (const [question, command] of entry.examples) lines.push(`  ${question}:`, `    ${command}`);
+    }
   } else if (topic === "skill") {
     lines.push(
       "Usage:",

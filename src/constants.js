@@ -95,17 +95,34 @@ export const AUTH_PATHS = Object.freeze({
 // --limit locally.
 export const READ_PATHS = Object.freeze({
   usage: "/v1/agent/usage",
+  usageAggregates: "/v1/agent/usage/aggregates",
   routes: "/v1/agent/routes",
   traces: "/v1/agent/traces",
-  // usage --group-by-metadata reads the grouped aggregates.
-  usageAggregates: "/v1/agent/usage/aggregates",
 });
 export const READ_QUERY_KEYS = Object.freeze({
   "/v1/agent/usage": Object.freeze(["days", "limit", "metadata"]),
-  "/v1/agent/usage/aggregates": Object.freeze(["days", "limit", "group_by", "metadata"]),
+  "/v1/agent/usage/aggregates": Object.freeze([
+    "group_by", "days", "since", "until", "limit", "route", "provider", "model", "environment", "metadata",
+  ]),
   "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor", "metadata"]),
   "/v1/cli/setup/credential": Object.freeze(["family_id"]),
 });
+
+// Query keys that may repeat on a path, one value each, as the service reads
+// list parameters. Every other key may appear at most once.
+export const READ_QUERY_REPEATABLE = Object.freeze({
+  // One group_by per dimension, so a metadata key is never split on a comma.
+  "/v1/agent/usage/aggregates": Object.freeze(["group_by", "route", "provider", "model", "environment"]),
+});
+
+// Grouped usage (GET /v1/agent/usage/aggregates). Dimensions the service can
+// group by (plus at most one "metadata.<key>"), the most values one filter may name, and how far apart the two
+// ends of an explicit window may be.
+export const USAGE_DIMENSIONS = Object.freeze(["provider", "model", "route", "day"]);
+export const USAGE_DEFAULT_GROUP_BY = Object.freeze(["provider", "model"]);
+export const USAGE_MAX_FILTER_VALUES = 20;
+export const USAGE_SORTS = Object.freeze(["cost", "cost-per-call", "calls", "errors", "avg-latency", "p95-latency", "day"]);
+export const USAGE_COMPARISONS = Object.freeze(["previous", "previous-same-time"]);
 
 // Read commands share one total deadline for every request they make,
 // including a token refresh. It is never reset per request or page.

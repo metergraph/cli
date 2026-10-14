@@ -1,0 +1,145 @@
+{
+  "agent": {
+    "capability_discovery": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/capabilities"
+    },
+    "incidents": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/incidents"
+    },
+    "ingestion_health": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/ingestion-health"
+    },
+    "report_detail": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/report"
+    },
+    "report_evidence": {
+      "available": false,
+      "content": true,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "content",
+      "required_scope": "agent:read",
+      "schema": "agent-access/report-evidence"
+    },
+    "reports": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/reports"
+    },
+    "routes": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/routes"
+    },
+    "trace_content": {
+      "available": false,
+      "content": true,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "content",
+      "required_scope": "agent:read",
+      "schema": "trace-debug/trace"
+    },
+    "trace_metadata": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/trace-metadata"
+    },
+    "trace_replay": {
+      "available": false,
+      "content": true,
+      "external_calls": true,
+      "mutates": false,
+      "privacy_class": "replay",
+      "required_scope": "agent:replay",
+      "schema": "trace-debug/replay"
+    },
+    "usage": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/usage"
+    },
+    "usage_aggregates": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/usage-aggregates"
+    },
+    "workspace_context": {
+      "available": true,
+      "content": false,
+      "external_calls": false,
+      "mutates": false,
+      "privacy_class": "metadata",
+      "required_scope": "agent:metadata",
+      "schema": "agent-access/workspace-context"
+    }
+  },
+  "bounds": {
+    "content_included_by_default": false,
+    "max_days": 90,
+    "max_response_bytes": 5242880,
+    "max_rows": 200
+  },
+  "contracts": {
+    "agent_access": "metergraph.agent-access/v1",
+    "trace_debug": "metergraph.trace-debug/v1"
+  },
+  "deployment_capabilities": [
+    "agent_api",
+    "telemetry",
+    "workspace_settings"
+  ],
+  "deployment_profile": "local",
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T16:30:57.248178+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1"
+}

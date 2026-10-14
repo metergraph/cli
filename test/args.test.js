@@ -260,7 +260,7 @@ test("parses read commands with bounded defaults and explicit values", () => {
 
 test("read commands refuse environment, time range, query and content requests as unsupported", () => {
   const cases = [
-    [["usage", "--environment", "hunter2"], "environment_selector_unsupported"],
+    [["traces", "--environment", "hunter2"], "environment_selector_unsupported"],
     [["traces", "--workload", "hunter2"], "workload_filter_unsupported"],
     [["traces", "--workload="], "workload_filter_unsupported"],
     [["routes", "--since=hunter2"], "time_range_unsupported"],

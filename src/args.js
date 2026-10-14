@@ -25,6 +25,11 @@ import {
   MAX_METADATA_KEY_LENGTH,
   MAX_METADATA_QUERY_LENGTH,
   MAX_METADATA_VALUE_LENGTH,
+  USAGE_COMPARISONS,
+  USAGE_DEFAULT_GROUP_BY,
+  USAGE_DIMENSIONS,
+  USAGE_MAX_FILTER_VALUES,
+  USAGE_SORTS,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
 import { isCursor, isSafeFilter, metadataQueryValue } from "./read-contract.js";
@@ -45,7 +50,10 @@ const OPTIONS = {
   status: new Set(READ_BASE),
   context: new Set(READ_BASE),
   capabilities: new Set(READ_BASE),
-  usage: new Set([...READ_BASE, "--days", "--limit", "--metadata", "--metadata-json", "--group-by-metadata"]),
+  usage: new Set([
+    ...READ_BASE, "--days", "--limit", "--metadata", "--metadata-json", "--group-by-metadata",
+    "--group-by", "--route", "--provider", "--model", "--environment", "--since", "--until", "--sort", "--compare",
+  ]),
   routes: new Set([...READ_BASE, "--limit"]),
   traces: new Set([...READ_BASE, "--days", "--limit", "--route", "--status", "--cursor", "--metadata", "--metadata-json"]),
   verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
@@ -67,13 +75,14 @@ const REFUSED = {
 };
 const REFUSED_MESSAGES = {
   environment_selector_unsupported:
-    "--environment is not supported: the service's agent access contract has no environment selector, " +
-    "so the CLI never sends one. Results cover the bound workspace. No request was made.",
+    "--environment is supported only by usage, which sends it to the grouped usage read. This command has no " +
+    "environment selector, so the CLI never sends one. Results cover the bound workspace. No request was made.",
   workload_filter_unsupported:
     "--workload is not supported by this CLI version: it cannot verify from the returned traces that a " +
     "workload filter was applied, so it never sends one. No request was made.",
   time_range_unsupported:
-    "--since and --until are not supported. Use --days N (1 to 90) for a window relative to now. No request was made.",
+    "--since and --until are supported only by usage. Use --days N (1 to 90) for a window relative to now. " +
+    "No request was made.",
   query_unsupported:
     "Free-form queries are not supported. Use the fixed options of this command. No request was made.",
   content_access_unsupported:
@@ -81,11 +90,20 @@ const REFUSED_MESSAGES = {
 };
 // Options that may be given more than once; their values are kept in order.
 const REPEATABLE = new Set(["--metadata"]);
+// usage takes several values for each of its exact-match filters.
+const USAGE_REPEATABLE = new Set(["--route", "--provider", "--model", "--environment"]);
+// usage reads a time range and environments itself, through grouped usage.
+const USAGE_ACCEPTS = new Set(["--environment", "--since", "--until"]);
+// Options that select grouped usage (GET /v1/agent/usage/aggregates).
+const USAGE_GROUPED = [
+  "--group-by", "--group-by-metadata", "--route", "--provider", "--model", "--environment", "--since", "--until", "--sort", "--compare",
+];
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
   setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites", "--no-repository"]),
   verify: new Set(["--open", "--no-browser"]),
+  usage: new Set(["--today"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -162,7 +180,7 @@ export function parseArgs(argv) {
     if (READ_COMMANDS.includes(command)) {
       const equals = arg.indexOf("=");
       const name = equals === -1 ? arg : arg.slice(0, equals);
-      if (Object.hasOwn(REFUSED, name)) {
+      if (Object.hasOwn(REFUSED, name) && !(command === "usage" && USAGE_ACCEPTS.has(name))) {
         const { reason } = REFUSED[name];
         return fail(reason, REFUSED_MESSAGES[reason], "unsupported");
       }
@@ -188,7 +206,7 @@ export function parseArgs(argv) {
         if (value === undefined) {
           return fail("missing_value", `${name} requires a value.`);
         }
-        if (REPEATABLE.has(name)) {
+        if (REPEATABLE.has(name) || (command === "usage" && USAGE_REPEATABLE.has(name))) {
           values[name] = [...(values[name] ?? []), value];
           continue;
         }
@@ -233,7 +251,7 @@ export function parseArgs(argv) {
   if (command === "login") return parseLogin(values, flags, json, fail);
   if (command === "setup") return parseSetup(values, flags, json, fail);
   if (command === "verify") return parseVerify(values, flags, json, fail);
-  if (READ_COMMANDS.includes(command)) return parseRead(command, values, json, fail);
+  if (READ_COMMANDS.includes(command)) return parseRead(command, values, flags, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
     if (!paths.ok) return paths;
@@ -462,7 +480,7 @@ function parseSetup(values, flags, json, fail) {
 // Read commands take the project and config directory, one total timeout and,
 // where the endpoint supports them, bounded days, limit and trace filters.
 // Out of range values fail here; nothing is clamped.
-function parseRead(command, values, json, fail) {
+function parseRead(command, values, flags, json, fail) {
   const paths = parsePaths(values, fail);
   if (!paths.ok) return paths;
   const rawTimeout = values["--timeout-ms"];
@@ -489,6 +507,9 @@ function parseRead(command, values, json, fail) {
     limit = values["--limit"] === undefined ? fallback : parseBounded(values["--limit"], 1, READ_MAX_LIMIT);
     if (limit === null) return fail("invalid_limit", `--limit must be a whole number from 1 to ${READ_MAX_LIMIT}.`);
   }
+  if (command === "usage" && (USAGE_GROUPED.some((name) => values[name] !== undefined) || flags.has("--today"))) {
+    return parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit });
+  }
   const route = values["--route"] ?? null;
   if (route !== null && !isSafeFilter(route)) {
     return fail("invalid_route", "--route must be 1 to 256 characters without control characters.");
@@ -506,11 +527,6 @@ function parseRead(command, values, json, fail) {
   }
   const metadata = parseMetadata(values, fail);
   if (!metadata.ok) return metadata;
-  const groupByMetadata = values["--group-by-metadata"] ?? null;
-  if (groupByMetadata !== null) {
-    const problem = metadataKeyProblem(groupByMetadata);
-    if (problem !== null) return fail(problem.code, `--group-by-metadata ${problem.message}`);
-  }
   return {
     ok: true,
     command,
@@ -523,9 +539,148 @@ function parseRead(command, values, json, fail) {
     status,
     cursor,
     metadata: metadata.filters,
-    groupByMetadata,
+    groupByMetadata: null,
     json,
   };
+}
+
+// Grouped usage: server-side groups by provider, model, route and UTC day,
+// with exact filters and a UTC window. The window is either a preset of whole
+// UTC days (--days N or --today: the current UTC day so far and the N - 1
+// whole UTC days before it) or an explicit --since/--until, never both.
+// Ranking other than by cost and the prior-period comparison are computed
+// from the returned groups and say when those groups are not all of them.
+function parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit }) {
+  // A "metadata.<key>" entry takes the rest of the value as the key, so a key
+  // may contain commas and dots; it must come last. --group-by-metadata KEY
+  // is the same dimension, appended last.
+  let groupBy = values["--group-by"] === undefined && values["--group-by-metadata"] !== undefined
+    ? []
+    : [...USAGE_DEFAULT_GROUP_BY];
+  if (values["--group-by"] !== undefined) {
+    const raw = values["--group-by"];
+    const at = raw.startsWith(METADATA_PREFIX) ? 0 : raw.indexOf(`,${METADATA_PREFIX}`);
+    const plain = at === -1 ? raw : raw.slice(0, Math.max(0, at));
+    const metadataPart = at === -1 ? null : raw.slice(at === 0 ? 0 : at + 1);
+    const parts = plain === "" ? [] : plain.split(",").map((part) => part.trim());
+    if (
+      (parts.length === 0 && metadataPart === null) ||
+      !parts.every((part) => USAGE_DIMENSIONS.includes(part)) ||
+      new Set(parts).size !== parts.length
+    ) {
+      return fail(
+        "invalid_group_by",
+        `--group-by must list distinct dimensions from ${USAGE_DIMENSIONS.join(", ")}, comma separated, ` +
+          "optionally ending with metadata.KEY.",
+      );
+    }
+    groupBy = metadataPart === null ? parts : [...parts, metadataPart];
+  }
+  if (values["--group-by-metadata"] !== undefined) {
+    if (groupBy.some((dimension) => dimension.startsWith(METADATA_PREFIX))) {
+      return fail("too_many_metadata_dimensions", "Group by at most one metadata key.");
+    }
+    groupBy = [...groupBy, `${METADATA_PREFIX}${values["--group-by-metadata"]}`];
+  }
+  const metadataDimension = groupBy.find((dimension) => dimension.startsWith(METADATA_PREFIX)) ?? null;
+  if (metadataDimension !== null) {
+    const problem = metadataKeyProblem(metadataDimension.slice(METADATA_PREFIX.length));
+    if (problem !== null) return fail(problem.code, `A metadata grouping key ${problem.message}`);
+  }
+  const filters = {};
+  for (const [option, key] of [["--route", "route"], ["--provider", "provider"], ["--model", "model"], ["--environment", "environment"]]) {
+    const list = values[option] ?? [];
+    if (list.length > USAGE_MAX_FILTER_VALUES) {
+      return fail("too_many_filter_values", `${option} may be given at most ${USAGE_MAX_FILTER_VALUES} times.`);
+    }
+    if (!list.every((value) => isSafeFilter(value) && value.trim() !== "")) {
+      return fail(`invalid_${key}`, `${option} must be 1 to 256 characters without control characters.`);
+    }
+    filters[key] = list.length === 0 ? null : [...new Set(list)];
+  }
+  const today = flags.has("--today");
+  const rawSince = values["--since"];
+  const rawUntil = values["--until"];
+  const explicit = rawSince !== undefined || rawUntil !== undefined;
+  if ([today, explicit, values["--days"] !== undefined].filter(Boolean).length > 1) {
+    return fail("window_conflict", "Use one window: --days N, --today, or --since with an optional --until.");
+  }
+  let days = null;
+  let since = null;
+  let until = null;
+  if (explicit) {
+    if (rawSince === undefined) return fail("invalid_window", "--until needs --since.");
+    since = utcInstant(rawSince);
+    until = rawUntil === undefined ? null : utcInstant(rawUntil);
+    if (since === null || (rawUntil !== undefined && until === null)) {
+      return fail(
+        "invalid_window",
+        "--since and --until must be a UTC date (YYYY-MM-DD, meaning 00:00 UTC) or an ISO 8601 timestamp with Z or an offset.",
+      );
+    }
+    const end = until === null ? Date.now() : Date.parse(until);
+    if (Date.parse(since) >= end) return fail("invalid_window", "--since must be before --until (or before now).");
+    if (end - Date.parse(since) > READ_MAX_DAYS * DAY_MS) {
+      return fail("invalid_window", `The window may span at most ${READ_MAX_DAYS} days.`);
+    }
+  } else {
+    days = today ? 1 : values["--days"] === undefined ? READ_DEFAULT_DAYS : parseBounded(values["--days"], 1, READ_MAX_DAYS);
+    if (days === null) return fail("invalid_days", `--days must be a whole number from 1 to ${READ_MAX_DAYS}.`);
+  }
+  const sort = values["--sort"] ?? (groupBy.length === 1 && groupBy[0] === "day" ? "day" : "cost");
+  if (!USAGE_SORTS.includes(sort)) return fail("invalid_sort", `--sort must be one of ${USAGE_SORTS.join(", ")}.`);
+  if (sort === "day" && !groupBy.includes("day")) {
+    return fail("invalid_sort", "--sort day needs day in --group-by.");
+  }
+  const compare = values["--compare"] ?? null;
+  if (compare !== null && !USAGE_COMPARISONS.includes(compare)) {
+    return fail("invalid_compare", `--compare must be ${USAGE_COMPARISONS.join(" or ")}.`);
+  }
+  if (compare !== null && groupBy.includes("day")) {
+    return fail(
+      "compare_with_day_grouping",
+      "--compare matches groups across two windows, and a UTC day is never in both. " +
+        "For a trend, use --group-by day without --compare.",
+    );
+  }
+  const metadata = parseMetadata(values, fail);
+  if (!metadata.ok) return metadata;
+  return {
+    ok: true,
+    command: "usage",
+    project: paths.project,
+    configDir: paths.configDir,
+    timeoutMs,
+    days,
+    limit,
+    route: null,
+    status: null,
+    cursor: null,
+    metadata: metadata.filters,
+    groupByMetadata: metadataDimension === null ? null : metadataDimension.slice(METADATA_PREFIX.length),
+    grouped: { groupBy, filters, since, until, today, sort, compare },
+    json,
+  };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const METADATA_PREFIX = "metadata.";
+const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ZONED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+// A window bound as a UTC ISO 8601 string, or null. A date alone is 00:00
+// UTC; a timestamp must carry Z or an offset, so a local time is never read
+// as UTC by accident.
+function utcInstant(raw) {
+  if (typeof raw !== "string" || raw.length > 40) return null;
+  const text = UTC_DATE.test(raw) ? `${raw}T00:00:00Z` : ZONED_TIME.test(raw) ? raw : null;
+  if (text === null) return null;
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) return null;
+  const iso = new Date(parsed).toISOString();
+  // Reject dates the parser rolled over, such as 2026-02-30.
+  if (UTC_DATE.test(raw) && iso.slice(0, 10) !== raw) return null;
+  return iso;
 }
 
 // Exact customer-metadata filters. --metadata KEY=VALUE splits at the first

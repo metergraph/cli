@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+- `usage` answers cost questions with grouped usage from the service: `--group-by`
+  any of provider, model, route and UTC day, plus one `metadata.KEY`, exact `--route`, `--provider`, `--model`
+  and `--environment` filters, and a UTC window (`--days N`, `--today`, or `--since`
+  with `--until`). Groups are attributed per call, totals cover every matching call,
+  and coverage, pricing and attribution are shown in text and JSON. `--sort` ranks by
+  cost, cost per call, calls, errors, mean latency or estimated p95 latency (labelled
+  as an estimate) and says when a ranking covers only the listed groups. `--compare
+  previous` adds the prior period and warns when a partial current UTC day is
+  compared with a whole one; `--compare previous-same-time` compares equal lengths.
+  A deployment without grouped usage exits 14 with a `next_action` naming the read
+  it does support. Plain `usage` without these options is unchanged. `usage --help`
+  lists tested examples, also in `--help --json`.
 - `usage` and `traces` carry the service's coverage, pricing and cost attribution
   evidence when it is reported: requested and read window, completeness with reasons,
   whole-window totals separate from the returned rows, known zero prices apart from

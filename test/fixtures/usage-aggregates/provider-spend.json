@@ -1,0 +1,134 @@
+{
+  "attribution": {
+    "cost_basis": "call",
+    "level": "call",
+    "mixed_model_rows": 0,
+    "mixed_provider_rows": 0,
+    "per_provider_exact": true
+  },
+  "completeness": {
+    "complete": true,
+    "from": "2026-10-08T00:00:00+00:00",
+    "limit": 50,
+    "mode": "top_n",
+    "returned": 1,
+    "to": "2026-10-14T16:30:57.323169+00:00"
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T16:30:57.329490+00:00",
+    "completeness": "complete",
+    "effective_window": {
+      "days": 6.688163,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T16:30:57.323169+00:00"
+    },
+    "filters": {
+      "environments": null,
+      "metadata": [],
+      "model": null,
+      "provider": [
+        "provider-a"
+      ],
+      "route": null
+    },
+    "next_cursor": null,
+    "reasons": [],
+    "requested_window": {
+      "days": 6.688163,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T16:30:57.323169+00:00"
+    },
+    "rows": {
+      "limit": 50,
+      "matched": 1,
+      "ordering": "cost_usd desc, calls desc, group key asc",
+      "returned": 1,
+      "shape": "top_n",
+      "truncated": false
+    },
+    "totals_scope": "population"
+  },
+  "evidence": {
+    "complete": true,
+    "rows": 1,
+    "sources": [
+      "calls",
+      "ingest_batches"
+    ]
+  },
+  "group_by": [
+    "provider"
+  ],
+  "items": [
+    {
+      "cache_read_tokens": 70,
+      "cache_write_tokens": 35,
+      "calls": 7,
+      "cost_per_call_usd": 0.4,
+      "cost_usd": 2.8,
+      "error_calls": 1,
+      "input_tokens": 700,
+      "latency": {
+        "avg_ms": 1307,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 2650,
+        "samples": 7
+      },
+      "output_tokens": 350,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 7,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "provider": "provider-a",
+      "reasoning_tokens": 14
+    }
+  ],
+  "pricing": {
+    "cost": "exact",
+    "partial_calls": 0,
+    "priced_calls": 7,
+    "unknown_calls": 0,
+    "unpriced_calls": 0,
+    "zero_cost_calls": 0
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T16:30:57.329490+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "totals": {
+    "cache_read_tokens": 70,
+    "cache_write_tokens": 35,
+    "calls": 7,
+    "cost_per_call_usd": 0.4,
+    "cost_usd": 2.8,
+    "error_calls": 1,
+    "input_tokens": 700,
+    "latency": {
+      "avg_ms": 1307,
+      "p95_method": "histogram_estimate",
+      "p95_ms": 2650,
+      "samples": 7
+    },
+    "output_tokens": 350,
+    "reasoning_tokens": 14,
+    "scope": "population"
+  },
+  "warnings": [],
+  "window": {
+    "days": 7,
+    "preset": "utc_days",
+    "since": "2026-10-08T00:00:00+00:00",
+    "timezone": "UTC",
+    "until": "2026-10-14T16:30:57.323169+00:00",
+    "until_is_request_time": true
+  }
+}

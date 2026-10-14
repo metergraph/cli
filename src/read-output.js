@@ -20,7 +20,7 @@ const READ_MESSAGES = {
   contract_version_unsupported: "The service answered with an agent access contract version this CLI does not support.",
   content_in_metadata_response:
     "The service's Metadata response contained a field that could carry captured content or a credential. Nothing from it was printed.",
-  filter_mismatch: "The service reported different trace filters than the ones requested. Nothing from it was printed.",
+  filter_mismatch: "The service reported different filters than the ones requested. Nothing from it was printed.",
   filter_not_applied:
     "The service returned traces that do not match the requested filter. Nothing from it was printed.",
   metadata_filter_unsupported:
@@ -29,8 +29,20 @@ const READ_MESSAGES = {
   metadata_filter_mismatch:
     "The service reported different metadata filters than the ones requested. Nothing from it was printed.",
   group_by_mismatch:
-    "The service did not group by the requested metadata key. The service may predate metadata grouping. " +
+    "The service did not group by the requested dimensions or metadata key. The service may predate that grouping. " +
     "Nothing from it was printed.",
+  coverage_not_reported:
+    "The service's grouped usage response carries no coverage evidence, so its groups cannot be checked. " +
+    "Nothing from it was printed.",
+  window_mismatch:
+    "The service read a different UTC window than the one requested. Nothing from it was printed.",
+  usage_aggregates_unavailable:
+    "This deployment does not offer grouped usage (by provider, model, route or UTC day) to the project's " +
+    "Metadata grant. Nothing was read.",
+  temporarily_unavailable:
+    "The service stopped this read at its time budget and returned nothing partial. Nothing was retried.",
+  response_too_large:
+    "The response is larger than the read's size budget, so nothing from it was printed.",
   read_response_invalid: "The service's response is not usable JSON. Nothing from it was printed.",
   usage_response_invalid: "The service's usage response does not match the contract. Nothing from it was printed.",
   routes_response_invalid: "The service's routes response does not match the contract. Nothing from it was printed.",
@@ -62,7 +74,7 @@ const NOTICES = {
   metadata_key_mostly_missing:
     "Most of this window's calls or cost have no value for the grouped key, so the rows with a value explain less than half of it.",
   metadata_values_missing:
-    "Some calls have no usable value for the grouped key (missing, not a string or too long). They are the group shown as having no value.",
+    "Some calls have no usable value for the grouped key (missing, not a string or too long). They are shown as (no value) and totalled as not attributed to any value.",
   routes_truncated_locally:
     "The service returned more routes than --limit. Only the first rows are shown; the routes endpoint has no server limit or window.",
   route_details_omitted: "Route descriptions, constraints and evaluation contract bodies are not printed.",
@@ -81,6 +93,18 @@ const NOTICES = {
   mixed_provider_traces:
     "Some traces used more than one provider or model. A trace cost is the whole-trace total and cannot be split by provider; use usage for per-route cost.",
   unpriced_traces: "Some traces have no priced call, so their cost is unknown (shown as -), not zero.",
+  groups_truncated:
+    "More groups matched than --limit. Only the highest-cost groups are listed; the all-calls totals still cover every matching call.",
+  ranking_partial:
+    "The service returns the highest-cost groups first, so this ranking covers only the listed groups, not every group.",
+  current_day_partial:
+    "The window ends now, part way through the current UTC day, so that day is partial.",
+  partial_day_comparison:
+    "A partial current UTC day is compared with a whole prior period. The totals are not like for like.",
+  comparison_incomplete:
+    "One of the compared windows is incomplete, so a change may be missing groups. A group absent from a cut window is unknown, not zero.",
+  environment_restricted_key:
+    "The grant is restricted to some environments, so totals cover only those environments.",
   trace_links_unavailable:
     "The service does not provide workspace-bound trace links yet, so no link is shown.",
 };
@@ -129,21 +153,32 @@ function coverageLines(lines, report) {
 // - The "mostly missing" warning supersedes the plain missing-values notice.
 // - Service warning codes are printed once on the "Service warnings" line,
 //   so the "messages omitted" note adds nothing in text.
-// A grouped report whose only rows are the no-value group, holding every call.
+// - Grouped usage prints the partial UTC day in its Window line, the spend
+//   without a key value in its metadata lines, and the comparison's window
+//   lengths, prior coverage and completeness in its comparison lines.
+// A metadata grouping where no call has a value: every call is unattributed.
 function noCallHasTheKey(report) {
-  if (!report?.group_by || !report.population_totals || !Array.isArray(report.items)) return false;
-  const total = report.population_totals.calls;
-  return total > 0 && report.items.length > 0 && report.items.every((item) => !item.has_value)
-    && report.totals.calls === total;
+  const groups = report?.metadata_groups;
+  if (!groups || !report.totals) return false;
+  return report.totals.calls > 0 && groups.listed_with_value.calls === 0 &&
+    groups.unlisted.other_values.calls === 0 && groups.unattributed.calls === report.totals.calls;
 }
 
 function textNotices(tokens, report) {
   const shown = new Set(tokens);
   const coverage = report?.coverage ?? null;
   if (coverage && coverage.completeness !== "complete") {
-    for (const token of ["evidence_incomplete", "rows_truncated", "metadata_groups_truncated"]) shown.delete(token);
+    for (const token of ["evidence_incomplete", "rows_truncated", "groups_truncated"]) shown.delete(token);
   }
   if (report?.pricing) shown.delete("pricing_lower_bound");
+  if (report?.source === "usage_aggregates") {
+    shown.delete("current_day_partial");
+    if (report.metadata_groups) shown.delete("metadata_values_missing");
+    if (report.comparison) {
+      for (const token of ["partial_day_comparison", "comparison_incomplete"]) shown.delete(token);
+      for (const token of tokens) if (token.startsWith("prior_")) shown.delete(token);
+    }
+  }
   if (shown.has("metadata_key_mostly_missing")) shown.delete("metadata_values_missing");
   // The grouped body states outright when no call has the key.
   if (noCallHasTheKey(report)) {
@@ -155,6 +190,10 @@ function textNotices(tokens, report) {
 }
 
 export function noticeText(token) {
+  if (token.startsWith("prior_")) {
+    const text = NOTICES[token.slice("prior_".length)];
+    return text === undefined ? null : `Prior window: ${text}`;
+  }
   return NOTICES[token] ?? null;
 }
 
@@ -281,8 +320,8 @@ function resultLines(command, report, lines) {
     );
     return;
   }
-  if (command === "usage" && report.group_by !== null) {
-    groupedUsageLines(report, lines);
+  if (command === "usage" && report.source === "usage_aggregates") {
+    aggregateUsageLines(report, lines);
     return;
   }
   if (command === "usage") {
@@ -375,41 +414,148 @@ function metadataFilterLine(filters) {
   return `Metadata filter: exact match on ${filters.keys.join(", ")}`;
 }
 
-function groupedUsageLines(report, lines) {
-  const key = report.group_by.metadata_key;
-  lines.push(
-    `Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`,
-    `Grouped by metadata: ${key}`,
-  );
+const DIMENSION_TITLES = { provider: "PROVIDER", model: "MODEL", route: "ROUTE", day: "DAY_UTC" };
+const titleOf = (dimension) => DIMENSION_TITLES[dimension] ?? "METADATA_VALUE";
+// One group's cell for a dimension. The metadata group without a value is
+// named, not shown as an empty string.
+const cellOf = (item, dimension) => {
+  if (dimension === "day") return `${item.day}${item.partial_day ? " (partial)" : ""}`;
+  if (dimension.startsWith("metadata.")) return item.has_value ? show(item.metadata_value) : "(no value)";
+  return show(item[dimension]);
+};
+const signed = (value, format) => (value === null ? "-" : `${value > 0 ? "+" : value < 0 ? "-" : ""}${format(Math.abs(value))}`);
+const percent = (value) => (value === null ? "-" : `${value > 0 ? "+" : ""}${value}%`);
+
+function windowLine(window) {
+  const kind = window.preset === "utc_days"
+    ? window.days === 1
+      ? "today so far"
+      : `the current UTC day so far and the ${window.days - 1} whole UTC days before it`
+    : "explicit window";
+  const partial = window.partial_days.length > 0 ? `; partial UTC day ${window.partial_days.join(", ")}` : "";
+  return `${window.since} to ${window.until} UTC, ${window.hours} h (${kind}${partial})`;
+}
+
+// Grouped usage: one row per group in the chosen order, then all-calls
+// totals, coverage, pricing, attribution and the latency definitions.
+function aggregateUsageLines(report, lines) {
+  const filters = Object.entries(report.filters)
+    .filter(([key, count]) => key !== "metadata" && count > 0)
+    .map(([key, count]) => `${key} (${count} value${count === 1 ? "" : "s"})`);
+  lines.push(`Window: ${windowLine(report.window)}`, `Grouped by: ${report.group_by.join(", ")}`);
+  const metadataDimension = report.group_by.find((dimension) => dimension.startsWith("metadata."));
+  if (metadataDimension) {
+    lines.push(`Metadata key: ${metadataDimension.slice("metadata.".length)} (a route is not a prompt; one route can carry several values)`);
+  }
+  if (filters.length > 0) lines.push(`Filters: exact match on ${filters.join(", ")}`);
   if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
-  lines.push("");
+  lines.push(
+    `Ranked by: ${report.sort.meaning}${report.sort.complete ? "" : " (listed groups only)"}`,
+    "",
+  );
   if (report.empty) {
-    lines.push("No calls in this window.");
+    lines.push("No calls match this window and these filters.");
   } else {
     const rows = report.items.map((item) => [
-      item.has_value ? show(item.metadata_value) : `(no ${key} value)`,
-      String(item.calls),
-      String(item.error_calls),
+      String(item.rank),
+      ...report.group_by.map((dimension) => cellOf(item, dimension)),
       usd(item.cost_usd),
-      String(item.input_tokens),
-      String(item.output_tokens),
-      show(item.p95_latency_ms),
+      String(item.calls),
+      usd(item.cost_per_call_usd),
+      String(item.error_calls),
+      show(item.latency.avg_ms),
+      show(item.latency.p95_ms),
     ]);
-    lines.push(...table(["VALUE", "CALLS", "ERRORS", "COST", "IN_TOKENS", "OUT_TOKENS", "P95_MS"], rows));
+    lines.push(...table(
+      ["#", ...report.group_by.map(titleOf), "COST", "CALLS", "COST/CALL", "ERRORS",
+        "AVG_MS", "P95_MS_EST"],
+      rows,
+    ));
   }
-  const rows = report.coverage.rows;
-  const total = report.population_totals;
+  const all = report.totals;
+  lines.push(
+    "",
+    `Groups: ${report.rows} listed of ${report.matched_groups ?? "an unreported number of"} matched.`,
+    `All matching calls: ${all.calls} calls, ${all.error_calls} errors, ${usd(all.cost_usd)}, ` +
+      `${usd(all.cost_per_call_usd)} per call, ${all.input_tokens} input and ${all.output_tokens} output tokens.`,
+  );
   if (noCallHasTheKey(report)) {
     lines.push(
-      "",
-      `No call in this window has a value for ${key}. Check the key's spelling and that the SDK sets it.`,
+      `No call in this window has a value for ${report.metadata_groups.key}. ` +
+        "Check the key's spelling and that the SDK sets it.",
+    );
+  }
+  if (report.metadata_groups) {
+    const groups = report.metadata_groups;
+    const { other_values: other, missing_key: missing, ineligible_value: ineligible } = groups.unlisted;
+    lines.push(
+      `Attributed to a ${groups.key} value: ${groups.listed_with_value.calls} listed calls ` +
+        `(${usd(groups.listed_with_value.cost_usd)}); ${other.groups} more values past --limit: ` +
+        `${other.calls} calls (${usd(other.cost_usd)}).`,
+      `Not attributed to any ${groups.key} value: ${groups.unattributed.calls} calls ` +
+        `(${usd(groups.unattributed.cost_usd)}): without the key ${missing.calls} (${usd(missing.cost_usd)}), ` +
+        `non-string or oversize value ${ineligible.calls} (${usd(ineligible.cost_usd)}).`,
+    );
+  }
+  coverageLines(lines, report);
+  if (report.attribution) {
+    lines.push(
+      `Attribution: per ${report.attribution.level}; ` +
+        (report.attribution.per_provider_exact
+          ? "a trace that used several providers adds each call's cost to that call's provider"
+          : "cost is not split exactly by provider"),
     );
   }
   lines.push(
-    "",
-    `Groups: ${rows.returned} shown of ${rows.matched} values.`,
-    `Calls in the window: ${total.calls} (${usd(total.cost_usd)}); the shown groups hold ${report.totals.calls}.`,
+    "Latency: AVG_MS is the mean over calls that reported latency; P95_MS_EST is estimated from a fixed latency " +
+      "histogram, not an exact percentile.",
     `Evidence: ${report.complete ? "complete" : "incomplete"}`,
   );
-  coverageLines(lines, report);
+  if (report.comparison) comparisonLines(report, lines);
+}
+
+function comparisonLines(report, lines) {
+  const comparison = report.comparison;
+  const { totals } = comparison;
+  lines.push(
+    "",
+    `Compared with ${comparison.mode === "previous" ? "the whole previous period" : "the previous period to the same elapsed time"}: ` +
+      windowLine(comparison.prior.window),
+    `Total cost: ${usd(totals.current.cost_usd)} now, ${usd(totals.prior.cost_usd)} before, ` +
+      `${signed(totals.cost_change.delta, (value) => `$${value.toFixed(4)}`)} (${percent(totals.cost_change.percent)})`,
+    `Calls: ${totals.current.calls} now, ${totals.prior.calls} before, ` +
+      `${signed(totals.calls_change.delta, String)} (${percent(totals.calls_change.percent)})`,
+  );
+  if (comparison.partial_day_compared_with_full) {
+    lines.push(
+      `Not like for like: ${comparison.hours.current} h now against ${comparison.hours.prior} h before.`,
+    );
+  }
+  if (comparison.items.length > 0) {
+    const rows = comparison.items.map((item) => [
+      ...report.group_by.map((dimension) => (dimension === "day" ? show(item.day) : cellOf(item, dimension))),
+      item.current === null ? "unknown" : usd(item.current.cost_usd),
+      item.prior === null ? "unknown" : usd(item.prior.cost_usd),
+      signed(item.cost_change.delta, (value) => `$${value.toFixed(4)}`),
+      percent(item.cost_change.percent),
+      item.current === null ? "unknown" : String(item.current.calls),
+      item.prior === null ? "unknown" : String(item.prior.calls),
+    ]);
+    lines.push(
+      "",
+      ...table(
+        [...report.group_by.map(titleOf), "COST", "PRIOR_COST", "CHANGE", "CHANGE_%",
+          "CALLS", "PRIOR_CALLS"],
+        rows,
+      ),
+    );
+  }
+  const prior = comparison.prior;
+  lines.push(
+    "",
+    `Prior coverage: ${prior.coverage?.completeness ?? "not reported"}` +
+      (prior.coverage && prior.coverage.reasons.length > 0 ? ` (${prior.coverage.reasons.join(", ")})` : "") +
+      `; pricing ${prior.pricing?.cost === "exact" ? "exact" : prior.pricing ? "lower bound" : "not reported"}`,
+    `Comparison: ${comparison.complete ? "complete" : "incomplete"}`,
+  );
 }
