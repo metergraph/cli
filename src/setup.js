@@ -91,20 +91,23 @@ export async function runSetup(options, progress = () => {}) {
     const bound = readBinding(root)?.binding ?? null;
     const intendedOrigin = options.originExplicit ? options.origin : bound?.origin ?? saved?.value.origin ?? options.origin;
     const intendedWorkspace = options.workspace ?? saved?.value.workspace_id ?? null;
-    // What an earlier --json --no-browser waiter is doing with an approval it
-    // received: still redeeming it, or refused by the service's budget. The
-    // rerun reports that instead of asking the person for another approval.
-    const pending = pendingRefusal(root, { familyId: saved?.value.family_id ?? null,
-      delivered: saved?.value.phase === "delivered" });
-    if (pending !== null) {
-      return stop(pending.reason === "setup_rate_limited" ? "rate_limited" : "conflict", pending.reason,
-        "delivery_pending", redeemNext(pending, intendedOrigin));
-    }
     // A family already tied to a workspace cannot be carried across a
     // reconnect. Refuse before login changes the Metadata binding or the env.
     if (saved && (saved.value.origin !== intendedOrigin || saved.value.workspace_id !== intendedWorkspace ||
         (bound !== null && (bound.origin !== saved.value.origin || bound.workspace_id !== saved.value.workspace_id)))) {
       return stop("conflict", "setup_binding_changed");
+    }
+    // What an earlier --json --no-browser waiter is doing with an approval it
+    // received: still redeeming it, or refused by the service's budget. The
+    // rerun reports that instead of asking the person for another approval.
+    // It runs after the binding guard, so a rerun aimed at another deployment
+    // or workspace is refused as such and leaves the record for a correct
+    // rerun; the next action names the saved family's own deployment.
+    const pending = pendingRefusal(root, { familyId: saved?.value.family_id ?? null,
+      delivered: saved?.value.phase === "delivered" });
+    if (pending !== null) {
+      return stop(pending.reason === "setup_rate_limited" ? "rate_limited" : "conflict", pending.reason,
+        "delivery_pending", redeemNext(pending, saved?.value.origin ?? intendedOrigin));
     }
     // An env key this setup does not own stops before any sign in, so the
     // refusal costs no approval and leaves the binding untouched. The check

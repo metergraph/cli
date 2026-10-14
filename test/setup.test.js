@@ -980,3 +980,23 @@ test("a crafted record cannot block setup beyond the limits the CLI writes", asy
     assert.equal(fs.existsSync(refusalFile(box)), false);
   } finally { await server.close(); }
 });
+
+test("a rerun aimed at another deployment is refused as a binding change and keeps the record", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    writeRecord(box, { state: "refused", reason: "setup_key_limit", pid: 1 });
+    const other = await startOAuthServer({ setup: true });
+    try {
+      const elsewhere = await setup(box, other, ["--url", other.origin]);
+      assert.equal(elsewhere.outcome, "conflict");
+      assert.equal(elsewhere.error.reason, "setup_binding_changed");
+    } finally { await other.close(); }
+    assert.equal(fs.existsSync(refusalFile(box)), true, "the record is kept for a correct rerun");
+    // The correct rerun reports the refusal with the saved deployment's Keys page.
+    const here = await setup(box, server);
+    assert.equal(here.error.reason, "setup_key_limit");
+    assert.equal(here.data.next_action.url, `${server.origin}/#api-keys`);
+  } finally { await server.close(); }
+});
