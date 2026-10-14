@@ -30,7 +30,7 @@
       "preset": "utc_days",
       "since": "2026-10-14T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.267044+00:00",
+      "until": "2026-10-14T16:40:16.764430+00:00",
       "until_is_request_time": true
     }
   },
@@ -69,7 +69,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.323169+00:00",
+      "until": "2026-10-14T16:40:16.787145+00:00",
       "until_is_request_time": true
     }
   },
@@ -104,7 +104,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.365378+00:00",
+      "until": "2026-10-14T16:40:16.803827+00:00",
       "until_is_request_time": true
     }
   },
@@ -143,7 +143,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.410790+00:00",
+      "until": "2026-10-14T16:40:16.822175+00:00",
       "until_is_request_time": true
     }
   },
@@ -194,7 +194,7 @@
       ],
       "limit": 50,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T16:30:57.267044+00:00"
+      "until": "2026-10-13T16:40:16.764430+00:00"
     },
     "http_status": 200,
     "mcp_arguments": {
@@ -203,7 +203,7 @@
       ],
       "limit": 50,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T16:30:57.267044+00:00"
+      "until": "2026-10-13T16:40:16.764430+00:00"
     },
     "mcp_is_error": false,
     "question": "Comparison with the prior period: the prior UTC day to the same elapsed time",
@@ -217,7 +217,7 @@
       "preset": null,
       "since": "2026-10-13T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-13T16:30:57.267044+00:00",
+      "until": "2026-10-13T16:40:16.764430+00:00",
       "until_is_request_time": false
     }
   },
@@ -252,7 +252,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.526795+00:00",
+      "until": "2026-10-14T16:40:16.877625+00:00",
       "until_is_request_time": true
     }
   },
@@ -326,7 +326,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.602995+00:00",
+      "until": "2026-10-14T16:40:16.918195+00:00",
       "until_is_request_time": true
     }
   },
@@ -361,7 +361,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.639947+00:00",
+      "until": "2026-10-14T16:40:16.936940+00:00",
       "until_is_request_time": true
     }
   },
@@ -400,7 +400,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.678399+00:00",
+      "until": "2026-10-14T16:40:16.955436+00:00",
       "until_is_request_time": true
     }
   },
@@ -435,7 +435,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.714365+00:00",
+      "until": "2026-10-14T16:40:16.972742+00:00",
       "until_is_request_time": true
     }
   },
@@ -470,7 +470,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.752806+00:00",
+      "until": "2026-10-14T16:40:16.991090+00:00",
       "until_is_request_time": true
     }
   },
@@ -507,7 +507,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.787440+00:00",
+      "until": "2026-10-14T16:40:17.008287+00:00",
       "until_is_request_time": true
     }
   },
@@ -546,7 +546,159 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.823407+00:00",
+      "until": "2026-10-14T16:40:17.026348+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "workflow-past-week",
+    "groups": 2,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "group_by": [
+        "metadata.workflow_name"
+      ],
+      "limit": 50,
+      "since": "2026-10-01T00:00:00+00:00",
+      "until": "2026-10-08T00:00:00+00:00"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "group_by": [
+        "metadata.workflow_name"
+      ],
+      "limit": 50,
+      "since": "2026-10-01T00:00:00+00:00",
+      "until": "2026-10-08T00:00:00+00:00"
+    },
+    "mcp_is_error": false,
+    "question": "A specific past week by workflow_name (and the prior week of a week-over-week)",
+    "totals": {
+      "calls": 2,
+      "cost_usd": 0.11,
+      "error_calls": 0
+    },
+    "window": {
+      "days": null,
+      "preset": null,
+      "since": "2026-10-01T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-08T00:00:00+00:00",
+      "until_is_request_time": false
+    }
+  },
+  {
+    "fixture": "workflow-week",
+    "groups": 4,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "metadata.workflow_name"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "metadata.workflow_name"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "This week by workflow_name (current window of week-over-week)",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:40:17.059435+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "day-workflow",
+    "groups": 12,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "day",
+        "metadata.workflow_name"
+      ],
+      "limit": 50
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "day",
+        "metadata.workflow_name"
+      ],
+      "limit": 50
+    },
+    "mcp_is_error": false,
+    "question": "Day by workflow_name",
+    "totals": {
+      "calls": 14,
+      "cost_usd": 3.67,
+      "error_calls": 2
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:40:17.077601+00:00",
+      "until_is_request_time": true
+    }
+  },
+  {
+    "fixture": "route-provider-workflow",
+    "groups": 1,
+    "http_equals_mcp_excluding_request_time": true,
+    "http_query": {
+      "days": 7,
+      "group_by": [
+        "provider",
+        "model",
+        "metadata.workflow_name"
+      ],
+      "limit": 50,
+      "route": "support"
+    },
+    "http_status": 200,
+    "mcp_arguments": {
+      "days": 7,
+      "group_by": [
+        "provider",
+        "model",
+        "metadata.workflow_name"
+      ],
+      "limit": 50,
+      "route": [
+        "support"
+      ]
+    },
+    "mcp_is_error": false,
+    "question": "Provider and model by workflow_name for one route",
+    "totals": {
+      "calls": 6,
+      "cost_usd": 1.9,
+      "error_calls": 1
+    },
+    "window": {
+      "days": 7,
+      "preset": "utc_days",
+      "since": "2026-10-08T00:00:00+00:00",
+      "timezone": "UTC",
+      "until": "2026-10-14T16:40:17.098075+00:00",
       "until_is_request_time": true
     }
   },
@@ -585,7 +737,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T16:30:57.855712+00:00",
+      "until": "2026-10-14T16:40:17.158229+00:00",
       "until_is_request_time": true
     }
   }

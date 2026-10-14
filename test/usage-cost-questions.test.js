@@ -521,3 +521,83 @@ test("prior windows are whole periods or the same elapsed time, in UTC", async (
   assert.equal(cut.complete, false);
   assert.ok(notices.has("comparison_incomplete"));
 });
+
+test("plain and grouped windows are labelled: rolling hours against whole UTC days", async () => {
+  await withSignedIn(async (server, box) => {
+    const plain = await usage(box, server, ["--days", "7"]);
+    assert.equal(plain.run.code, 0, plain.run.stdout);
+    assert.deepEqual(
+      [plain.result.data.result.window.kind, plain.result.data.result.window.hours, plain.result.data.result.window.aligned_to_utc_days],
+      ["rolling", 168, false],
+    );
+    const plainText = await usage(box, server, ["--days", "7"], { json: false });
+    assert.match(plainText.run.stdout, /Window +rolling 168 h ending now, .* UTC \(not aligned to UTC days/);
+    const grouped = await usage(box, server, ["--group-by", "model", "--days", "7"]);
+    assert.equal(grouped.result.data.result.window.kind, "utc_days");
+    assert.match(grouped.result.data.result.window.since, /T00:00:00/);
+    const explicit = aggregateFixture("workflow-past-week").window;
+    const past = await usage(box, server, [
+      "--group-by", "metadata.workflow_name", "--since", explicit.since.slice(0, 10), "--until", explicit.until.slice(0, 10),
+    ]);
+    assert.equal(past.result.data.result.window.kind, "explicit");
+  });
+});
+
+test("metadata.KEY combines with a past week, week over week, day, route and provider grouping", async () => {
+  await withSignedIn(async (server, box) => {
+    // A specific past week by workflow_name.
+    const week = aggregateFixture("workflow-past-week");
+    const past = await usage(box, server, [
+      "--group-by", "metadata.workflow_name", "--since", week.window.since.slice(0, 10), "--until", week.window.until.slice(0, 10),
+    ]);
+    assert.equal(past.run.code, 0, past.run.stdout);
+    const pastReport = assertEnvelope(past.result, "workflow-past-week");
+    assert.equal(pastReport.window.hours, 7 * 24);
+    assert.deepEqual(pastReport.items.map((item) => item.metadata_value).sort(), ["nightly-triage", "ticket-reply"]);
+    assert.equal(pastReport.metadata_groups.unattributed.calls, 0);
+
+    // Week over week by workflow: this UTC-day week against the 7 whole UTC
+    // days before it, with the partial-day warning.
+    const wow = await usage(box, server, ["--group-by", "metadata.workflow_name", "--days", "7", "--compare", "previous"]);
+    assert.equal(wow.run.code, 0, wow.run.stdout);
+    const wowReport = assertEnvelope(wow.result, "workflow-week");
+    const sent = server.requestsTo(AGGREGATES).slice(-2).map((request) => request.query);
+    assert.equal(sent[0].group_by, "metadata.workflow_name");
+    assert.equal(Date.parse(sent[1].since), Date.parse(week.window.since));
+    assert.equal(Date.parse(sent[1].until), Date.parse(week.window.until));
+    const ticket = wowReport.comparison.items.find((item) => item.metadata_value === "ticket-reply");
+    assert.deepEqual([ticket.current.calls, ticket.prior.calls], [6, 1]);
+    assert.equal(ticket.has_value, true);
+    // The group without a value this week has no counterpart in a complete prior week: zero there.
+    const none = wowReport.comparison.items.find((item) => item.has_value === false);
+    assert.deepEqual(none.prior, { calls: 0, error_calls: 0, cost_usd: 0 });
+    assert.equal(wowReport.comparison.partial_day_compared_with_full, true);
+    assert.ok(wow.result.data.notices.includes("partial_day_comparison"));
+    const wowText = await usage(box, server, ["--group-by", "metadata.workflow_name", "--days", "7", "--compare", "previous"], { json: false });
+    assert.match(wowText.run.stdout, /METADATA_VALUE +COST +PRIOR_COST/);
+    assert.match(wowText.run.stdout, /ticket-reply/);
+
+    // Day by workflow.
+    const daily = await usage(box, server, ["--group-by", "day,metadata.workflow_name", "--sort", "day"]);
+    assert.equal(daily.run.code, 0, daily.run.stdout);
+    assert.deepEqual(server.requestsTo(AGGREGATES).at(-1).query.group_by, "metadata.workflow_name");
+    const dailyReport = assertEnvelope(daily.result, "day-workflow");
+    const days = dailyReport.items.map((item) => item.day);
+    assert.deepEqual(days, [...days].sort());
+    assert.ok(dailyReport.items.every((item) => typeof item.day === "string" && item.metadata_key === "workflow_name"));
+    assert.ok(dailyReport.items.some((item) => item.partial_day));
+    const dailyText = await usage(box, server, ["--group-by", "day,metadata.workflow_name"], { json: false });
+    assert.match(dailyText.run.stdout, /DAY_UTC +METADATA_VALUE/);
+
+    // One route, by provider and model and workflow.
+    const routed = await usage(box, server, [
+      "--route", "support", "--group-by", "provider,model,metadata.workflow_name",
+    ]);
+    assert.equal(routed.run.code, 0, routed.run.stdout);
+    const routedReport = assertEnvelope(routed.result, "route-provider-workflow");
+    assert.deepEqual(routedReport.items.map((item) => [item.provider, item.model, item.metadata_value]), [
+      ["provider-a", "model-large", "ticket-reply"],
+    ]);
+    assert.equal(routedReport.filters.route, 1);
+  });
+});

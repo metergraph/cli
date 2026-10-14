@@ -325,7 +325,10 @@ function resultLines(command, report, lines) {
     return;
   }
   if (command === "usage") {
-    lines.push(`Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`);
+    lines.push(
+      `Window: rolling ${report.window.hours} h ending now, ${report.window.since} to ${report.window.until} UTC ` +
+        "(not aligned to UTC days: the first and last dates are partial; --today, --since or --group-by use UTC days)",
+    );
     if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
     lines.push("");
     if (report.empty) {

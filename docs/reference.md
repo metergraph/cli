@@ -711,13 +711,16 @@ there. Nothing is read.
 | Cost by a prompt metadata key | `metergraph usage --group-by metadata.prompt_id --days 7` |
 | Today against yesterday | `metergraph usage --group-by route --today --compare previous` |
 
-Windows are UTC. `--days N` is the current UTC day so far and the N - 1 whole UTC days
-before it, ending at the request time; `--today` is `--days 1`. `--since` (inclusive)
+Windows are UTC. In grouped usage, `--days N` is the current UTC day so far and the N - 1
+whole UTC days before it, ending at the request time (`window.kind: "utc_days"`); plain
+`usage --days N` instead reads the last N x 24 hours, rolling and not aligned to UTC days
+(`window.kind: "rolling"`, `aligned_to_utc_days: false`), and its text output says so; `--today` is `--days 1`. `--since` (inclusive)
 and `--until` (exclusive, default now) take a UTC date (`YYYY-MM-DD`, 00:00 UTC) or an
 ISO 8601 timestamp with `Z` or an offset; a timestamp without one exits 2, so a local
 time is never read as UTC. A window spans at most 90 days. `result.window` echoes
 `since`, `until`, `timezone: "UTC"`, `preset`, `until_is_request_time`, `hours` and
-`partial_days`, the UTC days the window covers only in part. A `day` group in
+`partial_days`, the UTC days the window covers only in part, and `kind` (`utc_days` or
+`explicit`). A `day` group in
 `partial_days` has `partial_day: true`, and the `current_day_partial` notice is set
 when the window ends part way through today. A window, grouping or filter the service
 did not apply as asked exits 11 (`window_mismatch`, `group_by_mismatch`,

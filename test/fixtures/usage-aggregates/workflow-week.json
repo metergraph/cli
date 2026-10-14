@@ -1,0 +1,236 @@
+{
+  "attribution": {
+    "cost_basis": "call",
+    "level": "call",
+    "mixed_model_rows": 0,
+    "mixed_provider_rows": 0,
+    "per_provider_exact": true
+  },
+  "completeness": {
+    "complete": true,
+    "from": "2026-10-08T00:00:00+00:00",
+    "limit": 50,
+    "mode": "top_n",
+    "returned": 4,
+    "to": "2026-10-14T16:40:17.059435+00:00"
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T16:40:17.060792+00:00",
+    "completeness": "complete",
+    "effective_window": {
+      "days": 6.694642,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T16:40:17.059435+00:00"
+    },
+    "filters": {
+      "environments": null,
+      "metadata": [],
+      "model": null,
+      "provider": null,
+      "route": null
+    },
+    "next_cursor": null,
+    "reasons": [
+      "metadata_key_missing",
+      "pricing_unknown"
+    ],
+    "requested_window": {
+      "days": 6.694642,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T16:40:17.059435+00:00"
+    },
+    "rows": {
+      "limit": 50,
+      "matched": 4,
+      "ordering": "cost_usd desc, calls desc, group key asc",
+      "returned": 4,
+      "shape": "top_n",
+      "truncated": false
+    },
+    "totals_scope": "population"
+  },
+  "evidence": {
+    "complete": true,
+    "rows": 4,
+    "sources": [
+      "calls",
+      "ingest_batches"
+    ]
+  },
+  "group_by": [
+    "metadata.workflow_name"
+  ],
+  "items": [
+    {
+      "cache_read_tokens": 60,
+      "cache_write_tokens": 30,
+      "calls": 6,
+      "cost_per_call_usd": 0.31666667,
+      "cost_usd": 1.9,
+      "error_calls": 1,
+      "input_tokens": 600,
+      "latency": {
+        "avg_ms": 1092,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 1450,
+        "samples": 6
+      },
+      "metadata.workflow_name": "ticket-reply",
+      "output_tokens": 300,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 6,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 12
+    },
+    {
+      "cache_read_tokens": 30,
+      "cache_write_tokens": 15,
+      "calls": 3,
+      "cost_per_call_usd": 0.56666667,
+      "cost_usd": 1.7,
+      "error_calls": 0,
+      "input_tokens": 300,
+      "latency": {
+        "avg_ms": 2333,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 2950,
+        "samples": 3
+      },
+      "metadata.workflow_name": "research-digest",
+      "output_tokens": 150,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 3,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 6
+    },
+    {
+      "cache_read_tokens": 40,
+      "cache_write_tokens": 20,
+      "calls": 4,
+      "cost_per_call_usd": 0.0175,
+      "cost_usd": 0.07,
+      "error_calls": 1,
+      "input_tokens": 400,
+      "latency": {
+        "avg_ms": 262,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 295,
+        "samples": 4
+      },
+      "metadata.workflow_name": "nightly-triage",
+      "output_tokens": 200,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 4,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 8
+    },
+    {
+      "cache_read_tokens": 10,
+      "cache_write_tokens": 5,
+      "calls": 1,
+      "cost_per_call_usd": 0.0,
+      "cost_usd": 0.0,
+      "error_calls": 0,
+      "input_tokens": 100,
+      "latency": {
+        "avg_ms": 1900,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 1975,
+        "samples": 1
+      },
+      "metadata.workflow_name": null,
+      "output_tokens": 50,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 0,
+        "priced_calls": 0,
+        "unknown_calls": 1,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 2
+    }
+  ],
+  "metadata_groups": {
+    "key": "workflow_name",
+    "unlisted": {
+      "ineligible_value": {
+        "calls": 0,
+        "cost_usd": 0.0
+      },
+      "missing_key": {
+        "calls": 1,
+        "cost_usd": 0.0
+      },
+      "other_values": {
+        "calls": 0,
+        "cost_usd": 0.0,
+        "groups": 0
+      }
+    }
+  },
+  "pricing": {
+    "cost": "lower_bound",
+    "partial_calls": 0,
+    "priced_calls": 13,
+    "unknown_calls": 1,
+    "unpriced_calls": 0,
+    "zero_cost_calls": 0
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T16:40:17.060792+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "totals": {
+    "cache_read_tokens": 140,
+    "cache_write_tokens": 70,
+    "calls": 14,
+    "cost_per_call_usd": 0.26214286,
+    "cost_usd": 3.67,
+    "error_calls": 2,
+    "input_tokens": 1400,
+    "latency": {
+      "avg_ms": 1179,
+      "p95_method": "histogram_estimate",
+      "p95_ms": 2767,
+      "samples": 14
+    },
+    "output_tokens": 700,
+    "reasoning_tokens": 28,
+    "scope": "population"
+  },
+  "warnings": [
+    {
+      "code": "pricing_incomplete",
+      "message": "Some calls have missing, partial or unknown pricing; cost_usd is a lower bound."
+    }
+  ],
+  "window": {
+    "days": 7,
+    "preset": "utc_days",
+    "since": "2026-10-08T00:00:00+00:00",
+    "timezone": "UTC",
+    "until": "2026-10-14T16:40:17.059435+00:00",
+    "until_is_request_time": true
+  }
+}

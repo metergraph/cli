@@ -283,7 +283,8 @@ export const READ_HELP = Object.freeze([
         value: "N",
         summary:
           `Window, 1 to ${READ_MAX_DAYS}. Default ${READ_DEFAULT_DAYS}. Grouped: the current UTC day so far and the ` +
-          "N - 1 whole UTC days before it. Otherwise the last N days.",
+          "N - 1 whole UTC days before it (window.kind utc_days). Otherwise the last N x 24 hours, rolling and not " +
+          "aligned to UTC days (window.kind rolling).",
       },
       { name: "--today", value: null, summary: "Grouped: the current UTC day so far (--days 1)." },
       {

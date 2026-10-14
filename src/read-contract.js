@@ -544,6 +544,9 @@ function usageWindow(value, request, reason) {
     partialDays.push(new Date(lastDay).toISOString().slice(0, 10));
   }
   return {
+    // utc_days: from 00:00 UTC, days - 1 whole UTC days before today, to now.
+    // explicit: exactly [since, until).
+    kind: value.preset === "utc_days" ? "utc_days" : "explicit",
     timezone: "UTC",
     preset: value.preset,
     days: value.days,
@@ -993,7 +996,10 @@ export function usageReport(body, ctx, request, notices) {
     if (body.truncated) notices.add("rows_truncated");
     return {
       provenance: origin,
-      window: span,
+      // The route-by-day read's window is the last days x 24 hours, ending
+      // now: it is not aligned to UTC days, so its first and last dates are
+      // partial. Grouped usage windows are labelled "utc_days" or "explicit".
+      window: { ...span, kind: "rolling", timezone: "UTC", hours: span.days * 24, aligned_to_utc_days: false },
       evidence: proof,
       warnings: codes,
       content_included: false,
