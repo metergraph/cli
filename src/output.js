@@ -116,6 +116,20 @@ const AGENT_APPROVAL_HELP = [
   "and after they approve, run the same command again to continue.",
 ];
 
+// One recommended sequence per place an agent runs. login and setup detect
+// SSH, cloud workspaces and CI and answer with a structured next_action.
+const AGENT_PATH_HELP = [
+  "Where the agent runs:",
+  "  Local shell or local container   setup --runtime local --client C --json --no-browser,",
+  "                                   rerun after each approval, then status --json",
+  "  SSH, cloud workspace or CI       A person creates a coding-agent key with Metadata access",
+  "                                   on the Keys page and saves it as the secret",
+  "                                   METERGRAPH_AGENT_TOKEN; then status --json, usage --json",
+  "  Metadata key, no saved sign in   The same: reads use METERGRAPH_AGENT_TOKEN, or",
+  "                                   --agent-token-file PATH, after verifying the workspace",
+  "Never pass a key as an argument. Debug and Replay keys are refused, not reduced.",
+];
+
 const CONFIG_DIR_OPTION = {
   name: "--config-dir",
   value: "DIR",
@@ -198,6 +212,25 @@ const READ_BASE_OPTIONS = [
       `Total time for every request of the command, ${READ_MIN_TIMEOUT_MS} to ${READ_MAX_TIMEOUT_MS}. ` +
       `Default ${READ_DEFAULT_TIMEOUT_MS}.`,
   },
+  {
+    name: "--url",
+    value: "ORIGIN",
+    summary:
+      "Where a Metadata key is sent when the project is not bound. Default METERGRAPH_URL, else the hosted service. " +
+      "A bound project's origin cannot be changed here.",
+  },
+  {
+    name: "--workspace",
+    value: "UUID",
+    summary: "The workspace the credential must be for. Without it, an unbound key's own workspace is used.",
+  },
+  {
+    name: "--agent-token-file",
+    value: "PATH",
+    summary:
+      "Private (0600) file holding a coding-agent key with Metadata access. Used instead of a saved sign in. " +
+      "Without it, METERGRAPH_AGENT_TOKEN is used when this project has no saved sign in on this machine.",
+  },
 ];
 const DAYS_OPTION = {
   name: "--days",
@@ -209,13 +242,15 @@ const limitOption = (fallback, extra = "") => ({
   value: "N",
   summary: `Rows to return, 1 to ${READ_MAX_LIMIT}. Default ${fallback}.${extra}`,
 });
-const READ_BASE_USAGE = "[--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
+const READ_BASE_USAGE =
+  "[--url ORIGIN] [--workspace UUID] [--agent-token-file PATH] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
 const REFUSED_NOTE =
   "--environment, --workload, --since, --until, --sql, --query, --content, --include-content, --debug and --replay " +
   "are recognized and refused with exit code 6 before any request.";
 
-// The read commands. Each uses the project's saved Metadata grant, makes GET
-// requests to fixed paths on the bound origin and never opens a browser.
+// The read commands. Each uses the project's saved Metadata grant or a
+// coding-agent key with Metadata access, makes GET requests to fixed paths on
+// the verified origin and never opens a browser.
 export const READ_HELP = Object.freeze([
   {
     name: "status",
@@ -479,18 +514,22 @@ export function helpText(topic, style = PLAIN) {
       "",
       entry.summary,
       "",
-      "Uses this project's saved Metadata grant (see \"metergraph help login\"). Sends GET requests only, to",
-      "fixed paths on the bound origin, follows no redirects and reads bounded responses. Never opens a",
-      "browser, signs in, writes project files, reads retained content, replays or calls a model provider.",
-      "It may refresh its own saved grant, and the service may record the access (for example last used",
-      "times); it never changes workspace configuration or telemetry and never sends ingest data.",
+      "Uses this project's saved Metadata grant (see \"metergraph help login\"), or, where there is none on",
+      "this machine, a coding-agent key with Metadata access from METERGRAPH_AGENT_TOKEN or",
+      "--agent-token-file. A key is sent only after the origin answers as a supported Metergraph service,",
+      "and nothing is read until the service shows exactly the Metadata scope, no content access and the",
+      "expected workspace. Sends GET requests only, to fixed paths on that origin, follows no redirects and",
+      "reads bounded responses. Never opens a browser, signs in, writes project files or the key, reads",
+      "retained content, replays or calls a model provider. It may refresh its own saved grant, and the",
+      "service may record the access (for example last used times); it never changes workspace",
+      "configuration or telemetry and never sends ingest data.",
       REFUSED_NOTE,
       "",
       "Options:",
     );
     for (const option of entry.options) {
       const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
+      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
     }
   } else if (topic === "skill") {
     lines.push(
@@ -580,6 +619,8 @@ export function helpText(topic, style = PLAIN) {
       'Run "metergraph help login" or "metergraph help logout" for sign in options.',
       'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
+      "",
+      ...AGENT_PATH_HELP,
     );
   }
   lines.push("", "Exit codes:");
@@ -907,13 +948,19 @@ export function authText(result, message, style = PLAIN) {
   if (!result.ok) lines.push(...paragraph(style, message), "");
   const next = report.next_action;
   const guide = next?.url ?? null;
+  // A remote handoff names the Keys page where a person creates the
+  // Metadata key the agent then reads from METERGRAPH_AGENT_TOKEN.
+  const keys = next?.kind === "use_agent_key"
+    ? next.person_steps.find((step) => step.action === "create_metadata_key")?.url ?? null
+    : null;
   if (reason === "runtime_not_supported") {
     lines.push(...steps(style, [
       ["Signing in from this machine?", style.bold("metergraph login --runtime local")],
       ["Connecting a cloud agent?", guide],
+      ["Metadata key for the agent", keys],
     ]));
   } else {
-    lines.push(...steps(style, [["", next?.message ?? null], ["Connection guide", guide]]));
+    lines.push(...steps(style, [["", next?.message ?? null], ["Keys page", keys], ["Connection guide", guide]]));
   }
   return render(lines);
 }

@@ -23,6 +23,10 @@ export const LOCAL_ENV = Object.freeze({
   GITPOD_WORKSPACE_ID: "",
   CLOUD_SHELL: "",
   METERGRAPH_CONFIG_DIR: "",
+  // A Metadata key or origin in the developer's own shell must not change
+  // which credential a test uses.
+  METERGRAPH_AGENT_TOKEN: "",
+  METERGRAPH_URL: "",
 });
 
 export function sandboxes(workDir) {
