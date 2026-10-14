@@ -116,14 +116,72 @@ restate what you are starting and proceed. Otherwise ask and wait.
    the returned run instead of starting another. On `precondition_failed`,
    report the `reason` and stop.
 4. Poll `metergraph_get_analysis_run` with the `run_id` at a modest interval
-   (about every 30 to 60 seconds) and tell the user the status as it changes.
-   Do not restart a run because it is slow. Stop polling when the status is
-   final, and say if it failed, with its `error_code`.
+   (about every 30 to 60 seconds). Do not restart a run because it is slow.
+   Stop polling when the status is final, and say if it failed, with its
+   `error_code`.
+5. After the start and after every poll, write a progress report in the
+   shape shown under "Show run progress" before you wait, set a timer or
+   schedule the next check. The start response already carries
+   `run.stages`, so the reply that starts the run has one too. A one-line
+   status such as "The run is exporting; I'll check again in a minute" is
+   not a progress report. The graphic is required every time.
+
+## Show run progress
+
+Draw the stages from `run.stages.items`, in the order returned. Use each
+item's `state` exactly as given. Never decide a stage's state from `status`,
+trace names or the report.
+
+Render one line with a marker per state: `✓` completed, `●` current, `✗`
+failed, `–` skipped, `○` not started. For example:
+
+```
+✓ queued → ✓ exporting → ✓ analyzing → ● classified → ○ importing → ○ completed
+```
+
+If the client can draw a richer inline graphic, you may use one. Keep the
+same order and states, and make the states distinct without relying on
+colour alone.
+
+Under the graphic, always write a plain-text line that says the same thing:
+the stages that are done, the current stage, and the stages still to come.
+
+Every check-in, including the reply that starts the run, has this shape:
+
+````
+Run 3f2a… at 19:34 UTC:
+
+```
+✓ queued → ✓ exporting → ✓ analyzing → ● classified → ○ importing → ○ completed
+```
+Done: queued, exporting, analyzing. Now: classified, since 19:23 UTC
+(11 minutes, unchanged since the last check). Still to come: importing,
+completed. No error, no report yet. Next check in about a minute.
+````
+
+- **Time in the current stage.** Take it from the current item's
+  `entered_at` and the response's `provenance.generated_at`, which is the
+  check time. Say when you last checked, and say plainly when the stage has
+  not changed since the last check. Never give a percentage, an ETA or a
+  time remaining. The run data supports neither.
+- **Finished.** On `completed`, draw the items as returned, like any other
+  check: the stages the run passed through are `✓`, and a stage it never
+  entered stays `–` skipped. When `report.available` is true, read the
+  report (step 6) and give any link it returns exactly as given. When it is
+  false, say plainly that no report exists yet.
+- **Failed.** On `failed`, mark the stage it stopped in with `✗`, give the
+  `error_code`, and leave the later stages `○`.
+- **No stage data.** When `run.stages.available` is false, or `stages` is
+  missing, show no graphic. Say the stage breakdown is unavailable for this
+  run (`unavailable_reason`, when present). Report the `status`, the
+  timestamps, the `error_code` if the run failed, and whether a report
+  exists. Never mark stages complete by inference.
 
 ## 6. Read the report and recommend
 
 When `report.available` is true, call `metergraph_get_report` with
-`report.analysis_id`. Use the summary format and report link in
+`report.analysis_id`. While it is false, do not look for a report under
+another or guessed ID. Use the summary format and report link in
 `metergraph-report` when it is installed. Present:
 
 - the report `outcome`: `opportunities`, `no_opportunities`,

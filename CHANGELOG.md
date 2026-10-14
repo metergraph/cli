@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+- Refresh the npm setup skill, Python setup skill and ten-skill npm pack from
+  `metergraph/skills` at `87e315cf8d9c781a921a8e637aec7de929dfabad`, including
+  remote-agent setup, bounded CLI-first cost investigation and analysis progress.
 - `setup` handles the service's ingest-key issuance budget. A short `Retry-After` is waited out
   and the same approval is redeemed again, so the person does not approve twice. A budget that
   stays exhausted exits `rate_limited` with a `retry_later` next action, and a workspace at its
