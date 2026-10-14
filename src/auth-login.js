@@ -45,6 +45,10 @@ import { deadline, trapSignals } from "./transport.js";
 // exists, while the listener keeps waiting. The caller prints it as the one
 // JSON line, so an agent can hand the URL to a person; approval-handoff.js
 // lets the agent's command exit then while this process keeps waiting.
+// options.ingestSetup, given only by setup, is { familyId, supported(origin,
+// profile, signal) }. When the service supports it, the sign-in consent also
+// approves the first ingest key for that family, and an ok result carries the
+// unredeemed receipt as result.ingestSetup (never in data).
 
 export async function runLogin(options, progress) {
   const ctx = {
@@ -160,7 +164,7 @@ export async function runLogin(options, progress) {
     if (bound !== null && bound.credential_slot !== slot) {
       ctx.previousGrant = await retireSlot(store, bound);
     }
-    return end("ok", null, CONNECTED);
+    return { ...end("ok", null, CONNECTED), ingestSetup: flow.ingestSetup };
   } catch (error) {
     if (error instanceof Stop) return end(error.outcome, error.reason);
     throw error;
@@ -189,6 +193,16 @@ async function authorize(options, ctx, cancel, progress, announce) {
   if (!discovered.ok) return httpFailure(discovered, cancel);
   const { endpoints, requireIss, offeredClientId } = discovered;
 
+  // Setup asks this consent to approve the first ingest key too, but only
+  // when the service says it can. Otherwise sign in is unchanged and setup
+  // asks for its own approval afterwards.
+  let setupPkce = null;
+  if (options.ingestSetup) {
+    limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
+    if (await options.ingestSetup.supported(ctx.origin, ctx.profile, limit.signal)) setupPkce = newPkce();
+    if (cancel.aborted) return fail("authorization_failed", "cancelled");
+  }
+
   const listener = await startCallbackListener();
   let callback;
   let clientId;
@@ -211,6 +225,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
       requireIss,
       timeoutMs: options.timeoutMs,
       cancel,
+      acceptSetupCode: setupPkce !== null,
     });
     const url = authorizationUrl(endpoints, {
       clientId,
@@ -218,15 +233,18 @@ async function authorize(options, ctx, cancel, progress, announce) {
       state: pkce.state,
       challenge: pkce.challenge,
       signup: options.signup,
+      ingestSetup: setupPkce === null ? null : { familyId: options.ingestSetup.familyId, challenge: setupPkce.challenge },
     });
+    const purpose = setupPkce === null ? "sign in with Metadata access"
+      : "sign in with Metadata access and approve an ingest-only key for this project";
     const seconds = Math.round(options.timeoutMs / 1000);
     // A wait armed after Ctrl+C has already settled; do not show the URL.
     if (cancel.aborted) return fail("authorization_failed", "cancelled");
     if (options.noBrowser && announce) {
-      announce(openUrl(url, seconds, "sign in with Metadata access"));
+      announce(openUrl(url, seconds, purpose));
     } else if (options.noBrowser) {
       progress(
-        "Open this URL in a browser on this machine to sign in:\n" +
+        `Open this URL in a browser on this machine to ${purpose}:\n` +
           `${url}\n` +
           `Waiting up to ${seconds} seconds for the browser. Press Ctrl+C to cancel.`,
       );
@@ -243,7 +261,10 @@ async function authorize(options, ctx, cancel, progress, announce) {
             : {}),
         });
       }
-      progress(`Opened your browser to sign in. Waiting up to ${seconds} seconds. Press Ctrl+C to cancel.`);
+      progress(setupPkce === null
+        ? `Opened your browser to sign in. Waiting up to ${seconds} seconds. Press Ctrl+C to cancel.`
+        : "Opened your browser to sign in and approve this project's ingest key in one step. " +
+          `Waiting up to ${seconds} seconds. Press Ctrl+C to cancel.`);
     }
     callback = await pending;
   } finally {
@@ -283,7 +304,15 @@ async function authorize(options, ctx, cancel, progress, announce) {
     return rejectGrant(verified.outcome, verified.reason);
   }
   ctx.workspaceId = grant.tenant;
-  return { ok: true, endpoints, clientId, grant };
+  // The receipt is a separate credential: setup redeems it with its own
+  // verifier, for the family it named, after binding this sign in. A service
+  // that showed only the sign in returns no receipt, and setup falls back to
+  // its own approval.
+  const ingestSetup = setupPkce !== null && callback.setupCode
+    ? { familyId: options.ingestSetup.familyId, code: callback.setupCode, verifier: setupPkce.verifier,
+        clientId, redirectUri: listener.redirectUri }
+    : null;
+  return { ok: true, endpoints, clientId, grant, ingestSetup };
 }
 
 export async function runLogout(options) {

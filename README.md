@@ -21,7 +21,8 @@ Published on npm as `latest`. See the [changelog](https://github.com/metergraph/
 ## Quickstart
 
 **1. Set up the project.** Run this in your project directory. It opens your browser to
-sign in and choose a workspace, asks a workspace member to approve an ingest-only key,
+sign in and choose a workspace, asks a workspace member to approve an ingest-only key
+(on the same page as sign in, where the service supports it),
 writes `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL` to a private `.env`, and
 installs the skill for your coding agent.
 

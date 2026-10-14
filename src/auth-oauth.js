@@ -225,7 +225,11 @@ export function newPkce() {
 // The authorization URL the browser opens. With signup, the browser starts
 // at the service's own signup page, which returns to the same authorization
 // request on this origin after the account exists.
-export function authorizationUrl(endpoints, { clientId, redirectUri, state, challenge, signup }) {
+// ingestSetup, when given as { familyId, challenge }, asks this one consent to
+// also approve the first ingest key for a new setup family. The service
+// returns that receipt next to the code; it is redeemed separately with its
+// own PKCE verifier.
+export function authorizationUrl(endpoints, { clientId, redirectUri, state, challenge, signup, ingestSetup = null }) {
   const url = new URL(endpoints.authorization);
   url.search = new URLSearchParams({
     response_type: "code",
@@ -236,6 +240,11 @@ export function authorizationUrl(endpoints, { clientId, redirectUri, state, chal
     code_challenge: challenge,
     code_challenge_method: "S256",
     resource: endpoints.resource,
+    ...(ingestSetup === null ? {} : {
+      ingest_setup: "1",
+      ingest_setup_family_id: ingestSetup.familyId,
+      ingest_setup_code_challenge: ingestSetup.challenge,
+    }),
   }).toString();
   if (!signup) return url.href;
   const entry = new URL(`${endpoints.origin}${AUTH_PATHS.signup}`);

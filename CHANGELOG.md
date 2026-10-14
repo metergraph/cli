@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+- A first `setup` that has to sign in now needs one browser approval instead of two
+  when the service supports it: the sign-in consent also approves the project's
+  ingest key and names both. The sign-in grant and the ingest key stay separate
+  credentials with separate PKCE verifiers and separate revocation. Services without
+  support, projects already signed in, `--repair` and replacement keep the separate
+  ingest-only approval. With `--json --no-browser`, a first setup then takes two
+  runs instead of three.
 - `usage` and `traces` carry the service's coverage, pricing and cost attribution
   evidence when it is reported: requested and read window, completeness with reasons,
   whole-window totals separate from the returned rows, known zero prices apart from
