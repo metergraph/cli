@@ -819,7 +819,7 @@ test("setup stops as rate_limited with a retry next action when the budget stays
 });
 
 test("setup does not wait out a long or missing Retry-After", async () => {
-  for (const retryAfter of ["600", "soon"]) {
+  for (const retryAfter of ["600", "soon", "60junk", "1.5", "-1", ""]) {
     const server = await startOAuthServer({ setup: true, setupSlowDown: 5, setupRetryAfter: retryAfter });
     try {
       const box = boxFor();
@@ -845,5 +845,59 @@ test("the active-key cap stops setup with the Keys page and issues nothing", asy
     assert.match(result.data.next_action.message, /Revoke unused CLI setup keys on the Keys page/);
     assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 1);
     assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});
+
+test("a --json --no-browser waiter's budget refusal is reported on the rerun instead of a new approval", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    const first = await agentSetup(box, server);
+    const signIn = assertAnnounced(first, server);
+    assert.equal(await completeInBrowser(signIn.href), 200);
+    await until(() => fs.existsSync(path.join(box.project, ".metergraph", "project.json")), "the waiter to sign in");
+    const second = await agentSetup(box, server);
+    const approval = assertAnnounced(second, server);
+    assert.equal(await completeInBrowser(approval.href), 200);
+    // The waiter's redemption is refused at the cap after the command exited.
+    const refusal = path.join(box.project, ".metergraph", "setup-refusal.json");
+    await until(() => fs.existsSync(refusal), "the waiter to record the refusal");
+    assert.ok(!fs.readFileSync(refusal, "utf8").includes("mg"), "the record holds no credential");
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+
+    // The agent's rerun reports the refusal and opens no new approval.
+    const third = await agentSetup(box, server);
+    assert.equal(third.result.outcome, "conflict");
+    assert.equal(third.result.error.reason, "setup_key_limit");
+    assert.equal(third.result.data.next_action.kind, "revoke_keys");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+
+    // After the person revokes keys, the next rerun asks for a new approval.
+    server.behavior.setupKeyLimit = false;
+    const fourth = await agentSetup(box, server);
+    assert.equal(assertAnnounced(fourth, server).pathname, "/v1/cli/setup/authorize");
+    assert.equal(fs.existsSync(refusal), false);
+  } finally { await server.close(); }
+});
+
+test("a recorded rate refusal is reported until its retry time, then setup proceeds", async () => {
+  const server = await startOAuthServer({ setup: true, setupSlowDown: 1, setupRetryAfter: "600" });
+  try {
+    const box = boxFor();
+    const refused = await setup(box, server, ["--url", server.origin]);
+    assert.equal(refused.outcome, "rate_limited");
+    const refusal = path.join(box.project, ".metergraph", "setup-refusal.json");
+    const record = JSON.parse(fs.readFileSync(refusal, "utf8"));
+    assert.equal(record.reason, "setup_rate_limited");
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    const again = await setup(box, server);
+    assert.equal(again.outcome, "rate_limited");
+    assert.ok(again.data.next_action.retry_after_seconds > 0 && again.data.next_action.retry_after_seconds <= 60);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+    // Once the retry time has passed, setup asks for a new approval and completes.
+    fs.writeFileSync(refusal, JSON.stringify({ ...record, retry_at: new Date(Date.now() - 1000).toISOString() }));
+    const done = await setup(box, server);
+    assert.equal(done.outcome, "ok");
+    assert.equal(fs.existsSync(refusal), false);
   } finally { await server.close(); }
 });

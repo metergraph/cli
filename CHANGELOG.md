@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+- A budget refusal met by the `--json --no-browser` background waiter is no longer lost: setup
+  records it in `.metergraph/setup-refusal.json`, and the agent's rerun reports `retry_later` or
+  `revoke_keys` instead of asking the person for another approval at once.
+- Setup treats a partially numeric `Retry-After` (such as `60junk` or `1.5`) as unusable and does not
+  wait on it.
 - `setup` handles the service's ingest-key issuance budget. A short `Retry-After` is waited out
   and the same approval is redeemed again, so the person does not approve twice. A budget that
   stays exhausted exits `rate_limited` with a `retry_later` next action, and a workspace at its

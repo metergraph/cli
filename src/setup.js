@@ -13,6 +13,7 @@ import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-e
 import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
 import { runSkill } from "./skill.js";
 import { handoffPages } from "./environment.js";
+import { REFUSAL_REASONS, clearSetupRefusal, pendingRefusal, writeSetupRefusal } from "./setup-refusal.js";
 import { ensureRepositoryIdentity, envRepository } from "./repository-identity.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
@@ -197,6 +198,14 @@ export async function runSetup(options, progress = () => {}) {
     // must open an approval URL, unless the sign in approved the key too. A
     // run that already announced its sign in URL has used its one JSON line,
     // so it stops here and the rerun continues.
+    // A budget refusal of this family's last redemption is reported, not
+    // answered with a new approval at once. It matters most for --json
+    // --no-browser, whose waiter hit the refusal after the command exited.
+    const refused = previous === null ? null : pendingRefusal(root, previous.value.family_id);
+    if (refused !== null) {
+      return stop(refused.reason === "setup_key_limit" ? "conflict" : "rate_limited", refused.reason,
+        "delivery_pending", redeemNext(refused, origin));
+    }
     if (announced && combined === null) return stop("action_required", "browser_approval_required", "approval_pending");
     const setup = await discoverSetup(origin, profile, trap.signal);
     if (!setup.ok) return stop(setup.outcome, setup.reason);
@@ -235,7 +244,12 @@ export async function runSetup(options, progress = () => {}) {
     const redeemed = await redeem(origin, { code: approval.code, client_id: approval.clientId,
       redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal, progress);
-    if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
+    if (!redeemed.ok) {
+      if (REFUSAL_REASONS.includes(redeemed.reason)) {
+        writeSetupRefusal(root, state.family_id, redeemed.reason, redeemed.retryAfter ?? null);
+      }
+      return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
+    }
     const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: origin, signal: trap.signal });
     const checked = await checkCredential(origin, redeemed.token, state, profile, trap.signal);
     if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
@@ -243,6 +257,7 @@ export async function runSetup(options, progress = () => {}) {
     if (!ack.ok) return stop(ack.outcome, ack.reason, "delivery_pending");
     credentialVerified = true;
     writeSetupState(root, withSetupState(previous.value, { key_id: redeemed.keyId, phase: "delivered" }), previous);
+    clearSetupRefusal(root);
     return finishSkill(root, options, written.receipt.file);
   } catch (error) {
     if (error instanceof Stop) return stop(error.outcome, error.reason);
@@ -403,11 +418,16 @@ async function redeem(origin, form, profile, cancel, progress = () => {}) {
 }
 
 // Seconds from Retry-After (or the body's retry_after_seconds), 1 to 60, or
-// null when the service gave no usable delay.
+// null when the service gave no usable delay. The header must be whole
+// digits: "60junk" or "1.5" is unusable, as on the read path.
+const RETRY_AFTER = /^[0-9]{1,6}$/;
+
 function retryAfterSeconds(response) {
-  const header = Number.parseInt(String(response.headers?.["retry-after"] ?? ""), 10);
+  const raw = response.headers?.["retry-after"];
+  const header = typeof raw === "string" && RETRY_AFTER.test(raw.trim()) ? Number(raw.trim()) : null;
+  if (raw !== undefined && header === null) return null;
   const body = parseJsonObject(response)?.retry_after_seconds;
-  const value = Number.isInteger(header) ? header : Number.isInteger(body) ? body : null;
+  const value = header !== null ? header : Number.isInteger(body) ? body : null;
   return value !== null && value >= 1 && value <= MAX_RETRY_AFTER_SECONDS ? value : null;
 }
 
