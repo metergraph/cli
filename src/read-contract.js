@@ -108,8 +108,19 @@ const isObject = (value) => value !== null && typeof value === "object" && !Arra
 const isCount = (value) => Number.isSafeInteger(value) && value >= 0;
 const isAmount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 const isToken = (value) => typeof value === "string" && TOKEN.test(value);
-const isTimestamp = (value) =>
-  typeof value === "string" && value.length <= 40 && TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
+// An ISO 8601 timestamp with a real calendar date and clock time; the parser
+// would roll 2026-02-29 or 24:00 over to another instant.
+const isTimestamp = (value) => {
+  if (typeof value !== "string" || value.length > 40 || !TIMESTAMP.test(value)) return false;
+  if (!Number.isFinite(Date.parse(value))) return false;
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) {
+    return false;
+  }
+  const [hours, minutes, seconds] = value.slice(11, 19).split(":").map(Number);
+  return hours <= 23 && minutes <= 59 && seconds <= 59;
+};
 // A real calendar date: the parser rolls 2026-02-30 over to March, so the
 // parsed date must print back as the same string.
 const isDate = (value) => {
@@ -720,7 +731,7 @@ function checkUsageFilters(raw, request, notices) {
 // past the limit (other_values), calls without the key (missing_key) and
 // calls with a non-string or oversize value (ineligible_value) add up to the
 // population exactly; a document where they do not is refused.
-function metadataGroupsOf(value, items, population, dimension, reason) {
+function metadataGroupsOf(value, items, population, dimension, reason, { truncated, matched }) {
   const key = dimension.slice(METADATA_DIMENSION.length);
   const bucket = (entry, withGroups = false) => {
     if (!isObject(entry) || !isCount(entry.calls) || !isAmount(entry.cost_usd) || (withGroups && !isCount(entry.groups))) {
@@ -738,7 +749,8 @@ function metadataGroupsOf(value, items, population, dimension, reason) {
     missing_key: bucket(value.unlisted.missing_key),
     ineligible_value: bucket(value.unlisted.ineligible_value),
   };
-  const round = (amount) => Math.round(amount * 1e6) / 1e6;
+  // The service's eight-decimal precision, so a tiny cost never reads as zero.
+  const round = (amount) => Math.round(amount * 1e8) / 1e8;
   const valued = items.filter((item) => item.has_value);
   const listed = {
     calls: valued.reduce((sum, item) => sum + item.calls, 0),
@@ -750,6 +762,18 @@ function metadataGroupsOf(value, items, population, dimension, reason) {
     listed.calls + unlisted.other_values.calls + unlisted.missing_key.calls + unlisted.ineligible_value.calls !==
       population.calls ||
     Math.abs(listed.cost_usd + bucketCost - population.cost_usd) > costTolerance(items.length + 3)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  // Every group has calls, so unlisted values and unlisted calls come
+  // together; none exist when nothing was cut, and never more than the
+  // matched groups that were not returned.
+  const other = unlisted.other_values;
+  if (
+    (other.groups === 0) !== (other.calls === 0) ||
+    (other.calls === 0 && other.cost_usd !== 0) ||
+    (!truncated && other.groups !== 0) ||
+    (matched !== null && other.groups > matched - items.length)
   ) {
     throw new Invalid("verification_failed", reason);
   }
@@ -868,7 +892,11 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       if (!isObject(value) || typeof value.complete !== "boolean" || !isCount(value.returned) || !isCount(value.limit)) {
         throw new Invalid("verification_failed", reason);
       }
-      dashboard = { mode: value.mode === "top_n" ? "top_n" : null, complete: value.complete, returned: value.returned, limit: value.limit };
+      // The dashboard summary must agree with the request and the rows.
+      if (value.mode !== "top_n" || value.returned !== body.items.length || value.limit !== request.limit) {
+        throw new Invalid("verification_failed", reason);
+      }
+      dashboard = { mode: "top_n", complete: value.complete, returned: value.returned, limit: value.limit };
     }
     const matched = coverage.rows.matched;
     const truncated =
@@ -884,7 +912,12 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       (matched !== null && items.length !== Math.min(request.limit, matched)) ||
       (coverage.rows.truncated === false && matched !== null && matched !== items.length) ||
       listedCalls > population.calls ||
-      (!truncated && listedCalls !== population.calls)
+      (!truncated && listedCalls !== population.calls) ||
+      // The dashboard summary's completeness must match the coverage rows.
+      (dashboard !== null && matched !== null && dashboard.complete !== (matched === items.length)) ||
+      // Every group has calls, and calls in the population mean listed groups.
+      items.some((item) => item.calls === 0) ||
+      (population.calls > 0 && items.length === 0)
     ) {
       throw new Invalid("verification_failed", reason);
     }
@@ -918,7 +951,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (span.until_is_request_time && span.partial_days.length > 0) notices.add("current_day_partial");
     if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
     if (codes.some((entry) => entry.code === "metadata_key_mostly_missing")) notices.add("metadata_key_mostly_missing");
-    const metadataGroups = metadataDimension === null ? null : metadataGroupsOf(body.metadata_groups, items, population, metadataDimension, reason);
+    const metadataGroups = metadataDimension === null ? null : metadataGroupsOf(body.metadata_groups, items, population, metadataDimension, reason, { truncated, matched });
     // Grouped usage is attributed per call; anything else is not the promised split.
     const groupedAttribution = attributionOf(body.attribution, reason, "call");
     if (
@@ -946,7 +979,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       },
       truncated,
       complete,
-      empty: items.length === 0,
+      empty: population.calls === 0,
       rows: items.length,
       matched_groups: matched,
       items,

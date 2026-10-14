@@ -898,3 +898,65 @@ test("absence proves zero only in a complete window, and tiny changes print at f
   assert.match(text, /a +\$0\.00000140 +\$0\.00000100 +\+\$0\.00000040 +\+40%/);
   assert.match(text, /Prior service warnings: coverage_incomplete/);
 });
+
+test("metadata buckets, window timestamps, emptiness and the completeness summary must agree", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite) => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.ok(["usage_response_invalid", "window_mismatch"].includes(result.error.reason), result.error.reason);
+    };
+    const others = (doc, change) => ({
+      ...doc,
+      metadata_groups: {
+        ...doc.metadata_groups,
+        unlisted: { ...doc.metadata_groups.unlisted, other_values: { ...doc.metadata_groups.unlisted.other_values, ...change } },
+      },
+    });
+    // Unlisted values claimed for a complete grouping.
+    await refused(["--group-by", "metadata.prompt_id"], (doc) => others(doc, { groups: 999 }));
+    // An impossible calendar date in the window.
+    await refused(["--group-by", "model"], (doc) => ({ ...doc, window: { ...doc.window, since: "2026-02-29T00:00:00+00:00" } }));
+    // No rows although calls matched, and a group with no calls.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, items: [], coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, returned: 0, matched: null, truncated: true } },
+    }));
+    // A completeness summary that contradicts the rows.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, completeness: { mode: "bogus", complete: false, returned: 0, limit: 1 },
+    }));
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, completeness: { ...doc.completeness, complete: false },
+    }));
+  });
+});
+
+test("unattributed metadata spend keeps eight decimals", async () => {
+  await withSignedIn(async (server, box) => {
+    server.behavior.usage = (doc) => {
+      // Move a tiny amount between the population and the missing-key bucket.
+      const tiny = 0.00000004;
+      const missing = doc.metadata_groups.unlisted.missing_key;
+      const items = doc.items.map((item) =>
+        item.has_value === false || item["metadata.prompt_id"] === null
+          ? { ...item, cost_usd: item.cost_usd + tiny, cost_per_call_usd: (item.cost_usd + tiny) / item.calls }
+          : item);
+      return {
+        ...doc,
+        items,
+        totals: { ...doc.totals, cost_usd: doc.totals.cost_usd + tiny, cost_per_call_usd: (doc.totals.cost_usd + tiny) / doc.totals.calls },
+        metadata_groups: {
+          ...doc.metadata_groups,
+          unlisted: { ...doc.metadata_groups.unlisted, missing_key: { ...missing, cost_usd: missing.cost_usd + tiny } },
+        },
+      };
+    };
+    const { run, result } = await usage(box, server, ["--group-by", "metadata.prompt_id"]);
+    assert.equal(run.code, 0, run.stdout);
+    const recorded = aggregateFixture("prompt-cost").metadata_groups.unlisted;
+    const expected = Math.round((recorded.missing_key.cost_usd + recorded.ineligible_value.cost_usd + 0.00000004) * 1e8) / 1e8;
+    assert.equal(result.data.result.metadata_groups.unattributed.cost_usd, expected);
+  });
+});
