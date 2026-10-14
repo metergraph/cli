@@ -247,3 +247,18 @@ test("a changed window end is shown, and legacy trace attribution stays null", (
   assert.equal(old.coverage, null);
   assert.equal(old.traces.find((trace) => trace.trace_id === "trace-mixed").mixed_providers, true);
 });
+
+test("call-filtered trace rows are labelled as matching calls, never whole traces", () => {
+  const body = fixture("traces-mixed");
+  body.attribution = { ...body.attribution, cost_basis: "matching_calls" };
+  const { report, notices } = traces(body, { days: 7, limit: 10 });
+  assert.equal(report.attribution.cost_basis, "matching_calls");
+  assert.equal(report.attribution.per_provider_exact, false);
+  assert.match(textOf("traces", report, notices), /Costs: matching calls only/);
+  const unfiltered = traces(fixture("traces-mixed"), { days: 7, limit: 10 }).report;
+  assert.match(textOf("traces", unfiltered, new Set()), /Costs: whole-trace totals/);
+
+  const exact = fixture("traces-mixed");
+  exact.attribution = { ...exact.attribution, cost_basis: "matching_calls", per_provider_exact: true };
+  assert.equal(tracesReport(exact, CTX, { days: 7, limit: 10, route: null, status: null, cursor: null }, new Set()).ok, false);
+});

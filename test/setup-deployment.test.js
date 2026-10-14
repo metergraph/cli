@@ -243,7 +243,18 @@ test("a remote session is handed off before any request or credential read", asy
       assert.equal(result.proceed, false);
       assert.equal(result.outcome, "unsupported");
       assert.equal(result.reason, "run_on_local_machine");
-      assertNext(result.data.next_action, { kind: "run_on_customer_machine", prerequisite: null, url: GUIDE });
+      // The same handoff as hosted setup: a runnable local command for this
+      // deployment, and the Metadata key path for reads from here, sent only
+      // to this deployment's origin.
+      const next = result.data.next_action;
+      assert.equal(next.kind, "run_on_local_machine");
+      assert.equal(next.environment, env.CODESPACES ? "cloud_workspace" : "ssh_session");
+      assert.match(next.command, new RegExp(`^metergraph setup --runtime local --deployment ${deployment} --url ${server.origin.replace(/[.]/g, "\\.")} --workspace [0-9a-f-]{36} `));
+      assert.equal(next.metadata_reads.kind, "use_agent_key");
+      assert.deepEqual(next.metadata_reads.then_run, [
+        `metergraph status --url ${server.origin} --json`,
+        `metergraph usage --url ${server.origin} --json`,
+      ]);
       assert.equal(result.data.metadata_access, "not_checked");
     }
   }

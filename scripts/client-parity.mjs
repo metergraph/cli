@@ -81,9 +81,12 @@ const report = {
   failure_matrix: [],
   // Narrowed below to what this run actually covered. live_client_discovery
   // (a coding agent finding and following the skill) and provider-billed
-  // application traffic are never covered by this harness.
+  // application traffic are never covered by this harness. The two pending
+  // journeys in docs/release-matrix.md (Metadata reads with an existing key
+  // from a remote agent session, and grouped usage cost questions) have no
+  // scenarios yet, so every report lists them until a released CLI ships them.
   not_checked: ["published_registry_bytes", "live_authentication", "live_client_discovery", "application_traffic",
-    "hosted_setup", "customer_local_bundle", "byoc", "oss"],
+    "hosted_setup", "customer_local_bundle", "byoc", "oss", "remote_metadata_key_reads", "usage_cost_questions"],
 };
 
 function npmInstall(directory, source) {

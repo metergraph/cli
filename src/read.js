@@ -1,4 +1,4 @@
-import { agentKeySource, keySession, keyTarget } from "./agent-key.js";
+import { agentKeySource, keySession, keyTarget, readAgentKey } from "./agent-key.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
@@ -132,6 +132,12 @@ export async function runRead(options) {
     if (!useKey && source !== null) notices.add("agent_key_not_used");
 
     ctx.credential = useKey ? "agent_key" : "oauth_grant";
+    // A key in the environment is checked for shape before any request,
+    // including status's unauthenticated probes.
+    if (useKey && source.kind === "env") {
+      const shape = readAgentKey(source, env);
+      if (!shape.ok) return end(shape.outcome, shape.reason);
+    }
     // --url, METERGRAPH_URL (for a key only) and --workspace may repeat the
     // binding but never contradict it.
     const target = keyTarget({ binding, options, env: useKey ? env : {}, originConfirmed: originConfirmed || !useKey });
@@ -141,7 +147,8 @@ export async function runRead(options) {
       workspaceId: target.workspaceId,
       intendedWorkspace: target.workspaceId,
       profile: target.profile,
-      configured: true,
+      // configured means this project is bound; a key alone binds nothing.
+      configured: binding !== null,
     });
 
     let verifiedProfile = null;

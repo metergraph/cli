@@ -8,12 +8,12 @@
   },
   "content_included": false,
   "coverage": {
-    "as_of": "2026-10-14T15:56:39.848627+00:00",
+    "as_of": "2026-10-14T17:28:01.486314+00:00",
     "completeness": "partial",
     "effective_window": {
       "days": 7.0,
-      "since": "2026-10-07T15:56:39.848629+00:00",
-      "until": "2026-10-14T15:56:39.848629+00:00"
+      "since": "2026-10-07T17:28:01.485171+00:00",
+      "until": "2026-10-14T17:28:01.485171+00:00"
     },
     "filters": {
       "environments": null,
@@ -23,7 +23,7 @@
       "trace_id": null,
       "workload": null
     },
-    "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE1OjUxOjQzLjcyNDEyNCswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
+    "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE3OjIzOjA1LjM1NDc1NyswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
     "reasons": [
       "ingestion_pending",
       "page_unread",
@@ -32,8 +32,8 @@
     ],
     "requested_window": {
       "days": 7,
-      "since": "2026-10-07T15:56:39.848629+00:00",
-      "until": "2026-10-14T15:56:39.848629+00:00"
+      "since": "2026-10-07T17:28:01.485171+00:00",
+      "until": "2026-10-14T17:28:01.485171+00:00"
     },
     "rows": {
       "limit": 2,
@@ -52,10 +52,10 @@
       "calls"
     ]
   },
-  "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE1OjUxOjQzLjcyNDEyNCswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
+  "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE3OjIzOjA1LjM1NDc1NyswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
   "page": {
     "limit": 2,
-    "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE1OjUxOjQzLjcyNDEyNCswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
+    "next_cursor": "eyJsYXN0X3NwYW5fYXQiOiIyMDI2LTEwLTE0VDE3OjIzOjA1LjM1NDc1NyswMDowMCIsInRyYWNlX2lkIjoidHJhY2UtcGFydGlhbCJ9",
     "truncated": true
   },
   "pricing": {
@@ -69,7 +69,7 @@
   "provenance": {
     "deployment_profile": "local",
     "environments": null,
-    "generated_at": "2026-10-14T15:56:39.848627+00:00",
+    "generated_at": "2026-10-14T17:28:01.486314+00:00",
     "source": "live-database",
     "workspace_id": "00000000-0000-4000-8000-00000000c0de"
   },
@@ -82,7 +82,7 @@
       "environment": "production",
       "id": "trace-legacy",
       "input_tokens": 10,
-      "last_span_at": "2026-10-14T15:51:44.724124+00:00",
+      "last_span_at": "2026-10-14T17:23:06.354757+00:00",
       "metergraph_links": {
         "trace": null
       },
@@ -107,7 +107,7 @@
         "search"
       ],
       "span_count": 1,
-      "started_at": "2026-10-14T15:51:44.724124+00:00",
+      "started_at": "2026-10-14T17:23:06.354757+00:00",
       "status": "success",
       "trace_id": "trace-legacy",
       "trace_name": "LLM trace"
@@ -119,7 +119,7 @@
       "environment": "production",
       "id": "trace-partial",
       "input_tokens": 10,
-      "last_span_at": "2026-10-14T15:51:43.724124+00:00",
+      "last_span_at": "2026-10-14T17:23:05.354757+00:00",
       "metergraph_links": {
         "trace": null
       },
@@ -144,7 +144,7 @@
         "search"
       ],
       "span_count": 1,
-      "started_at": "2026-10-14T15:51:43.724124+00:00",
+      "started_at": "2026-10-14T17:23:05.354757+00:00",
       "status": "success",
       "trace_id": "trace-partial",
       "trace_name": "LLM trace"
@@ -163,7 +163,7 @@
   ],
   "window": {
     "days": 7,
-    "since": "2026-10-07T15:56:39.848651+00:00",
-    "until": "2026-10-14T15:56:39.848651+00:00"
+    "since": "2026-10-07T17:28:01.486332+00:00",
+    "until": "2026-10-14T17:28:01.486332+00:00"
   }
 }

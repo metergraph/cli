@@ -403,6 +403,9 @@ test("the packed CLI passes the offline three-client parity matrix", { timeout: 
   assert.equal(report.artifact_source, "packed_tarball");
   assert.ok(report.not_checked.includes("published_registry_bytes"));
   assert.ok(report.not_checked.includes("live_client_discovery"));
+  // Pending journeys stay listed until the harness has scenarios for them.
+  assert.ok(report.not_checked.includes("remote_metadata_key_reads"));
+  assert.ok(report.not_checked.includes("usage_cost_questions"));
   assert.equal(report.journey, undefined);
 });
 

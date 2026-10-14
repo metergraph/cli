@@ -43,7 +43,7 @@ the same for all three clients. Rows say what was run with each one.
 | Any | Linux (Debian 12, Node 22 and 24, arm64 and amd64 containers) | Untested past sign-in. Install, skill install and cancelled sign-in pass | Untested | Untested |
 | Any | Windows, Node 22 and 24 | Untested live. `synthetic_fixture` passes in CI | Untested. The bundle needs WSL | Untested |
 | Any | Node 22 or 24 on macOS, Linux or Windows | `synthetic_fixture` passes in CI for every row | | |
-| Any | Cloud or no-shell agent runtime, remote SSH, CI | **Unsupported**. Setup hands off to the customer's machine and creates no tunnel | **Unsupported**, same handoff | |
+| Any | Cloud or no-shell agent runtime, remote SSH, CI | **Unsupported**. Setup hands off to the customer's machine and creates no tunnel. Metadata reads with an existing key are [pending](#pending-release-checks) | **Unsupported**, same handoff | |
 | Claude Desktop | | **Unsupported** for `setup`. `skills install --client claude-desktop` points to the plugin marketplace | | |
 
 ## Setup scenarios
@@ -119,3 +119,55 @@ because the skill names the command without them.
 - Revoked ingest key repair, denied npm registry access, and a fresh image pull
   with a customer's pull-only registry credential.
 - `byoc` and `oss` against live deployments.
+
+## Pending release checks
+
+These journeys are not in a released package. In `0.2.1` (`latest` and
+`next`), `usage` takes only `--days` and `--limit`, and the read commands accept
+only a project's saved sign-in grant. `main` now has the remote Metadata-key
+path (see the Unreleased changelog), but no published version carries it yet.
+Every parity report lists
+both in `not_checked` until a released CLI ships them. Each row stays
+**Pending** until a live run of the published package passes; a packed tarball,
+source tests or an API call outside the CLI do not count. Exact flags, outcomes
+and reasons are recorded from the released help when the row is run.
+
+### Metadata reads from a remote agent session with an existing key
+
+The agent runs in a session the CLI identifies as remote (SSH, a cloud
+workspace or CI). It has a private Metadata key that a person created, and no
+saved sign-in grant.
+
+| Check | Expected result | Evidence class | Status |
+|---|---|---|---|
+| Remote markers present, no key, no grant | `login` and the read commands return a precise remote reason with a `use_agent_key` next action, and `setup` returns `run_on_local_machine`. No browser flow is claimed from a URL alone. Nothing written | `real_deployment` | Pending |
+| A local container without remote markers | Reported as `local_container`, not as a remote session | `real_deployment` | Pending |
+| Key supplied privately through `METERGRAPH_AGENT_TOKEN` or `--agent-token-file`, never as an argument | The CLI checks origin, workspace, exactly the Metadata scope and no content access before any read, then `status`, `context`, `capabilities`, `usage`, `routes` and `traces` return Metadata only, with `credential` and `environment` in the output | `real_deployment` | Pending |
+| Key never disclosed | No key value in argv, stdout, stderr, JSON output, logs or project files | `real_deployment` | Pending |
+| Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Pending |
+| Signup, invitation and workspace choice | Each human step returns a `next_action`; rerunning after it shows the verified workspace and the next step, with no duplicate key | `real_deployment` | Pending |
+| A coding agent in a remote session follows the skill | It uses the official CLI with the key path and does not write its own API client | `client_discovery` | Pending |
+
+Record the package version, the remote markers present, the number of manual
+steps and the verified outcome.
+
+### Usage cost questions
+
+Each question is answered by one documented `usage` command against an approved
+test workspace, and its totals are compared with the same server read through
+the agent API.
+
+| Question | Expected result | Evidence class | Status |
+|---|---|---|---|
+| Most expensive route today | Routes ranked by cost over an explicit UTC window | `real_deployment` | Pending |
+| Spend with one provider | A provider filter over a bounded window | `real_deployment` | Pending |
+| Spend by model | Grouped by model | `real_deployment` | Pending |
+| One route's daily trend | Grouped by UTC day for one route | `real_deployment` | Pending |
+| Cost ranked by a metadata key | Grouped by an eligible metadata key, kept distinct from route | `real_deployment` | Pending |
+| Comparison with the prior period | Both windows shown in UTC, with a warning when a partial current day is compared with a full prior day | `real_deployment` | Pending |
+| Coverage and cost attribution | Shown in text and JSON for every answer above | `real_deployment` | Pending |
+| A capability the deployment lacks | Exit 14 `capability_unavailable` or a documented `next_action`, with nothing read | `real_deployment` | Pending |
+| Parity with the agent API | Same totals, groups and window as the server read | `real_deployment` | Pending |
+| A coding agent answers a cost question from the skill | It runs the smallest bounded `usage` read that answers it, and does not attribute a cost change to a commit from a diff alone | `client_discovery` | Pending |
+
+These runs read Metadata only and make no provider call.
