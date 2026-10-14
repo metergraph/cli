@@ -53,6 +53,12 @@ export async function startOAuthServer(initial = {}) {
     setupMetadata: (doc) => doc,
     setupAuthorize: () => {},
     setupRedeem: "issue", // issue, drop-before-issue, drop-after-issue, reject
+    // The issuance budget: refuse this many redemptions with 429 (keeping the
+    // receipt) before issuing, with this Retry-After; or refuse with the
+    // active-key cap (409 setup_key_limit).
+    setupSlowDown: 0,
+    setupRetryAfter: "1",
+    setupKeyLimit: false,
     setupCredentialReject: false,
     // "combined": discovery advertises one approval for sign in and the first
     // ingest key and the sign-in consent honors it. "advertise-only": it is
@@ -183,6 +189,15 @@ export async function startOAuthServer(initial = {}) {
     if (path === "/v1/cli/setup/redeem" && request.method === "POST") {
       if (behavior.setupRedeem === "drop-before-issue") return response.socket.destroy();
       const form = new URLSearchParams(body);
+      // Budget refusals leave the receipt redeemable, as the service does.
+      if (behavior.setupKeyLimit && state.setupReceipts.has(form.get("code"))) {
+        return send(response, 409, { error: "setup_key_limit", error_description: "SYNTHETIC_BODY_MARKER" });
+      }
+      if (behavior.setupSlowDown > 0 && state.setupReceipts.has(form.get("code"))) {
+        behavior.setupSlowDown -= 1;
+        response.writeHead(429, { "content-type": "application/json", "retry-after": behavior.setupRetryAfter });
+        return response.end(JSON.stringify({ error: "slow_down", error_description: "SYNTHETIC_BODY_MARKER" }));
+      }
       const receipt = state.setupReceipts.get(form.get("code"));
       state.setupReceipts.delete(form.get("code"));
       if (receipt === undefined || behavior.setupRedeem === "reject" ||

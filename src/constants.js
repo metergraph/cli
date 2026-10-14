@@ -187,7 +187,7 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
     "The service does not make this read available to the project's Metadata grant. No data was read.",
   permission_denied:
     "The service refused this read for the signed in grant, for example for a missing scope or permission.",
-  rate_limited: "The service asked the CLI to slow down. Nothing was retried. Try again later.",
+  rate_limited: "The service asked the CLI to slow down. Try again later. Only setup retries, after a short Retry-After, to keep its approval.",
   cancelled:
     "A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry.",
   action_required:

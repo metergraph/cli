@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+- `setup` handles the service's ingest-key issuance budget. A short `Retry-After` is waited out
+  and the same approval is redeemed again, so the person does not approve twice. A budget that
+  stays exhausted exits `rate_limited` with a `retry_later` next action, and a workspace at its
+  cap of active CLI setup keys exits `conflict` (`setup_key_limit`) with a `revoke_keys` next
+  action pointing to the Keys page.
 - A first `setup` that has to sign in now needs one browser approval instead of two
   when the service supports it: the sign-in consent also approves the project's
   ingest key and names both. The sign-in grant and the ingest key stay separate
