@@ -572,6 +572,32 @@ Bounds and honesty rules:
 - `usage` and `traces` report `truncated` and `complete`. Totals are sums of the
   returned rows only; when `complete` is `false` they are not workspace totals. An
   empty window is a successful result with `empty: true`.
+- When the service reports them, `usage` and `traces` also carry `coverage`,
+  `pricing` and `attribution`, and `usage` carries `population_totals`. An older
+  service omits them: the fields are `null` and the `coverage_not_reported` notice is
+  set. The existing fields keep their meaning.
+  - `coverage.completeness` is `complete`, `partial` or `unknown`, with sorted
+    `reasons` such as `row_limit`, `page_unread`, `window_clamped`,
+    `retention_clipped`, `ingestion_pending`, `ingestion_failed`,
+    `ingestion_unverified` or `evidence_missing`. `requested_window` and
+    `effective_window` show what was asked and what was read, `as_of` when, and
+    `filters_applied` which filters applied (names only, never values).
+    `complete` is `true` only when the evidence is complete, nothing was truncated
+    and coverage is `complete`. The CLI never reports a better completeness than
+    the reasons allow, and an unrecognized reason makes it at least `unknown`.
+  - `population_totals` covers every matching call in the window, whatever
+    `--limit` returned. `totals` remains the sum of the returned rows.
+  - `pricing.cost` is `exact` only when every call is priced. `zero_cost_calls` were
+    priced at zero; `unpriced_calls` have no price; `unknown_calls` cannot be told
+    apart from either. Otherwise cost is a `lower_bound` and the
+    `pricing_lower_bound` notice is set. Each usage row and trace carries its own
+    `pricing`.
+  - A trace `cost_usd` is the whole-trace total and is `null` when no call in it is
+    priced. `mixed_providers` and `mixed_models` mark traces that span more than
+    one, and `attribution.per_provider_exact` is always `false` for traces: a trace
+    total is never split by provider. Usage rows are attributed per call.
+  - A final `traces` page without `next_cursor` is still `complete: false` when the
+    service reports any other reason, for example pending ingestion.
 - `GET /v1/agent/routes` takes no limit or window. The CLI validates every returned row,
   keeps the first `--limit`, and reports `server_rows`, `truncated` and
   `truncation: "local"`. Route descriptions, constraints and evaluation contract bodies
@@ -659,8 +685,10 @@ A successful `usage`, shortened:
 
 On failure `result` is `null`, `authenticated` says whether the grant was verified
 before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
-`evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted` or
-`trace_links_unavailable`.
+`evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted`,
+`trace_links_unavailable`, `coverage_partial`, `coverage_unknown`,
+`coverage_not_reported`, `pricing_lower_bound`, `mixed_provider_traces` or
+`unpriced_traces`.
 
 ## JSON output
 

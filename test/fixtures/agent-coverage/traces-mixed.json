@@ -1,0 +1,282 @@
+{
+  "attribution": {
+    "cost_basis": "trace_total",
+    "level": "trace",
+    "mixed_model_rows": 1,
+    "mixed_provider_rows": 1,
+    "per_provider_exact": false
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T15:45:50.429989+00:00",
+    "completeness": "partial",
+    "effective_window": {
+      "days": 7.0,
+      "since": "2026-10-07T15:45:50.429994+00:00",
+      "until": "2026-10-14T15:45:50.429994+00:00"
+    },
+    "filters": {
+      "environments": null,
+      "request_id": null,
+      "route": null,
+      "status": null,
+      "trace_id": null,
+      "workload": null
+    },
+    "next_cursor": null,
+    "reasons": [
+      "ingestion_pending",
+      "pricing_missing",
+      "pricing_partial",
+      "pricing_unknown"
+    ],
+    "requested_window": {
+      "days": 7,
+      "since": "2026-10-07T15:45:50.429994+00:00",
+      "until": "2026-10-14T15:45:50.429994+00:00"
+    },
+    "rows": {
+      "limit": 10,
+      "matched": null,
+      "ordering": "last_span_at desc, trace_id desc",
+      "returned": 5,
+      "shape": "page",
+      "truncated": false
+    },
+    "totals_scope": "page"
+  },
+  "evidence": {
+    "complete": false,
+    "rows": 5,
+    "sources": [
+      "calls"
+    ]
+  },
+  "next_cursor": null,
+  "page": {
+    "limit": 10,
+    "next_cursor": null,
+    "truncated": false
+  },
+  "pricing": {
+    "cost": "lower_bound",
+    "partial_calls": 1,
+    "priced_calls": 3,
+    "unknown_calls": 1,
+    "unpriced_calls": 1,
+    "zero_cost_calls": 1
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T15:45:50.429989+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "traces": [
+    {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": null,
+      "environment": "production",
+      "id": "trace-legacy",
+      "input_tokens": 10,
+      "last_span_at": "2026-10-14T15:40:55.235243+00:00",
+      "metergraph_links": {
+        "trace": null
+      },
+      "mixed_models": false,
+      "mixed_providers": false,
+      "models": [
+        "example-model-legacy"
+      ],
+      "output_tokens": 5,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 0,
+        "priced_calls": 0,
+        "unknown_calls": 1,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "providers": [
+        "example-provider-a"
+      ],
+      "routes": [
+        "search"
+      ],
+      "span_count": 1,
+      "started_at": "2026-10-14T15:40:55.235243+00:00",
+      "status": "success",
+      "trace_id": "trace-legacy",
+      "trace_name": "LLM trace"
+    },
+    {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.05,
+      "environment": "production",
+      "id": "trace-partial",
+      "input_tokens": 10,
+      "last_span_at": "2026-10-14T15:40:54.235243+00:00",
+      "metergraph_links": {
+        "trace": null
+      },
+      "mixed_models": false,
+      "mixed_providers": false,
+      "models": [
+        "example-model-large"
+      ],
+      "output_tokens": 5,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 1,
+        "priced_calls": 0,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "providers": [
+        "example-provider-a"
+      ],
+      "routes": [
+        "search"
+      ],
+      "span_count": 1,
+      "started_at": "2026-10-14T15:40:54.235243+00:00",
+      "status": "success",
+      "trace_id": "trace-partial",
+      "trace_name": "LLM trace"
+    },
+    {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": null,
+      "environment": "production",
+      "id": "trace-unpriced",
+      "input_tokens": 10,
+      "last_span_at": "2026-10-14T15:40:53.235243+00:00",
+      "metergraph_links": {
+        "trace": null
+      },
+      "mixed_models": false,
+      "mixed_providers": false,
+      "models": [
+        "example-model-custom"
+      ],
+      "output_tokens": 5,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 0,
+        "priced_calls": 0,
+        "unknown_calls": 0,
+        "unpriced_calls": 1,
+        "zero_cost_calls": 0
+      },
+      "providers": [
+        "example-provider-c"
+      ],
+      "routes": [
+        "classifier"
+      ],
+      "span_count": 1,
+      "started_at": "2026-10-14T15:40:53.235243+00:00",
+      "status": "success",
+      "trace_id": "trace-unpriced",
+      "trace_name": "LLM trace"
+    },
+    {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "environment": "production",
+      "id": "trace-free",
+      "input_tokens": 10,
+      "last_span_at": "2026-10-14T15:40:52.235243+00:00",
+      "metergraph_links": {
+        "trace": null
+      },
+      "mixed_models": false,
+      "mixed_providers": false,
+      "models": [
+        "example-model-nano"
+      ],
+      "output_tokens": 5,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 1
+      },
+      "providers": [
+        "example-provider-a"
+      ],
+      "routes": [
+        "classifier"
+      ],
+      "span_count": 1,
+      "started_at": "2026-10-14T15:40:52.235243+00:00",
+      "status": "success",
+      "trace_id": "trace-free",
+      "trace_name": "LLM trace"
+    },
+    {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 1.0,
+      "environment": "production",
+      "id": "trace-mixed",
+      "input_tokens": 20,
+      "last_span_at": "2026-10-14T15:40:51.235243+00:00",
+      "metergraph_links": {
+        "trace": null
+      },
+      "mixed_models": true,
+      "mixed_providers": true,
+      "models": [
+        "example-model-large",
+        "example-model-medium"
+      ],
+      "output_tokens": 10,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 2,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "providers": [
+        "example-provider-a",
+        "example-provider-b"
+      ],
+      "routes": [
+        "support"
+      ],
+      "span_count": 2,
+      "started_at": "2026-10-14T15:40:50.235243+00:00",
+      "status": "success",
+      "trace_id": "trace-mixed",
+      "trace_name": "LLM trace"
+    }
+  ],
+  "truncated": false,
+  "warnings": [
+    {
+      "code": "pricing_incomplete",
+      "message": "Some calls in these traces have missing, partial or unknown pricing; a trace cost_usd is a lower bound, or null when no call is priced."
+    },
+    {
+      "code": "mixed_attribution",
+      "message": "Some traces span several providers or models. A trace cost_usd is the whole-trace total and cannot be split between them; use usage for call-level attribution."
+    }
+  ],
+  "window": {
+    "days": 7,
+    "since": "2026-10-07T15:45:50.430023+00:00",
+    "until": "2026-10-14T15:45:50.430023+00:00"
+  }
+}

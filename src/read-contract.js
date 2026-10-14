@@ -219,6 +219,219 @@ function nameList(value, notices, reason) {
   return names;
 }
 
+// Coverage, pricing and attribution evidence. The service adds these objects
+// to usage and trace documents; an older service omits them, and that is
+// reported rather than read as complete. Reasons are fixed tokens. A reason
+// this CLI does not know is kept, and unless the service already says
+// partial it makes completeness unknown: unknown evidence never reads as
+// complete.
+const PARTIAL_REASONS = new Set([
+  "row_limit",
+  "page_unread",
+  "window_clamped",
+  "retention_clipped",
+  "ingestion_pending",
+  "ingestion_failed",
+  "scope_incomplete",
+]);
+const UNKNOWN_REASONS = new Set(["ingestion_unverified", "evidence_missing"]);
+const PRICING_REASONS = new Set(["pricing_missing", "pricing_partial", "pricing_unknown"]);
+const COMPLETENESS = ["complete", "partial", "unknown"];
+const RANK = Object.freeze({ complete: 0, unknown: 1, partial: 2 });
+const ROW_SHAPES = ["top_n", "page", "all"];
+const TOTALS_SCOPES = ["population", "returned_rows", "page"];
+const FILTER_KEYS = ["route", "status", "workload", "trace_id", "request_id", "environments"];
+
+// The worst of the service's completeness and what the reasons imply.
+export function completenessOf(stated, reasons) {
+  let derived = "complete";
+  for (const reason of reasons) {
+    if (PARTIAL_REASONS.has(reason)) derived = "partial";
+    else if (!PRICING_REASONS.has(reason) && derived === "complete") derived = "unknown";
+  }
+  return RANK[stated] >= RANK[derived] ? stated : derived;
+}
+
+function windowSpan(value, reason) {
+  if (value === null) return null;
+  if (!isObject(value) || !isTimestamp(value.since) || !isTimestamp(value.until) || !isAmount(value.days)) {
+    throw new Invalid("verification_failed", reason);
+  }
+  return { since: value.since, until: value.until, days: value.days };
+}
+
+function coverageOf(value, notices, reason) {
+  if (value === undefined || value === null) {
+    notices.add("coverage_not_reported");
+    return null;
+  }
+  const rows = value.rows;
+  const nullableCount = (entry) => entry === null || isCount(entry);
+  if (
+    !isObject(value) ||
+    !isTimestamp(value.as_of) ||
+    !isObject(value.filters) ||
+    !isObject(rows) ||
+    !ROW_SHAPES.includes(rows.shape) ||
+    !(rows.ordering === null || isSafeFilter(rows.ordering)) ||
+    !isCount(rows.returned) ||
+    !nullableCount(rows.limit) ||
+    !(rows.truncated === null || typeof rows.truncated === "boolean") ||
+    !nullableCount(rows.matched) ||
+    !(value.next_cursor === null || isCursor(value.next_cursor)) ||
+    !TOTALS_SCOPES.includes(value.totals_scope) ||
+    !COMPLETENESS.includes(value.completeness) ||
+    !Array.isArray(value.reasons) ||
+    value.reasons.length > MAX_LIST ||
+    !value.reasons.every(isToken)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  // Applied filters are echoed by name only, as whether one was applied.
+  // Their values are request arguments or names and are not printed back.
+  const filters = {};
+  for (const key of FILTER_KEYS) {
+    if (Object.hasOwn(value.filters, key)) filters[key] = value.filters[key] !== null;
+  }
+  const reasons = [...new Set(value.reasons)].sort();
+  const completeness = completenessOf(value.completeness, reasons);
+  if (completeness === "partial") notices.add("coverage_partial");
+  if (completeness === "unknown") notices.add("coverage_unknown");
+  return {
+    as_of: value.as_of,
+    requested_window: windowSpan(value.requested_window ?? null, reason),
+    effective_window: windowSpan(value.effective_window ?? null, reason),
+    filters_applied: filters,
+    rows: {
+      shape: rows.shape,
+      ordering: rows.ordering,
+      returned: rows.returned,
+      limit: rows.limit,
+      truncated: rows.truncated,
+      matched: rows.matched,
+    },
+    next_cursor: value.next_cursor,
+    totals_scope: value.totals_scope,
+    completeness,
+    reasons,
+  };
+}
+
+const PRICING_COUNTS = ["priced_calls", "zero_cost_calls", "partial_calls", "unpriced_calls", "unknown_calls"];
+
+function pricingOf(value, notices, reason, { note = true } = {}) {
+  if (value === undefined || value === null) return null;
+  if (
+    !isObject(value) ||
+    !PRICING_COUNTS.every((key) => isCount(value[key])) ||
+    value.zero_cost_calls > value.priced_calls ||
+    (value.cost !== "exact" && value.cost !== "lower_bound")
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  // Exact cost needs every call priced; a service claiming otherwise is
+  // read as a lower bound.
+  const unpricedAny = value.partial_calls + value.unpriced_calls + value.unknown_calls > 0;
+  const cost = unpricedAny ? "lower_bound" : value.cost;
+  if (cost === "lower_bound" && note) notices.add("pricing_lower_bound");
+  return { ...Object.fromEntries(PRICING_COUNTS.map((key) => [key, value[key]])), cost };
+}
+
+function attributionOf(value, reason) {
+  if (value === undefined || value === null) return null;
+  const nullableCount = (entry) => entry === null || isCount(entry);
+  if (
+    !isObject(value) ||
+    (value.level !== "call" && value.level !== "trace") ||
+    (value.cost_basis !== "call" && value.cost_basis !== "trace_total") ||
+    typeof value.per_provider_exact !== "boolean" ||
+    !nullableCount(value.mixed_provider_rows) ||
+    !nullableCount(value.mixed_model_rows)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  // A whole-trace total is never an exact per-provider split, whatever the
+  // document says.
+  const perProviderExact = value.level === "trace" ? false : value.per_provider_exact;
+  return {
+    level: value.level,
+    cost_basis: value.cost_basis,
+    per_provider_exact: perProviderExact,
+    mixed_provider_rows: value.mixed_provider_rows,
+    mixed_model_rows: value.mixed_model_rows,
+  };
+}
+
+function populationTotalsOf(value, reason) {
+  if (value === undefined || value === null) return null;
+  if (
+    !isObject(value) ||
+    value.scope !== "population" ||
+    !isCount(value.calls) ||
+    !isCount(value.error_calls) ||
+    !isAmount(value.cost_usd) ||
+    !isCount(value.input_tokens) ||
+    !isCount(value.output_tokens)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  return {
+    scope: "population",
+    calls: value.calls,
+    error_calls: value.error_calls,
+    cost_usd: value.cost_usd,
+    input_tokens: value.input_tokens,
+    output_tokens: value.output_tokens,
+  };
+}
+
+// Combines the validated reports of consecutive trace pages (as returned by
+// tracesReport) into one coverage verdict for a local aggregation. It is
+// complete only when the last page has no cursor and no page, read or not,
+// carries any other reason the service gave for being incomplete. Running
+// out of cursors alone never proves completeness.
+export function combinePages(pages) {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return { complete: false, completeness: "unknown", reasons: ["evidence_missing"], pages: 0, next_cursor: null };
+  }
+  const reasons = new Set();
+  let completeness = "complete";
+  const worse = (value) => {
+    if (value === "partial" || (value === "unknown" && completeness === "complete")) completeness = value;
+  };
+  pages.forEach((page, index) => {
+    const last = index === pages.length - 1;
+    if (!last && page.next_cursor === null) {
+      // A page without a cursor followed by more pages is not a sequence.
+      reasons.add("evidence_missing");
+      worse("unknown");
+    }
+    if (page.coverage === null || page.coverage === undefined) {
+      if (!page.evidence.complete && !(page.truncated && !last)) {
+        reasons.add("evidence_missing");
+        worse("unknown");
+      }
+      return;
+    }
+    // A cursor that was followed is not an unread page.
+    const own = page.coverage.reasons.filter((reason) => last || reason !== "page_unread");
+    for (const reason of own) reasons.add(reason);
+    worse(completenessOf("complete", own));
+  });
+  const final = pages[pages.length - 1];
+  if (final.next_cursor !== null) {
+    reasons.add("page_unread");
+    worse("partial");
+  }
+  return {
+    complete: completeness === "complete",
+    completeness,
+    reasons: [...reasons].sort(),
+    pages: pages.length,
+    next_cursor: final.next_cursor,
+  };
+}
+
 // GET /v1/agent/workspace, already checked by checkWorkspace during the
 // session. Returns the approved workspace fields only.
 export function workspaceContext(body, ctx, notices) {
@@ -386,9 +599,11 @@ export function usageReport(body, ctx, request, notices) {
         output_tokens: row.output_tokens,
         avg_latency_ms: row.avg_latency_ms,
         p95_latency_ms: row.p95_latency_ms,
+        pricing: pricingOf(row.pricing, notices, reason, { note: false }),
       };
     });
-    const complete = proof.complete && !body.truncated;
+    const coverage = coverageOf(body.coverage, notices, reason);
+    const complete = proof.complete && !body.truncated && (coverage === null || coverage.completeness === "complete");
     if (!proof.complete) notices.add("evidence_incomplete");
     if (body.truncated) notices.add("rows_truncated");
     return {
@@ -403,6 +618,10 @@ export function usageReport(body, ctx, request, notices) {
       rows: items.length,
       items,
       totals: totalsOf(items, complete),
+      coverage,
+      population_totals: populationTotalsOf(body.totals, reason),
+      pricing: pricingOf(body.pricing, notices, reason),
+      attribution: attributionOf(body.attribution, reason),
     };
   });
 }
@@ -527,7 +746,9 @@ export function tracesReport(body, ctx, request, notices) {
         !isCount(row.cache_read_tokens) ||
         !isCount(row.cache_write_tokens) ||
         !nullableAmount(row.cost_usd) ||
-        (row.status !== "success" && row.status !== "error")
+        (row.status !== "success" && row.status !== "error") ||
+        !(row.mixed_providers === undefined || typeof row.mixed_providers === "boolean") ||
+        !(row.mixed_models === undefined || typeof row.mixed_models === "boolean")
       ) {
         throw new Invalid("verification_failed", reason);
       }
@@ -549,12 +770,24 @@ export function tracesReport(body, ctx, request, notices) {
         routes: nameList(row.routes, notices, reason),
         providers: nameList(row.providers, notices, reason),
         models: nameList(row.models, notices, reason),
+        // Derived from the row's own provider and model lists as well, so an
+        // older service that does not flag them still shows a mixed trace.
+        mixed_providers: row.mixed_providers === true || (Array.isArray(row.providers) && row.providers.length > 1),
+        mixed_models: row.mixed_models === true || (Array.isArray(row.models) && row.models.length > 1),
+        pricing: pricingOf(row.pricing, notices, reason, { note: false }),
         link: link.value,
         link_workspace_bound: link.workspaceBound === true,
       };
     });
     if (!proof.complete) notices.add("evidence_incomplete");
     if (page.truncated) notices.add("more_pages");
+    const coverage = coverageOf(body.coverage, notices, reason);
+    if (coverage !== null && coverage.next_cursor !== page.next_cursor) {
+      throw new Invalid("verification_failed", reason);
+    }
+    const pagePricing = pricingOf(body.pricing, notices, reason);
+    if (traces.some((trace) => trace.mixed_providers)) notices.add("mixed_provider_traces");
+    if (traces.some((trace) => trace.cost_usd === null)) notices.add("unpriced_traces");
     const missingLinks = traces.length === 0 || traces.some((trace) => trace.link === null);
     if (missingLinks) notices.add("trace_links_unavailable");
     const unboundLinks = traces.some((trace) => trace.link !== null && !trace.link_workspace_bound);
@@ -575,7 +808,17 @@ export function tracesReport(body, ctx, request, notices) {
       page: { limit: page.limit, rows: traces.length, truncated: page.truncated, next_cursor: page.next_cursor },
       truncated: page.truncated,
       next_cursor: page.next_cursor,
-      complete: proof.complete && !page.truncated,
+      complete: proof.complete && !page.truncated && (coverage === null || coverage.completeness === "complete"),
+      coverage,
+      pricing: pagePricing,
+      attribution: attributionOf(body.attribution, reason) ?? {
+        // Trace rows are whole-trace totals whether or not the service says so.
+        level: "trace",
+        cost_basis: "trace_total",
+        per_provider_exact: false,
+        mixed_provider_rows: traces.filter((trace) => trace.mixed_providers).length,
+        mixed_model_rows: traces.filter((trace) => trace.mixed_models).length,
+      },
       empty: traces.length === 0,
       link_status: missingLinks ? "server_link_unavailable" :
         unboundLinks ? "workspace_binding_unavailable" : "available",

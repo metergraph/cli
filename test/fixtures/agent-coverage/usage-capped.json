@@ -1,0 +1,137 @@
+{
+  "attribution": {
+    "cost_basis": "call",
+    "level": "call",
+    "mixed_model_rows": 0,
+    "mixed_provider_rows": 0,
+    "per_provider_exact": true
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T15:45:50.361963+00:00",
+    "completeness": "partial",
+    "effective_window": {
+      "days": 7.0,
+      "since": "2026-10-07T15:45:50.358115+00:00",
+      "until": "2026-10-14T15:45:50.358115+00:00"
+    },
+    "filters": {
+      "environments": null
+    },
+    "next_cursor": null,
+    "reasons": [
+      "ingestion_pending",
+      "pricing_missing",
+      "pricing_partial",
+      "pricing_unknown",
+      "row_limit"
+    ],
+    "requested_window": {
+      "days": 7,
+      "since": "2026-10-07T15:45:50.358115+00:00",
+      "until": "2026-10-14T15:45:50.358115+00:00"
+    },
+    "rows": {
+      "limit": 2,
+      "matched": 3,
+      "ordering": "date desc, calls desc, route asc",
+      "returned": 2,
+      "shape": "top_n",
+      "truncated": true
+    },
+    "totals_scope": "population"
+  },
+  "days": 7,
+  "evidence": {
+    "complete": false,
+    "rows": 2,
+    "sources": [
+      "calls",
+      "ingest_batches"
+    ]
+  },
+  "items": [
+    {
+      "avg_latency_ms": 100,
+      "calls": 2,
+      "cost_usd": 0.0,
+      "date": "2026-10-14",
+      "error_calls": 0,
+      "input_tokens": 20,
+      "output_tokens": 10,
+      "p95_latency_ms": 100,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 1,
+        "zero_cost_calls": 1
+      },
+      "route": "classifier"
+    },
+    {
+      "avg_latency_ms": 100,
+      "calls": 2,
+      "cost_usd": 0.05,
+      "date": "2026-10-14",
+      "error_calls": 0,
+      "input_tokens": 20,
+      "output_tokens": 10,
+      "p95_latency_ms": 100,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 1,
+        "priced_calls": 0,
+        "unknown_calls": 1,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "route": "search"
+    }
+  ],
+  "pricing": {
+    "cost": "lower_bound",
+    "partial_calls": 1,
+    "priced_calls": 3,
+    "unknown_calls": 1,
+    "unpriced_calls": 1,
+    "zero_cost_calls": 1
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T15:45:50.361963+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "totals": {
+    "calls": 6,
+    "cost_usd": 1.05,
+    "error_calls": 0,
+    "input_tokens": 60,
+    "output_tokens": 30,
+    "scope": "population"
+  },
+  "truncated": true,
+  "warnings": [
+    {
+      "code": "truncated",
+      "message": "The usage items reached their row limit. totals still cover every matching call."
+    },
+    {
+      "code": "coverage_incomplete",
+      "message": "The read does not cover the whole requested window: ingestion_pending, row_limit."
+    },
+    {
+      "code": "pricing_incomplete",
+      "message": "Some calls have missing, partial or unknown pricing; cost_usd is a lower bound."
+    }
+  ],
+  "window": {
+    "days": 7,
+    "since": "2026-10-07T15:45:50.361990+00:00",
+    "until": "2026-10-14T15:45:50.361990+00:00"
+  }
+}

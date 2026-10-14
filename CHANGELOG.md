@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+- `usage` and `traces` carry the service's coverage, pricing and cost attribution
+  evidence when it is reported: requested and read window, completeness with reasons,
+  whole-window totals separate from the returned rows, known zero prices apart from
+  missing or unknown ones, and mixed-provider traces whose cost is never split by
+  provider. A read the service reports as incomplete stays `complete: false` even on
+  a last page without a cursor. Existing JSON fields are unchanged.
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line
