@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+- `usage` and `traces` carry the service's coverage, pricing and cost attribution
+  evidence when it is reported: requested and read window, completeness with reasons,
+  whole-window totals separate from the returned rows, known zero prices apart from
+  missing or unknown ones, and mixed-provider traces whose cost is never split by
+  provider. A read the service reports as incomplete stays `complete: false` even on
+  a last page without a cursor. Existing JSON fields are unchanged.
 - Read commands (`status`, `context`, `capabilities`, `usage`, `routes`, `traces`)
   accept a coding-agent key with Metadata access from `METERGRAPH_AGENT_TOKEN`, or
   from a private file named by `--agent-token-file`, when browser sign in cannot
@@ -17,7 +23,6 @@
   a cloud workspace and CI. Where sign in cannot finish they return a structured
   `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
   person's steps, the Keys page and the commands to run afterwards.
-
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line

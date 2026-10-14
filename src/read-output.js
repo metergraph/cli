@@ -93,9 +93,56 @@ const NOTICES = {
   unsafe_text_omitted: "Some names contained control or formatting characters and are shown as null.",
   unrecognized_capabilities_ignored: "Capabilities this CLI does not recognize are not shown.",
   privacy_class_details_omitted: "Privacy class descriptions are not printed.",
+  coverage_partial:
+    "The service reports this read does not cover the whole question. See coverage.reasons before treating any total as complete.",
+  coverage_unknown:
+    "The service could not establish whether this read is complete, so it is not treated as complete.",
+  coverage_not_reported:
+    "This service does not report coverage details. Completeness rests on its evidence and truncation flags alone.",
+  pricing_lower_bound:
+    "Some calls have missing, partial or unknown pricing, so cost is a lower bound.",
+  mixed_provider_traces:
+    "Some traces used more than one provider or model. A trace cost is the whole-trace total and cannot be split by provider; use usage for per-route cost.",
+  unpriced_traces: "Some traces have no priced call, so their cost is unknown (shown as -), not zero.",
   trace_links_unavailable:
     "The service does not provide workspace-bound trace links yet, so no link is shown.",
 };
+
+// Coverage, window and pricing lines shared by usage and traces. Only
+// validated fields and fixed tokens are printed.
+function coverageLines(lines, report) {
+  const coverage = report.coverage;
+  if (coverage) {
+    const requested = coverage.requested_window;
+    const effective = coverage.effective_window;
+    if (requested && effective && (requested.since !== effective.since || requested.until !== effective.until)) {
+      lines.push(
+        `Window read: ${effective.since} to ${effective.until} ` +
+          `(requested ${requested.since} to ${requested.until})`,
+      );
+    }
+    const matched = coverage.rows.matched === null ? "" : ` of ${coverage.rows.matched}`;
+    // Pricing reasons are shown on the Pricing line instead.
+    const reasons = coverage.reasons.filter((reason) => !reason.startsWith("pricing_"));
+    lines.push(
+      `Coverage: ${coverage.completeness}` +
+        (reasons.length > 0 ? ` (${reasons.join(", ")})` : "") +
+        `; ${coverage.rows.returned}${matched} ${coverage.rows.shape === "page" ? "rows on this page" : "rows returned"}` +
+        `; as of ${coverage.as_of}`,
+    );
+  } else {
+    lines.push("Coverage: not reported by this service");
+  }
+  const pricing = report.pricing;
+  if (pricing) {
+    lines.push(
+      pricing.cost === "exact"
+        ? `Pricing: exact (${pricing.priced_calls} priced calls, ${pricing.zero_cost_calls} priced at zero)`
+        : `Pricing: lower bound (${pricing.unpriced_calls} unpriced, ${pricing.partial_calls} partially priced, ` +
+            `${pricing.unknown_calls} unknown, ${pricing.priced_calls} priced of which ${pricing.zero_cost_calls} at zero)`,
+    );
+  }
+}
 
 export function noticeText(token) {
   return NOTICES[token] ?? null;
@@ -260,6 +307,14 @@ function resultLines(command, report, lines) {
           `${totals.input_tokens} input and ${totals.output_tokens} output tokens.`,
       );
     }
+    if (report.population_totals) {
+      const all = report.population_totals;
+      lines.push(
+        `All matching calls in the window: ${all.calls} calls, ${all.error_calls} errors, ${usd(all.cost_usd)}, ` +
+          `${all.input_tokens} input and ${all.output_tokens} output tokens.`,
+      );
+    }
+    coverageLines(lines, report);
     lines.push(`Evidence: ${report.complete ? "complete" : "incomplete"}`);
     return;
   }
@@ -298,6 +353,14 @@ function resultLines(command, report, lines) {
     }
     lines.push("", `Page: ${report.page.rows} traces, limit ${report.page.limit}`);
     if (report.next_cursor !== null) lines.push(`Next page: --cursor ${report.next_cursor}`);
+    coverageLines(lines, report);
+    const mixed = report.traces.filter((trace) => trace.mixed_providers).length;
+    const matching = report.attribution?.cost_basis === "matching_calls";
+    lines.push(
+      (matching ? "Costs: matching calls only (a filter selected calls, not whole traces)" : "Costs: whole-trace totals") +
+        (mixed > 0 ? `; ${mixed} trace${mixed === 1 ? "" : "s"} used several providers, not split by provider` : ""),
+    );
+    lines.push(`Evidence: ${report.complete ? "complete" : "incomplete"}`);
     lines.push("Trace links: not available from the service yet");
   }
 }
