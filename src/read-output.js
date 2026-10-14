@@ -59,6 +59,8 @@ const NOTICES = {
   more_pages: "More traces exist. Pass --cursor with next_cursor to read the next page.",
   metadata_groups_truncated:
     "More metadata values exist than --limit. Calls in the window still counts every call.",
+  metadata_key_mostly_missing:
+    "Most of this window's calls or cost have no value for the grouped key, so the rows with a value explain less than half of it.",
   metadata_values_missing:
     "Some calls have no usable value for the grouped key (missing, not a string or too long). They are the group shown as having no value.",
   routes_truncated_locally:
@@ -86,6 +88,9 @@ const NOTICES = {
 // Coverage, window and pricing lines shared by usage and traces. Only
 // validated fields and fixed tokens are printed.
 function coverageLines(lines, report) {
+  // Service warning codes, once, on one line. Their messages are never printed.
+  const codes = [...new Set((report.warnings ?? []).map((entry) => entry.code))];
+  if (codes.length > 0) lines.push(`Service warnings: ${codes.join(", ")}`);
   const coverage = report.coverage;
   if (coverage) {
     const requested = coverage.requested_window;
@@ -114,6 +119,39 @@ function coverageLines(lines, report) {
             `${pricing.unknown_calls} unknown, ${pricing.priced_calls} priced of which ${pricing.zero_cost_calls} at zero)`,
     );
   }
+}
+
+// Notices for human output, without lines that repeat what the report
+// already printed. JSON output keeps every notice token.
+// - A Coverage line with completeness and reasons supersedes the generic
+//   incomplete-evidence and truncation notices.
+// - A Pricing line supersedes the lower-bound notice.
+// - The "mostly missing" warning supersedes the plain missing-values notice.
+// - Service warning codes are printed once on the "Service warnings" line,
+//   so the "messages omitted" note adds nothing in text.
+// A grouped report whose only rows are the no-value group, holding every call.
+function noCallHasTheKey(report) {
+  if (!report?.group_by || !report.population_totals || !Array.isArray(report.items)) return false;
+  const total = report.population_totals.calls;
+  return total > 0 && report.items.length > 0 && report.items.every((item) => !item.has_value)
+    && report.totals.calls === total;
+}
+
+function textNotices(tokens, report) {
+  const shown = new Set(tokens);
+  const coverage = report?.coverage ?? null;
+  if (coverage && coverage.completeness !== "complete") {
+    for (const token of ["evidence_incomplete", "rows_truncated", "metadata_groups_truncated"]) shown.delete(token);
+  }
+  if (report?.pricing) shown.delete("pricing_lower_bound");
+  if (shown.has("metadata_key_mostly_missing")) shown.delete("metadata_values_missing");
+  // The grouped body states outright when no call has the key.
+  if (noCallHasTheKey(report)) {
+    shown.delete("metadata_key_mostly_missing");
+    shown.delete("metadata_values_missing");
+  }
+  shown.delete("warning_messages_omitted");
+  return tokens.filter((token) => shown.has(token));
 }
 
 export function noticeText(token) {
@@ -173,7 +211,7 @@ export function readText(result, message, style = PLAIN) {
       lines.push(...fields(style, rows));
     }
   }
-  const notices = data.notices.map(noticeText).filter(Boolean);
+  const notices = textNotices(data.notices, result.ok ? data.result : null).map(noticeText).filter(Boolean);
   if (notices.length > 0) {
     lines.push("");
     for (const text of notices) {
@@ -361,6 +399,12 @@ function groupedUsageLines(report, lines) {
   }
   const rows = report.coverage.rows;
   const total = report.population_totals;
+  if (noCallHasTheKey(report)) {
+    lines.push(
+      "",
+      `No call in this window has a value for ${key}. Check the key's spelling and that the SDK sets it.`,
+    );
+  }
   lines.push(
     "",
     `Groups: ${rows.returned} shown of ${rows.matched} values.`,

@@ -318,6 +318,15 @@ export const READ_HELP = Object.freeze([
   },
 ]);
 
+// One "  FLAG  summary" line per option. The flag column keeps its usual
+// width but grows to fit the longest flag, so a flag never runs into its
+// summary.
+function optionLines(options, minimum) {
+  const flags = options.map((option) => (option.value ? `${option.name} ${option.value}` : option.name));
+  const width = Math.max(minimum, ...flags.map((flag) => flag.length + 2));
+  return options.map((option, index) => `  ${flags[index].padEnd(width)}${option.summary}`);
+}
+
 export function helpData(topic) {
   return {
     topic,
@@ -440,10 +449,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of DOCTOR_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(DOCTOR_OPTIONS, 18));
     lines.push(
       "",
       "ORIGIN must be a bare https origin such as https://metergraph.example.com.",
@@ -460,10 +466,7 @@ export function helpText(topic, style = PLAIN) {
       "operator prerequisite attestation; OSS remains an operator handoff. No application",
       "traffic is claimed until an exact instrumented invocation is separately verified.",
       "", "Options:");
-    for (const option of helpData(null).commands.find((entry) => entry.name === "setup").options) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
-    }
+    lines.push(...optionLines(helpData(null).commands.find((entry) => entry.name === "setup").options, 25));
     lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
@@ -493,20 +496,14 @@ export function helpText(topic, style = PLAIN) {
       );
     }
     lines.push("Options:");
-    for (const option of login ? LOGIN_OPTIONS : LOGOUT_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(login ? LOGIN_OPTIONS : LOGOUT_OPTIONS, 18));
     if (login) lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "verify") {
     lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
       "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
       "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
-    for (const option of VERIFY_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(22)}${option.summary}`);
-    }
+    lines.push(...optionLines(VERIFY_OPTIONS, 22));
   } else if (READ_HELP.some((entry) => entry.name === topic)) {
     const entry = READ_HELP.find((candidate) => candidate.name === topic);
     lines.push(
@@ -523,10 +520,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of entry.options) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(entry.options, 18));
   } else if (topic === "skill") {
     lines.push(
       "Usage:",
@@ -539,10 +533,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of SKILL_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(SKILL_OPTIONS, 18));
     lines.push(
       "",
       "install never replaces an existing skill. update replaces only a skill this CLI",
@@ -571,10 +562,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of SKILL_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(SKILL_OPTIONS, 18));
     lines.push(
       "",
       "install never replaces an existing skill. update replaces only skills this CLI",

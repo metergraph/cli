@@ -747,7 +747,11 @@ export function usageAggregatesDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
   const dimension = query.get("group_by");
-  const groups = [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }];
+  // A key no call carries: every call is in the null group.
+  const absent = dimension === "metadata.activity_name";
+  const groups = absent
+    ? [{ value: null, calls: 64, cost_usd: 0.064 }]
+    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }];
   const listed = groups.slice(0, limit);
   const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
   const metrics = (calls, cost) => ({
@@ -775,7 +779,11 @@ export function usageAggregatesDocument(provenance, query) {
       timezone: "UTC",
     },
     evidence: { sources: ["calls"], rows: listed.length, complete: listed.length === groups.length },
-    warnings: listed.length === groups.length ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }],
+    warnings: [
+      ...(listed.length === groups.length ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }]),
+      ...(absent ? [{ code: "metadata_key_mostly_missing", message: "SYNTHETIC_BODY_MARKER" }] : []),
+      { code: "pricing_incomplete", message: "SYNTHETIC_BODY_MARKER" },
+    ],
     coverage: {
       ...metadataCoverage(query, {
         shape: "top_n",

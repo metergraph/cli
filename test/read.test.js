@@ -1024,3 +1024,41 @@ test("a grouped usage response without coverage is refused", async () => {
     await server.close();
   }
 });
+
+test("a grouping no call has a value for says so once, without repeated notices", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    const json = await read(box, server, ["usage", "--group-by-metadata", "activity_name"]);
+    assert.equal(json.run.code, 0, json.run.stdout);
+    const report = json.result.data.result;
+    assert.deepEqual(report.items.map((item) => item.has_value), [false]);
+    assert.equal(report.items[0].calls, report.population_totals.calls);
+    // JSON keeps every notice token.
+    assert.ok(json.result.data.notices.includes("metadata_key_mostly_missing"));
+    assert.ok(json.result.data.notices.includes("metadata_values_missing"));
+
+    const text = await read(box, server, ["usage", "--group-by-metadata", "activity_name"], { json: false });
+    const out = text.run.stdout;
+    assert.match(out, /No call in this window has a value for activity_name\./);
+    assert.match(out, /Service warnings: metadata_key_mostly_missing, pricing_incomplete/);
+    // The explicit line replaces the generic notices; nothing is said twice.
+    assert.ok(!out.includes("Most of this window"));
+    assert.ok(!out.includes("Some calls have no usable value"));
+    assert.ok(!out.includes("Service warning messages are not printed"));
+    assert.ok(!out.includes("SYNTHETIC_BODY_MARKER"));
+    const notices = out.split("\n").filter((line) => line.trimStart().startsWith("! "));
+    assert.equal(new Set(notices).size, notices.length);
+  });
+});
+
+test("a truncated grouping prints its coverage once instead of three truncation notices", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    const text = await read(box, server, ["usage", "--group-by-metadata", "prompt_id", "--limit", "2"], { json: false });
+    const out = text.run.stdout;
+    assert.match(out, /Coverage: partial \(.*row_limit/);
+    assert.ok(!out.includes("The service marked this evidence as incomplete"));
+    assert.ok(!out.includes("More metadata values exist than --limit"));
+    assert.ok(!out.includes("cost is a lower bound."));
+  });
+});

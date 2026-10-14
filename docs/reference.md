@@ -668,7 +668,16 @@ evidence as any other read. `coverage.rows` gives `returned`, `limit`, `truncate
 `complete` is `false`, `coverage.completeness` is `partial` and the notice
 `metadata_groups_truncated` is set. A response not grouped by the requested key exits
 11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same
-reason. A service without the `usage_aggregates` capability exits 14.
+reason. A service without the `usage_aggregates` capability exits 14. When the service
+warns `metadata_key_mostly_missing` (calls without a usable value hold at least half of
+the window's calls or cost), the notice `metadata_key_mostly_missing` is set. When no
+call has the key at all, human output says so in one line and suggests checking the
+key's spelling.
+
+In human output, notices that repeat a printed line are left out: the Coverage line
+replaces the incomplete-evidence and truncation notices, the Pricing line replaces the
+lower-bound notice, and service warning codes are printed once on a `Service warnings`
+line. `--json` keeps every notice token.
 
 ```sh
 metergraph usage --days 7 --group-by-metadata prompt_id --json

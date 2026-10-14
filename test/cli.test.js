@@ -199,3 +199,17 @@ test("unknown commands, arguments and bad timeouts exit 2 without echo", async (
     assertNoLeak(assert, json.stdout, json.stderr);
   }
 });
+
+test("every help topic keeps at least two spaces between a flag and its summary", async () => {
+  for (const topic of [
+    "doctor", "skill", "skills", "login", "logout", "setup", "verify",
+    "status", "context", "capabilities", "usage", "routes", "traces",
+  ]) {
+    const { stdout } = await runCli(["help", topic]);
+    for (const line of stdout.split("\n")) {
+      const match = /^ {2}(--[a-z-]+)( (?:[A-Z][A-Za-z_=./|-]*))?(.*)$/.exec(line);
+      if (!match || match[3] === "") continue;
+      assert.match(match[3], /^ {2,}\S/, `${topic}: ${line.slice(0, 60)}`);
+    }
+  }
+});

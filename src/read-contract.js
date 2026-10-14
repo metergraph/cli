@@ -780,6 +780,7 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
   if (!proof.complete) notices.add("evidence_incomplete");
   if (truncated) notices.add("metadata_groups_truncated");
   if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
+  if (codes.some((entry) => entry.code === "metadata_key_mostly_missing")) notices.add("metadata_key_mostly_missing");
   return {
     provenance: origin,
     window: span,

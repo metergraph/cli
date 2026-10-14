@@ -18,7 +18,12 @@
   or with a non-string value form one group with no value, and the window totals
   cover every call. The service must echo the applied filters in its coverage
   evidence; an older service that does not is refused with
-  `metadata_filter_unsupported`.
+  `metadata_filter_unsupported`. A grouping where no call has the key says so in one
+  line.
+- Help keeps a gap between every option and its description, however long the option.
+- Human `usage` and `traces` output no longer repeats a notice that restates a printed
+  Coverage or Pricing line, and prints service warning codes once. `--json` is
+  unchanged.
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line
