@@ -12,16 +12,16 @@
     "limit": 50,
     "mode": "top_n",
     "returned": 2,
-    "to": "2026-10-14T17:31:53.328062+00:00"
+    "to": "2026-10-14T17:54:38.272622+00:00"
   },
   "content_included": false,
   "coverage": {
-    "as_of": "2026-10-14T17:31:53.329588+00:00",
+    "as_of": "2026-10-14T17:54:38.274552+00:00",
     "completeness": "unknown",
     "effective_window": {
-      "days": 6.730478,
+      "days": 6.746276,
       "since": "2026-10-08T00:00:00+00:00",
-      "until": "2026-10-14T17:31:53.328062+00:00"
+      "until": "2026-10-14T17:54:38.272622+00:00"
     },
     "filters": {
       "environments": [
@@ -37,9 +37,9 @@
       "ingestion_unverified"
     ],
     "requested_window": {
-      "days": 6.730478,
+      "days": 6.746276,
       "since": "2026-10-08T00:00:00+00:00",
-      "until": "2026-10-14T17:31:53.328062+00:00"
+      "until": "2026-10-14T17:54:38.272622+00:00"
     },
     "rows": {
       "limit": 50,
@@ -64,7 +64,7 @@
   "items": [
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.3,
       "cost_usd": 0.3,
@@ -90,7 +90,7 @@
     },
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.2,
       "cost_usd": 0.2,
@@ -128,14 +128,14 @@
     "environments": [
       "staging"
     ],
-    "generated_at": "2026-10-14T17:31:53.329588+00:00",
+    "generated_at": "2026-10-14T17:54:38.274552+00:00",
     "source": "live-database",
     "workspace_id": "00000000-0000-4000-8000-00000000c0de"
   },
   "schema_version": "metergraph.agent-access/v1",
   "totals": {
     "cache_read_tokens": 20,
-    "cache_write_tokens": 10,
+    "cache_write_tokens": 24,
     "calls": 2,
     "cost_per_call_usd": 0.25,
     "cost_usd": 0.5,
@@ -162,7 +162,7 @@
     "preset": "utc_days",
     "since": "2026-10-08T00:00:00+00:00",
     "timezone": "UTC",
-    "until": "2026-10-14T17:31:53.328062+00:00",
+    "until": "2026-10-14T17:54:38.272622+00:00",
     "until_is_request_time": true
   }
 }

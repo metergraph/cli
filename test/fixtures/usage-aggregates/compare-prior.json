@@ -16,7 +16,7 @@
   },
   "content_included": false,
   "coverage": {
-    "as_of": "2026-10-14T17:31:53.221718+00:00",
+    "as_of": "2026-10-14T17:54:38.126327+00:00",
     "completeness": "complete",
     "effective_window": {
       "days": 1.0,
@@ -63,7 +63,7 @@
   "items": [
     {
       "cache_read_tokens": 20,
-      "cache_write_tokens": 10,
+      "cache_write_tokens": 24,
       "calls": 2,
       "cost_per_call_usd": 0.45,
       "cost_usd": 0.9,
@@ -89,7 +89,7 @@
     },
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.35,
       "cost_usd": 0.35,
@@ -115,7 +115,7 @@
     },
     {
       "cache_read_tokens": 20,
-      "cache_write_tokens": 10,
+      "cache_write_tokens": 24,
       "calls": 2,
       "cost_per_call_usd": 0.02,
       "cost_usd": 0.04,
@@ -151,14 +151,14 @@
   "provenance": {
     "deployment_profile": "local",
     "environments": null,
-    "generated_at": "2026-10-14T17:31:53.221718+00:00",
+    "generated_at": "2026-10-14T17:54:38.126327+00:00",
     "source": "live-database",
     "workspace_id": "00000000-0000-4000-8000-00000000c0de"
   },
   "schema_version": "metergraph.agent-access/v1",
   "totals": {
     "cache_read_tokens": 50,
-    "cache_write_tokens": 25,
+    "cache_write_tokens": 60,
     "calls": 5,
     "cost_per_call_usd": 0.258,
     "cost_usd": 1.29,

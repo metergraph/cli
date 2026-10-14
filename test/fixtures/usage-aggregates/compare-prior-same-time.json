@@ -12,16 +12,16 @@
     "limit": 50,
     "mode": "top_n",
     "returned": 3,
-    "to": "2026-10-13T17:31:53.124257+00:00"
+    "to": "2026-10-13T17:54:38.050253+00:00"
   },
   "content_included": false,
   "coverage": {
-    "as_of": "2026-10-14T17:31:53.239508+00:00",
+    "as_of": "2026-10-14T17:54:38.143400+00:00",
     "completeness": "complete",
     "effective_window": {
-      "days": 0.730476,
+      "days": 0.746274,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T17:31:53.124257+00:00"
+      "until": "2026-10-13T17:54:38.050253+00:00"
     },
     "filters": {
       "environments": null,
@@ -33,9 +33,9 @@
     "next_cursor": null,
     "reasons": [],
     "requested_window": {
-      "days": 0.730476,
+      "days": 0.746274,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T17:31:53.124257+00:00"
+      "until": "2026-10-13T17:54:38.050253+00:00"
     },
     "rows": {
       "limit": 50,
@@ -61,7 +61,7 @@
   "items": [
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.9,
       "cost_usd": 0.9,
@@ -87,7 +87,7 @@
     },
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.35,
       "cost_usd": 0.35,
@@ -113,7 +113,7 @@
     },
     {
       "cache_read_tokens": 10,
-      "cache_write_tokens": 5,
+      "cache_write_tokens": 12,
       "calls": 1,
       "cost_per_call_usd": 0.02,
       "cost_usd": 0.02,
@@ -149,14 +149,14 @@
   "provenance": {
     "deployment_profile": "local",
     "environments": null,
-    "generated_at": "2026-10-14T17:31:53.239508+00:00",
+    "generated_at": "2026-10-14T17:54:38.143400+00:00",
     "source": "live-database",
     "workspace_id": "00000000-0000-4000-8000-00000000c0de"
   },
   "schema_version": "metergraph.agent-access/v1",
   "totals": {
     "cache_read_tokens": 30,
-    "cache_write_tokens": 15,
+    "cache_write_tokens": 36,
     "calls": 3,
     "cost_per_call_usd": 0.42333333,
     "cost_usd": 1.27,
@@ -178,7 +178,7 @@
     "preset": null,
     "since": "2026-10-13T00:00:00+00:00",
     "timezone": "UTC",
-    "until": "2026-10-13T17:31:53.124257+00:00",
+    "until": "2026-10-13T17:54:38.050253+00:00",
     "until_is_request_time": false
   }
 }

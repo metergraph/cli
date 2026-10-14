@@ -12,16 +12,16 @@
     "limit": 50,
     "mode": "top_n",
     "returned": 3,
-    "to": "2026-10-14T17:31:53.172312+00:00"
+    "to": "2026-10-14T17:54:38.087595+00:00"
   },
   "content_included": false,
   "coverage": {
-    "as_of": "2026-10-14T17:31:53.174257+00:00",
+    "as_of": "2026-10-14T17:54:38.089515+00:00",
     "completeness": "complete",
     "effective_window": {
-      "days": 6.730477,
+      "days": 6.746274,
       "since": "2026-10-08T00:00:00+00:00",
-      "until": "2026-10-14T17:31:53.172312+00:00"
+      "until": "2026-10-14T17:54:38.087595+00:00"
     },
     "filters": {
       "environments": null,
@@ -35,9 +35,9 @@
       "pricing_unknown"
     ],
     "requested_window": {
-      "days": 6.730477,
+      "days": 6.746274,
       "since": "2026-10-08T00:00:00+00:00",
-      "until": "2026-10-14T17:31:53.172312+00:00"
+      "until": "2026-10-14T17:54:38.087595+00:00"
     },
     "rows": {
       "limit": 50,
@@ -63,7 +63,7 @@
   "items": [
     {
       "cache_read_tokens": 70,
-      "cache_write_tokens": 35,
+      "cache_write_tokens": 84,
       "calls": 7,
       "cost_per_call_usd": 0.4,
       "cost_usd": 2.8,
@@ -89,7 +89,7 @@
     },
     {
       "cache_read_tokens": 30,
-      "cache_write_tokens": 15,
+      "cache_write_tokens": 36,
       "calls": 3,
       "cost_per_call_usd": 0.26666667,
       "cost_usd": 0.8,
@@ -115,7 +115,7 @@
     },
     {
       "cache_read_tokens": 40,
-      "cache_write_tokens": 20,
+      "cache_write_tokens": 48,
       "calls": 4,
       "cost_per_call_usd": 0.0175,
       "cost_usd": 0.07,
@@ -151,14 +151,14 @@
   "provenance": {
     "deployment_profile": "local",
     "environments": null,
-    "generated_at": "2026-10-14T17:31:53.174257+00:00",
+    "generated_at": "2026-10-14T17:54:38.089515+00:00",
     "source": "live-database",
     "workspace_id": "00000000-0000-4000-8000-00000000c0de"
   },
   "schema_version": "metergraph.agent-access/v1",
   "totals": {
     "cache_read_tokens": 140,
-    "cache_write_tokens": 70,
+    "cache_write_tokens": 168,
     "calls": 14,
     "cost_per_call_usd": 0.26214286,
     "cost_usd": 3.67,
@@ -185,7 +185,7 @@
     "preset": "utc_days",
     "since": "2026-10-08T00:00:00+00:00",
     "timezone": "UTC",
-    "until": "2026-10-14T17:31:53.172312+00:00",
+    "until": "2026-10-14T17:54:38.087595+00:00",
     "until_is_request_time": true
   }
 }
