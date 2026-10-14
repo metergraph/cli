@@ -233,6 +233,8 @@ export async function runRead(options) {
     }
 
     const fetchOne = async (query, request, into) => {
+      // When this read was asked for, to check a window that ends "now".
+      request = { ...request, requestedAt: Date.now() };
       const response = await fetchRead(session.session, read.path, query, limit.signal);
       if (!response.ok) {
         // A key refused moments after it was verified was revoked meanwhile.

@@ -245,7 +245,10 @@ export function noticeText(token) {
 
 const yesNo = (value) => (value === true ? "yes" : value === false ? "no" : "not checked");
 const show = (value) => (value === null || value === undefined ? "-" : String(value));
-const usd = (value) => (value === null ? "-" : `$${value.toFixed(4)}`);
+// Four decimals, or the service's eight for a non-zero amount below $0.0001,
+// so a small cost never prints as zero.
+const usd = (value) =>
+  value === null ? "-" : `$${value !== 0 && Math.abs(value) < 0.0001 ? value.toFixed(8) : value.toFixed(4)}`;
 
 function table(header, rows) {
   const widths = header.map((title, column) =>
@@ -485,6 +488,9 @@ const cellOf = (item, dimension) => {
   if (dimension.startsWith("metadata.")) return item.has_value ? show(item.metadata_value) : "(no value)";
   return show(item[dimension]);
 };
+// A change in dollars: four decimals, or the service's eight when smaller, so
+// a non-zero change never prints as zero.
+const usdChange = (value) => `$${value !== 0 && value < 0.0001 ? value.toFixed(8) : value.toFixed(4)}`;
 const signed = (value, format) => (value === null ? "-" : `${value > 0 ? "+" : value < 0 ? "-" : ""}${format(Math.abs(value))}`);
 const percent = (value) => (value === null ? "-" : `${value > 0 ? "+" : ""}${value}%`);
 
@@ -585,7 +591,7 @@ function comparisonLines(report, lines) {
       windowLine(comparison.prior.window),
     `Total cost: ${usd(totals.current.cost_usd)} now, ${usd(totals.prior.cost_usd)} before, ` +
       (totals.cost_change_known
-        ? `${signed(totals.cost_change.delta, (value) => `$${value.toFixed(4)}`)} (${percent(totals.cost_change.percent)})`
+        ? `${signed(totals.cost_change.delta, usdChange)} (${percent(totals.cost_change.percent)})`
         : "change unknown (a window's cost is a lower bound)"),
     `Calls: ${totals.current.calls} now, ${totals.prior.calls} before, ` +
       `${signed(totals.calls_change.delta, String)} (${percent(totals.calls_change.percent)})`,
@@ -600,7 +606,7 @@ function comparisonLines(report, lines) {
       ...report.group_by.map((dimension) => (dimension === "day" ? show(item.day) : cellOf(item, dimension))),
       item.current === null ? "unknown" : usd(item.current.cost_usd),
       item.prior === null ? "unknown" : usd(item.prior.cost_usd),
-      signed(item.cost_change.delta, (value) => `$${value.toFixed(4)}`),
+      signed(item.cost_change.delta, usdChange),
       percent(item.cost_change.percent),
       item.current === null ? "unknown" : String(item.current.calls),
       item.prior === null ? "unknown" : String(item.prior.calls),
@@ -615,8 +621,10 @@ function comparisonLines(report, lines) {
     );
   }
   const prior = comparison.prior;
+  const priorCodes = [...new Set((prior.warnings ?? []).map((entry) => entry.code))];
   lines.push(
     "",
+    ...(priorCodes.length > 0 ? [`Prior service warnings: ${priorCodes.join(", ")}`] : []),
     `Prior coverage: ${prior.coverage?.completeness ?? "not reported"}` +
       (prior.coverage && prior.coverage.reasons.length > 0 ? ` (${prior.coverage.reasons.join(", ")})` : "") +
       `; pricing ${prior.pricing?.cost === "exact" ? "exact" : prior.pricing ? "lower bound" : "not reported"}`,

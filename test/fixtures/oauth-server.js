@@ -854,9 +854,21 @@ function syntheticMetadataAggregates(provenance, query) {
 // dataset (test/fixtures/usage-aggregates, recorded over HTTP with the MCP
 // tool returning the same document). parity.json maps each recorded query to
 // its document. The bound workspace and profile replace the recorded ones.
+//
+// The documents were recorded on one UTC day, and the CLI checks that a window
+// ending "now" ends on the UTC day of the request. So every date in them (and
+// in the recorded queries) is moved forward by whole days to today: the same
+// documents, translated in time, with every UTC-day alignment unchanged.
 const AGGREGATE_FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "usage-aggregates");
-export const aggregateFixture = (name) =>
-  JSON.parse(fs.readFileSync(path.join(AGGREGATE_FIXTURES, `${name}.json`), "utf8"));
+const readFixture = (name) => fs.readFileSync(path.join(AGGREGATE_FIXTURES, `${name}.json`), "utf8");
+const RECORDED_DAY = Date.parse(`${JSON.parse(readFixture("route-today")).window.until.slice(0, 10)}T00:00:00Z`);
+const SHIFT_DAYS = Math.round((Math.floor(Date.now() / DAY_MS) * DAY_MS - RECORDED_DAY) / DAY_MS);
+const shiftDates = (text) =>
+  SHIFT_DAYS === 0
+    ? text
+    : text.replace(/\b(\d{4})-(\d{2})-(\d{2})(?=T|")/g, (match, year, month, day) =>
+      new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)) + SHIFT_DAYS * DAY_MS).toISOString().slice(0, 10));
+export const aggregateFixture = (name) => JSON.parse(shiftDates(readFixture(name)));
 const AGGREGATE_PARITY = aggregateFixture("parity");
 
 function sameAggregateQuery(recorded, query) {

@@ -110,8 +110,13 @@ const isAmount = (value) => typeof value === "number" && Number.isFinite(value) 
 const isToken = (value) => typeof value === "string" && TOKEN.test(value);
 const isTimestamp = (value) =>
   typeof value === "string" && value.length <= 40 && TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
-const isDate = (value) =>
-  typeof value === "string" && DATE.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+// A real calendar date: the parser rolls 2026-02-30 over to March, so the
+// parsed date must print back as the same string.
+const isDate = (value) => {
+  if (typeof value !== "string" || !DATE.test(value)) return false;
+  const parsed = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+};
 
 export function hasUnsafeText(value) {
   for (const char of value) {
@@ -582,6 +587,8 @@ function usageMetrics(row, reason) {
     latency.p95_method !== P95_METHOD ||
     !isCount(latency.samples) ||
     latency.samples > row.calls ||
+    // Latency measured from no calls is no latency.
+    (latency.samples === 0 && (latency.avg_ms !== null || latency.p95_ms !== null)) ||
     // cost_per_call_usd must be cost_usd / calls, to the service's 8-decimal rounding.
     (row.calls > 0 && Math.abs(row.cost_per_call_usd * row.calls - row.cost_usd) > costTolerance(row.calls))
   ) {
@@ -628,6 +635,17 @@ function usageWindow(value, request, reason) {
       since !== utcMidnight(until) - (request.days - 1) * DAY_MS
     ) {
       throw new Invalid("verification_failed", "window_mismatch");
+    }
+    // A window that ends at the request time must end on the UTC day of this
+    // request (or, within an hour after midnight, the day before), so a
+    // response kept from an earlier day is never read as "today so far".
+    if (request.requestedAt !== undefined && request.requestedAt !== null) {
+      const today = utcMidnight(request.requestedAt);
+      const day = utcMidnight(until);
+      const nearMidnight = request.requestedAt - today < HOUR_MS;
+      if (day !== today && !(nearMidnight && day === today - DAY_MS)) {
+        throw new Invalid("verification_failed", "window_mismatch");
+      }
     }
   } else if (
     value.preset !== null ||
@@ -884,7 +902,14 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     }
     // The groups must come in the service's stated cost order; a cut list is
     // only the highest-cost groups when that is the order.
-    const costOrdered = items.every((item, index) => index === 0 || items[index - 1].cost_usd >= item.cost_usd);
+    // Cost descending, then calls descending for equal cost. The final key
+    // (group key ascending) follows the service's collation, which the CLI
+    // does not reproduce.
+    const costOrdered = items.every((item, index) => {
+      if (index === 0) return true;
+      const before = items[index - 1];
+      return before.cost_usd > item.cost_usd || (before.cost_usd === item.cost_usd && before.calls >= item.calls);
+    });
     if (!costOrdered || coverage.rows.ordering !== AGGREGATE_ORDERING) {
       throw new Invalid("verification_failed", reason);
     }

@@ -828,3 +828,73 @@ test("prior-window notices the comparison does not state are still shown", async
   assert.match(text, /Prior window: Some names contained control or formatting characters/);
   assert.ok(!text.includes("Prior window: Some calls have missing"));
 });
+
+test("a stale 'today so far' window, impossible dates, sampleless latency and broken call order are refused", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite, reason) => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, reason);
+    };
+    // A response kept from two days ago: internally aligned, but not today.
+    const back = (stamp) => new Date(Date.parse(stamp) - 2 * 24 * 60 * 60 * 1000).toISOString();
+    await refused(["--group-by", "route", "--today"], (doc) => ({
+      ...doc,
+      window: { ...doc.window, since: back(doc.window.since), until: back(doc.window.until) },
+      coverage: {
+        ...doc.coverage,
+        requested_window: { ...doc.coverage.requested_window, since: back(doc.window.since), until: back(doc.window.until) },
+        effective_window: { ...doc.coverage.effective_window, since: back(doc.window.since), until: back(doc.window.until) },
+      },
+    }), "window_mismatch");
+    const item0 = (doc, change) => ({ ...doc, items: [{ ...doc.items[0], ...change(doc.items[0]) }, ...doc.items.slice(1)] });
+    // A calendar date that does not exist.
+    await refused(["--route", "support", "--group-by", "day"], (doc) => item0(doc, () => ({ day: "2026-02-30" })), "usage_response_invalid");
+    // Latency from no samples.
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ latency: { ...item.latency, samples: 0 } })), "usage_response_invalid");
+    // Equal cost, fewer calls listed first.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc,
+      items: [
+        { ...doc.items[0], calls: doc.items[1].calls },
+        { ...doc.items[1], cost_usd: doc.items[0].cost_usd, calls: doc.items[0].calls },
+        ...doc.items.slice(2),
+      ],
+    }), "usage_response_invalid");
+  });
+});
+
+test("absence proves zero only in a complete window, and tiny changes print at full precision", async () => {
+  const { compareReports } = await import("../src/usage-aggregates.js");
+  const { readText } = await import("../src/read-output.js");
+  const pricing = { priced_calls: 1, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" };
+  const side = (items, complete) => ({
+    group_by: ["route"], truncated: false, complete, items, pricing,
+    window: { hours: 24, partial_days: [] }, totals: { calls: 1, error_calls: 0, cost_usd: 0.000001 },
+  });
+  const item = (route, cost) => ({ route, calls: 1, error_calls: 0, cost_usd: cost, pricing });
+  // The prior window is not truncated but incomplete (for example ingestion pending).
+  const pending = compareReports(side([item("a", 1)], true), side([], false), "previous", new Set());
+  assert.equal(pending.items[0].prior, null);
+
+  const tiny = compareReports(side([item("a", 0.0000014)], true), side([item("a", 0.000001)], true), "previous", new Set());
+  const window = { preset: null, days: null, since: "2026-01-01T00:00:00Z", until: "2026-01-02T00:00:00Z", hours: 24, partial_days: [] };
+  const report = {
+    source: "usage_aggregates", group_by: ["route"], filters: { route: 0, provider: 0, model: 0, environment: 0, metadata: { count: 0, keys: [] } },
+    window, sort: { by: "cost", meaning: "cost, highest first", complete: true }, items: [], empty: true, rows: 0, matched_groups: 0,
+    totals: { calls: 1, error_calls: 0, cost_usd: 0.0000014, cost_per_call_usd: 0.0000014, input_tokens: 0, output_tokens: 0 },
+    coverage: null, pricing: null, attribution: null, complete: true, metadata_groups: null,
+    comparison: {
+      ...tiny,
+      totals: { ...tiny.totals, current: { calls: 1, cost_usd: 0.0000014 }, prior: { calls: 1, cost_usd: 0.000001 } },
+      prior: { ...tiny.prior, window, warnings: [{ code: "coverage_incomplete" }], coverage: null, pricing: null },
+    },
+  };
+  const text = readText({ command: "usage", ok: true, outcome: "ok", data: {
+    origin: "http://127.0.0.1:9", workspace: { id: "x" }, result: report, notices: [], next_action: null,
+  } }, null);
+  assert.match(text, /a +\$0\.00000140 +\$0\.00000100 +\+\$0\.00000040 +\+40%/);
+  assert.match(text, /Prior service warnings: coverage_incomplete/);
+});

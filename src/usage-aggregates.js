@@ -117,7 +117,9 @@ export function compareReports(current, prior, mode, notices) {
     calls: 0, error_calls: 0, cost_usd: 0,
     pricing: { priced_calls: 0, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" },
   };
-  const absent = (report) => (report.truncated ? null : zero);
+  // Absence proves zero only in a window whose evidence is complete (not cut,
+  // and nothing pending, clipped or unknown); otherwise it is unknown.
+  const absent = (report) => (report.complete ? zero : null);
   const group = (item) => Object.fromEntries(current.group_by.flatMap((dimension) =>
     dimension.startsWith("metadata.")
       ? [["metadata_key", item.metadata_key], ["metadata_value", item.metadata_value], ["has_value", item.has_value]]
