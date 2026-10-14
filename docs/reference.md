@@ -45,9 +45,9 @@ metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
-metergraph usage [--days N] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] [--group-by-metadata KEY] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
-metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
 ```
 
@@ -622,9 +622,9 @@ times for the grant.
 | `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
 | `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
 | `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
-| `usage` | `GET /v1/agent/usage?days=N&limit=N` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. |
+| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=]`, or with `--group-by-metadata KEY` `GET /v1/agent/usage/aggregates?days=N&limit=N&group_by=metadata.KEY[&metadata=]` (needs the `usage_aggregates` capability) | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. With `--group-by-metadata KEY`, one row per value of that key instead (see [Metadata filters and grouping](#metadata-filters-and-grouping)). |
 | `routes` | `GET /v1/agent/routes` | Route name, calls, replay eligible calls, evaluation contract version and hash, and whether a description or contract exists. |
-| `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
+| `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&metadata=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
 
 Bounds and honesty rules:
 
@@ -635,6 +635,40 @@ Bounds and honesty rules:
 - `usage` and `traces` report `truncated` and `complete`. Totals are sums of the
   returned rows only; when `complete` is `false` they are not workspace totals. An
   empty window is a successful result with `empty: true`.
+- When the service reports them, `usage` and `traces` also carry `coverage`,
+  `pricing` and `attribution`, and `usage` carries `population_totals`. An older
+  service omits them: the fields are `null` and the `coverage_not_reported` notice is
+  set. The existing fields keep their meaning.
+  - `coverage.completeness` is `complete`, `partial` or `unknown`, with sorted
+    `reasons` such as `row_limit`, `page_unread`, `window_clamped`,
+    `retention_clipped`, `ingestion_pending`, `ingestion_failed`,
+    `ingestion_unverified` or `evidence_missing`. `requested_window` and
+    `effective_window` show what was asked and what was read, `as_of` when, and
+    `filters_applied` which filters applied (names only, never values).
+    `complete` is `true` only when the evidence is complete, nothing was truncated
+    and coverage is `complete`. The CLI never reports a better completeness than
+    the reasons allow, and an unrecognized reason makes it at least `unknown`.
+  - `population_totals` covers every matching call in the window, whatever
+    `--limit` returned. `totals` remains the sum of the returned rows.
+  - `pricing.cost` is `exact` only when every call is priced. `zero_cost_calls` were
+    priced at zero; `unpriced_calls` have no price; `unknown_calls` cannot be told
+    apart from either. Otherwise cost is a `lower_bound` and the
+    `pricing_lower_bound` notice is set. Each usage row and trace carries its own
+    `pricing`.
+  - A trace `cost_usd` is the whole-trace total and is `null` when no call in it is
+    priced. `mixed_providers` and `mixed_models` mark traces that span more than
+    one, and `attribution.per_provider_exact` is always `false` for traces: a trace
+    total is never split by provider. Usage rows are attributed per call. When a
+    `--route` or `--status` filter selected calls rather than whole traces,
+    `attribution.cost_basis` is `matching_calls` and each row's cost, pricing and
+    flags cover only its matching calls.
+  - A final `traces` page without `next_cursor` is still `complete: false` when the
+    service reports any other reason, for example pending ingestion.
+  - The evidence must describe the document it arrives in, or the read exits 11
+    with `usage_response_invalid` or `traces_response_invalid`. Coverage must
+    match the returned rows, limit, truncation, cursor and requested days, and
+    pricing must account for every call in its row, trace or window. A traces
+    document must report trace-level, whole-trace attribution.
 - `GET /v1/agent/routes` takes no limit or window. The CLI validates every returned row,
   keeps the first `--limit`, and reports `server_rows`, `truncated` and
   `truncation: "local"`. Route descriptions, constraints and evaluation contract bodies
@@ -658,6 +692,74 @@ Bounds and honesty rules:
   refused read exits 15 (`insufficient_scope` or `forbidden`), rate limiting exits 16
   with `retry_after_seconds` when the service sends a whole number of seconds, and a
   token refused during the read exits 12. Nothing is retried. Ctrl+C exits 17.
+
+#### Metadata filters and grouping
+
+Metadata is the string dictionary your application attaches to calls with the SDK's
+tags (for example `metergraph.tags(prompt_id="reply-v3")` or
+`mg.withTags({ prompt_id: "reply-v3" }, ...)`). `usage` and `traces` can filter on it,
+and `usage` can group by one key.
+
+- `--metadata KEY=VALUE` keeps only calls whose metadata has exactly that value. It is
+  case-sensitive and opaque: nothing is trimmed, case folded or split on a prefix, so
+  `queue:job/Run-1` matches only itself. Repeat it for up to 5 keys; a call must
+  match all of them. The argument splits at the first `=`, so a value may contain `=`.
+- `KEY=` matches only calls where the key is present with an empty value. A call
+  without the key never matches any filter.
+- `--metadata-json '{"a=b":"v"}'` gives the same filters as one JSON object, for a key
+  that contains `=`. It cannot be combined with `--metadata`. Duplicate keys and
+  non-string values exit 2.
+- Keys are 1 to 200 characters without control or formatting characters (keys are
+  printed back), and values at most 1,000. The whole request query, measured as it is
+  sent, must fit in 2,048 characters, or the command exits 2 with `query_too_long`
+  before any request. Keys that look like
+  credentials (ending in `api_key`, `token`, `secret`, `password`, `auth` and similar)
+  are refused with exit 2, and the service refuses them too.
+- The CLI sends the filters as one JSON object in the `metadata` query parameter.
+  Trace and usage rows do not carry metadata, so the service must echo exactly the
+  requested pairs in its coverage evidence (`coverage.filters.metadata`). A service
+  that does not echo them exits 6 with `metadata_filter_unsupported`; a different
+  echo exits 11 with `metadata_filter_mismatch`. Filter values are never printed
+  back; only the keys and how many were applied (`filters.metadata`), and
+  `coverage.filters_applied.metadata` says whether any applied.
+- On `traces`, a metadata filter selects spans, like `--route`, so a trace's totals
+  cover its matching spans.
+
+`--group-by-metadata KEY` groups the whole window by one key, highest cost first, using
+the service's usage aggregates (`group_by=metadata.KEY`). A route is not a prompt: one
+route usually carries several prompt IDs, so
+`metergraph usage --group-by-metadata prompt_id` is how to split a route's cost by
+prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and
+pricing. Calls without the key, or with a non-string value or one over 1,000
+characters, form one row with `metadata_value: null` and `has_value: false`. Human
+output shows that row as `(no KEY value)`, and the notice `metadata_values_missing` is
+set. `--limit` caps the listed values. Truncation is read from the same coverage
+evidence as any other read. `coverage.rows` gives `returned`, `limit`, `truncated` and
+`matched` (the number of distinct values, including the no-value group), and
+`population_totals` covers every matching call. The CLI refuses a response where
+`coverage.rows` disagrees with the groups. It also refuses one whose rows are not
+highest cost first, one that returns fewer than `min(limit, matched)` rows (the read
+has no cursor), and one where the listed calls, errors, tokens or cost exceed the
+totals (or, untruncated, do not equal them). When values were cut, `truncated` is `true`,
+`complete` is `false`, `coverage.completeness` is `partial` and the notice
+`metadata_groups_truncated` is set. A response not grouped by the requested key exits
+11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same
+reason. A service without the `usage_aggregates` capability exits 14. When the service
+warns `metadata_key_mostly_missing` (calls without a usable value hold at least half of
+the window's calls or cost), the notice `metadata_key_mostly_missing` is set. When no
+call has the key at all, human output says so in one line and suggests checking the
+key's spelling.
+
+In human output, notices that repeat a printed line are left out: the Coverage line
+replaces the incomplete-evidence and truncation notices, the Pricing line replaces the
+lower-bound notice, and service warning codes are printed once on a `Service warnings`
+line. `--json` keeps every notice token.
+
+```sh
+metergraph usage --days 7 --group-by-metadata prompt_id --json
+metergraph usage --metadata workflow_id=wf-2041 --json
+metergraph traces --route support-reply --metadata prompt_id=reply-v3 --limit 5 --json
+```
 
 A successful `usage`, shortened:
 
@@ -722,8 +824,10 @@ A successful `usage`, shortened:
 
 On failure `result` is `null`, `authenticated` says whether the grant was verified
 before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
-`evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted` or
-`trace_links_unavailable`.
+`evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted`,
+`trace_links_unavailable`, `coverage_partial`, `coverage_unknown`,
+`coverage_not_reported`, `pricing_lower_bound`, `mixed_provider_traces` or
+`unpriced_traces`.
 
 #### Reads with a Metadata key
 

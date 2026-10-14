@@ -511,6 +511,7 @@ export function capabilitiesDocument(provenance) {
       capability_discovery: metadata("agent-access/capabilities"),
       routes: metadata("agent-access/routes"),
       usage: metadata("agent-access/usage"),
+      usage_aggregates: metadata("agent-access/usage-aggregates"),
       trace_metadata: metadata("agent-access/trace-metadata"),
       report_evidence: capability(false, false, "content", "agent:read", "agent-access/report-evidence", false),
       trace_content: capability(false, true, "content", "agent:read", "trace-debug/trace", false),
@@ -569,9 +570,49 @@ export const USAGE_ROWS = Object.freeze([
   },
 ]);
 
+// Synthetic metadata per usage group: one route carries several prompt IDs.
+export const PROMPT_GROUPS = Object.freeze([
+  { value: "reply-v3", calls: 40, cost_usd: 0.04, routes: ["checkout-summary"] },
+  { value: "reply-v2", calls: 12, cost_usd: 0.012, routes: ["checkout-summary"] },
+  { value: "triage=a:b/c", calls: 5, cost_usd: 0.005, routes: ["checkout-summary", "support-triage"] },
+]);
+
+// Echoes the metadata pairs a request applied, sorted by key, as the service does.
+function metadataEcho(query) {
+  if (!query.has("metadata")) return [];
+  return Object.entries(JSON.parse(query.get("metadata")))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => ({ key, value }));
+}
+
+const PRICED = (calls) => ({
+  priced_calls: calls, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact",
+});
+
+// The shared coverage envelope, added only to metadata reads so the existing
+// read tests keep exercising a service that does not report coverage.
+function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope, ordering = null }) {
+  return {
+    as_of: new Date().toISOString(),
+    requested_window: null,
+    effective_window: null,
+    filters: { environments: null, metadata: metadataEcho(query) },
+    rows: { shape, ordering, returned, limit, truncated, matched },
+    next_cursor: null,
+    totals_scope: totalsScope,
+    completeness: truncated ? "partial" : "complete",
+    reasons: truncated ? ["row_limit"] : [],
+  };
+}
+
 export function usageDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
+  const window = {
+    days,
+    since: new Date(Date.now() - days * DAY_MS).toISOString(),
+    until: new Date().toISOString(),
+  };
   const items = USAGE_ROWS.slice(0, limit).map((row) => ({ ...row }));
   return {
     schema_version: CONTRACT_VERSION,
@@ -585,6 +626,19 @@ export function usageDocument(provenance, query) {
     warnings: [],
     days,
     content_included: false,
+    ...(query.has("metadata")
+      ? {
+          coverage: metadataCoverage(query, {
+            shape: "top_n",
+            returned: items.length,
+            limit,
+            truncated: USAGE_ROWS.length > limit,
+            matched: USAGE_ROWS.length,
+            totalsScope: "population",
+          }),
+        }
+      : {}),
+    group_by: null,
     truncated: USAGE_ROWS.length > limit,
     items,
   };
@@ -656,15 +710,24 @@ export const TRACE_ROWS = Object.freeze(
   })),
 );
 
+// Synthetic SDK tags per trace. Rows never carry them; only the echo does.
+const TRACE_METADATA = Object.freeze({
+  "trace-0001": { prompt_id: "reply-v3", "a=b": "x" },
+  "trace-0002": { prompt_id: "reply-v30" },
+  "trace-0003": { prompt_id: "" },
+});
+
 // The cursor is opaque to the CLI. Here it is "page:OFFSET".
 export function tracesDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
   const offset = query.has("cursor") ? Number(query.get("cursor").slice(5)) : 0;
+  const metadata = query.has("metadata") ? JSON.parse(query.get("metadata")) : {};
   const rows = TRACE_ROWS.filter(
     (row) =>
       (!query.has("status") || row.status === query.get("status")) &&
-      (!query.has("route") || row.routes.includes(query.get("route"))),
+      (!query.has("route") || row.routes.includes(query.get("route"))) &&
+      Object.entries(metadata).every(([key, value]) => TRACE_METADATA[row.trace_id]?.[key] === value),
   );
   const traces = rows.slice(offset, offset + limit).map((row) => ({ ...row }));
   const truncated = offset + limit < rows.length;
@@ -681,14 +744,102 @@ export function tracesDocument(provenance, query) {
     warnings: [],
     page: { limit, truncated, next_cursor: next },
     content_included: false,
+    ...(query.has("metadata")
+      ? {
+          coverage: metadataCoverage(query, {
+            shape: "page",
+            returned: traces.length,
+            limit,
+            truncated,
+            matched: null,
+            totalsScope: "page",
+          }),
+        }
+      : {}),
     truncated,
     next_cursor: next,
     traces,
   };
 }
 
+// GET /v1/agent/usage/aggregates for one metadata.<key> dimension. The null
+// group holds the calls without an eligible value, so groups add up to totals.
+export function usageAggregatesDocument(provenance, query) {
+  const days = Number(query.get("days"));
+  const limit = Number(query.get("limit"));
+  const dimension = query.get("group_by");
+  // A key no call carries: every call is in the null group.
+  const absent = dimension === "metadata.activity_name";
+  const groups = absent
+    ? [{ value: null, calls: 64, cost_usd: 0.064 }]
+    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }].sort((a, b) => b.cost_usd - a.cost_usd);
+  const listed = groups.slice(0, limit);
+  const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
+  const metrics = (calls, cost) => ({
+    calls,
+    error_calls: 0,
+    cost_usd: cost,
+    cost_per_call_usd: calls ? cost / calls : null,
+    input_tokens: calls * 100,
+    output_tokens: calls * 20,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    latency: { avg_ms: 500, p95_ms: 900, p95_method: "histogram_estimate", samples: calls },
+  });
+  const allCalls = sum(groups, "calls");
+  return {
+    schema_version: CONTRACT_VERSION,
+    provenance,
+    window: {
+      days,
+      since: new Date(Date.now() - days * DAY_MS).toISOString(),
+      until: new Date().toISOString(),
+      preset: "utc_days",
+      until_is_request_time: true,
+      timezone: "UTC",
+    },
+    evidence: { sources: ["calls"], rows: listed.length, complete: listed.length === groups.length },
+    warnings: [
+      ...(listed.length === groups.length ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }]),
+      ...(absent ? [{ code: "metadata_key_mostly_missing", message: "SYNTHETIC_BODY_MARKER" }] : []),
+      { code: "pricing_incomplete", message: "SYNTHETIC_BODY_MARKER" },
+    ],
+    coverage: {
+      ...metadataCoverage(query, {
+        ordering: "cost_usd desc, calls desc, group key asc",
+        shape: "top_n",
+        returned: listed.length,
+        limit,
+        truncated: listed.length < groups.length,
+        matched: groups.length,
+        totalsScope: "population",
+      }),
+      reasons: [
+        ...(listed.length < groups.length ? ["row_limit"] : []),
+        "metadata_key_missing",
+      ],
+    },
+    completeness: { mode: "top_n", complete: listed.length === groups.length, limit, returned: listed.length },
+    totals: { scope: "population", ...metrics(allCalls, sum(groups, "cost_usd")) },
+    pricing: PRICED(allCalls),
+    attribution: {
+      level: "call", cost_basis: "call", per_provider_exact: true, mixed_provider_rows: 0, mixed_model_rows: 0,
+    },
+    content_included: false,
+    group_by: [dimension],
+    items: listed.map((group) => ({
+      [dimension]: group.value,
+      ...metrics(group.calls, group.cost_usd),
+      pricing: PRICED(group.calls),
+    })),
+  };
+}
+
 const READ_DOCUMENTS = {
   "/v1/agent/usage": { name: "usage", build: usageDocument },
+  // Grouped usage shares the usage hook, so tests rewrite either the same way.
+  "/v1/agent/usage/aggregates": { name: "usage", build: usageAggregatesDocument },
   "/v1/agent/routes": { name: "routes", build: routesDocument },
   "/v1/agent/traces": { name: "traces", build: tracesDocument },
 };

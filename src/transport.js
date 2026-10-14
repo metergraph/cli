@@ -1,11 +1,11 @@
 import http from "node:http";
 import https from "node:https";
 
-import { PACKAGE_NAME, READ_QUERY_KEYS, VERSION } from "./constants.js";
+import { MAX_QUERY_LENGTH, PACKAGE_NAME, READ_QUERY_KEYS, VERSION } from "./constants.js";
 import { classifyError } from "./http.js";
 
 const USER_AGENT = `${PACKAGE_NAME}/${VERSION}`;
-const MAX_QUERY_LENGTH = 2048;
+// MAX_QUERY_LENGTH is shared with argument validation (constants.js).
 
 // Builds the request URL. Without a query the path must be a fixed path on
 // the origin with no search part. A query is accepted only as a

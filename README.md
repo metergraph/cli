@@ -136,8 +136,8 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | --- | --- | --- |
 | `setup` | Sign in, choose a workspace, write the ingest key to `.env`, record the repository, install the skill | Yes |
 | `verify` | Confirm that one exact trace, by trace ID or request ID, reached the workspace | Yes |
-| `usage` | Daily calls, errors, cost, tokens and latency per route | Yes |
-| `traces` | One page of trace metadata, with a cursor for the next page | Yes |
+| `usage` | Daily calls, errors, cost, tokens and latency per route, filtered by exact metadata or grouped by one metadata key | Yes |
+| `traces` | One page of trace metadata, filtered by route, status or exact metadata, with a cursor for the next page | Yes |
 | `routes` | Routes with call counts and evaluation contract status | Yes |
 | `status` | Whether the project is signed in, and to which workspace | Yes |
 | `context` | Workspace details and retention | Yes |

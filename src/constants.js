@@ -97,10 +97,13 @@ export const READ_PATHS = Object.freeze({
   usage: "/v1/agent/usage",
   routes: "/v1/agent/routes",
   traces: "/v1/agent/traces",
+  // usage --group-by-metadata reads the grouped aggregates.
+  usageAggregates: "/v1/agent/usage/aggregates",
 });
 export const READ_QUERY_KEYS = Object.freeze({
-  "/v1/agent/usage": Object.freeze(["days", "limit"]),
-  "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor"]),
+  "/v1/agent/usage": Object.freeze(["days", "limit", "metadata"]),
+  "/v1/agent/usage/aggregates": Object.freeze(["days", "limit", "group_by", "metadata"]),
+  "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor", "metadata"]),
   "/v1/cli/setup/credential": Object.freeze(["family_id"]),
 });
 
@@ -119,6 +122,15 @@ export const READ_DEFAULT_LIMIT = 50;
 export const TRACES_DEFAULT_LIMIT = 20;
 export const MAX_CURSOR_LENGTH = 512;
 export const MAX_FILTER_LENGTH = 256;
+// Exact customer-metadata filters, matching the service's bounds. The service
+// also refuses credential-like keys; the CLI checks the same rule first.
+export const MAX_METADATA_FILTERS = 5;
+export const MAX_METADATA_KEY_LENGTH = 200;
+export const MAX_METADATA_VALUE_LENGTH = 1000;
+// The longest query string the transport sends. Read arguments are checked
+// against the exact query they produce, so a long one is an input error
+// before any request rather than a failure after sign in.
+export const MAX_QUERY_LENGTH = 2048;
 
 // One exit code per outcome. Documented in README.md; changing a value is a
 // breaking change for scripts. New outcomes are appended.

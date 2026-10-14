@@ -6,6 +6,7 @@ import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.
 import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
+  readQuery,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
@@ -33,6 +34,13 @@ const READS = Object.freeze({
   usage: { capability: "usage", path: READ_PATHS.usage, validate: usageReport },
   routes: { capability: "routes", path: READ_PATHS.routes, validate: routesReport },
   traces: { capability: "trace_metadata", path: READ_PATHS.traces, validate: tracesReport },
+});
+// usage --group-by-metadata groups server-side on the aggregates read; the
+// same usage validator checks it and the same output code prints it.
+const GROUPED_USAGE = Object.freeze({
+  capability: "usage_aggregates",
+  path: READ_PATHS.usageAggregates,
+  validate: usageReport,
 });
 
 export async function runRead(options) {
@@ -198,7 +206,7 @@ export async function runRead(options) {
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
 
-    const read = READS[options.command];
+    const read = options.command === "usage" && options.groupByMetadata ? GROUPED_USAGE : READS[options.command];
     const entry = capabilities.value.agent[read.capability];
     if (entry === null || entry.available !== true) return end("capability_unavailable", "capability_unavailable");
     // The service's own bounds; a request beyond them is refused, never
@@ -208,7 +216,7 @@ export async function runRead(options) {
       return end("unsupported", "exceeds_service_bounds");
     }
 
-    const response = await fetchRead(session.session, read.path, queryFor(options), limit.signal);
+    const response = await fetchRead(session.session, read.path, readQuery(options), limit.signal);
     if (!response.ok) {
       // A key refused moments after it was verified was revoked meanwhile.
       if (ctx.credential === "agent_key" && response.reason === "access_revoked") response.reason = "agent_key_rejected";
@@ -236,22 +244,9 @@ function requestOf(options) {
     route: options.route ?? null,
     status: options.status ?? null,
     cursor: options.cursor ?? null,
+    metadata: options.metadata ?? null,
+    groupByMetadata: options.groupByMetadata ?? null,
   };
-}
-
-// The query string is built here from validated options only. The routes
-// endpoint takes none.
-function queryFor(options) {
-  if (options.command === "routes") return null;
-  const query = new URLSearchParams();
-  query.set("days", String(options.days));
-  query.set("limit", String(options.limit));
-  if (options.command === "traces") {
-    if (options.route !== null) query.set("route", options.route);
-    if (options.status !== null) query.set("status", options.status);
-    if (options.cursor !== null) query.set("cursor", options.cursor);
-  }
-  return query;
 }
 
 // Unauthenticated GET /healthz on the bound origin, so status can tell an
