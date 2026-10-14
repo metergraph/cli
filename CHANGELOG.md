@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+- A first `setup` that has to sign in now needs one browser approval instead of two
+  when the service supports it: the sign-in consent also approves the project's
+  ingest key and names both. The sign-in grant and the ingest key stay separate
+  credentials with separate PKCE verifiers and separate revocation. Services without
+  support, projects already signed in, `--repair` and replacement keep the separate
+  ingest-only approval. With `--json --no-browser`, a first setup then takes two
+  runs instead of three.
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line

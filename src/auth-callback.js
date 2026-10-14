@@ -14,6 +14,9 @@ const HOST = "127.0.0.1";
 const MAX_URL_LENGTH = 4096;
 const MAX_CODE_LENGTH = 2048;
 const ALLOWED_PARAMS = new Set(["code", "state", "error", "error_description", "error_uri", "iss"]);
+// The setup receipt a combined sign-in approval returns next to the code.
+// Accepted only by a wait that asked for it.
+export const SETUP_CODE_PARAM = "ingest_setup_code";
 
 const PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
@@ -38,7 +41,9 @@ const PAGES = {
 //     accepted and the timeout is running. Call it before the authorization
 //     URL is opened or printed, so a fast browser can never reach an unarmed
 //     listener. It may be called once. The promise resolves with
-//     { kind: "code", code }
+//     { kind: "code", code[, setupCode] } setupCode, the ingest_setup_code
+//                                         value, only when wait() was given
+//                                         acceptSetupCode and it was sent
 //     { kind: "denied" }                  the user or server declined
 //     { kind: "error", reason }           authorization_error,
 //                                         callback_issuer_mismatch or
@@ -85,7 +90,7 @@ export async function startCallbackListener() {
     await done;
   };
 
-  const wait = ({ state, issuer, requireIss, timeoutMs, cancel }) => {
+  const wait = ({ state, issuer, requireIss, timeoutMs, cancel, acceptSetupCode = false }) => {
     if (armed) throw new Error("callback listener is already armed");
     armed = true;
     // The executor runs synchronously, so the handler and timer are in
@@ -105,7 +110,7 @@ export async function startCallbackListener() {
 
       handler = (request, response) => {
         if (settled) return respond(response, 410, PAGES.invalid);
-        const verdict = inspect(request, { host, state, issuer, requireIss });
+        const verdict = inspect(request, { host, state, issuer, requireIss, acceptSetupCode });
         if (verdict.result === undefined) return respond(response, verdict.status, PAGES.invalid);
         const result = verdict.result;
         respond(response, verdict.status, result.kind === "code" ? PAGES.done : PAGES.failed);
@@ -131,7 +136,7 @@ function respond(response, status, body) {
 
 // Returns { status } for a request that is ignored, or { status, result }
 // for the one request that ends the flow.
-function inspect(request, { host, state, issuer, requireIss }) {
+function inspect(request, { host, state, issuer, requireIss, acceptSetupCode }) {
   const url = request.url ?? "";
   if (url.length > MAX_URL_LENGTH) return { status: 414 };
   if (request.method !== "GET") return { status: 405 };
@@ -148,7 +153,9 @@ function inspect(request, { host, state, issuer, requireIss }) {
   }
   const seen = new Set();
   for (const key of params.keys()) {
-    if (!ALLOWED_PARAMS.has(key) || seen.has(key)) return { status: 400 };
+    if (!(ALLOWED_PARAMS.has(key) || (acceptSetupCode && key === SETUP_CODE_PARAM)) || seen.has(key)) {
+      return { status: 400 };
+    }
     seen.add(key);
   }
   // Only a request that carries this flow's exact state can end it.
@@ -158,7 +165,9 @@ function inspect(request, { host, state, issuer, requireIss }) {
     return { status: 400, result: { kind: "error", reason: "callback_issuer_mismatch" } };
   }
   if (seen.has("error")) {
-    if (seen.has("code")) return { status: 400, result: { kind: "error", reason: "callback_invalid" } };
+    if (seen.has("code") || seen.has(SETUP_CODE_PARAM)) {
+      return { status: 400, result: { kind: "error", reason: "callback_invalid" } };
+    }
     return params.get("error") === "access_denied"
       ? { status: 200, result: { kind: "denied" } }
       : { status: 200, result: { kind: "error", reason: "authorization_error" } };
@@ -167,7 +176,12 @@ function inspect(request, { host, state, issuer, requireIss }) {
   if (code === null || code.length === 0 || code.length > MAX_CODE_LENGTH || /[^\x21-\x7e]/.test(code)) {
     return { status: 400, result: { kind: "error", reason: "callback_invalid" } };
   }
-  return { status: 200, result: { kind: "code", code } };
+  if (!seen.has(SETUP_CODE_PARAM)) return { status: 200, result: { kind: "code", code } };
+  const setupCode = params.get(SETUP_CODE_PARAM);
+  if (setupCode.length === 0 || setupCode.length > MAX_CODE_LENGTH || /[^\x21-\x7e]/.test(setupCode)) {
+    return { status: 400, result: { kind: "error", reason: "callback_invalid" } };
+  }
+  return { status: 200, result: { kind: "code", code, setupCode } };
 }
 
 function sameText(actual, expected) {

@@ -217,3 +217,50 @@ test("an open idle connection does not keep a closed listener alive", async () =
   await listener.close();
   await closed;
 });
+
+test("a setup receipt is accepted next to the code only when the wait asks for it", async () => {
+  const receipt = "mgbs_synthetic-receipt-cccccccccccccccccccc";
+  const withReceipt = `${valid}&ingest_setup_code=${receipt}`;
+  const plain = await listen();
+  try {
+    // An ordinary sign in treats the extra field as a malformed callback.
+    assert.equal((await hit(plain.port, withReceipt)).status, 400);
+    assert.equal((await hit(plain.port, valid)).status, 200);
+    assert.deepEqual(await plain.waiting, { kind: "code", code: CODE });
+  } finally {
+    await plain.listener.close();
+  }
+
+  // A duplicated receipt is ignored like any duplicated field; an empty or
+  // oversized one ends the flow as invalid.
+  for (const target of [`${valid}&ingest_setup_code=`, `${valid}&ingest_setup_code=${"r".repeat(2049)}`]) {
+    const bad = await listen({ acceptSetupCode: true });
+    try {
+      assert.equal((await hit(bad.port, `${valid}&ingest_setup_code=${receipt}&ingest_setup_code=${receipt}`)).status, 400);
+      const refused = await hit(bad.port, target);
+      assert.equal(refused.status, 400);
+      assert.deepEqual(await bad.waiting, { kind: "error", reason: "callback_invalid" });
+    } finally {
+      await bad.listener.close();
+    }
+  }
+
+  const setup = await listen({ acceptSetupCode: true });
+  try {
+    const accepted = await hit(setup.port, withReceipt);
+    assert.equal(accepted.status, 200);
+    assert.ok(!accepted.body.includes(receipt), "a receipt was reflected");
+    assert.deepEqual(await setup.waiting, { kind: "code", code: CODE, setupCode: receipt });
+  } finally {
+    await setup.listener.close();
+  }
+
+  // A receipt never accompanies a denial.
+  const denied = await listen({ acceptSetupCode: true });
+  try {
+    await hit(denied.port, `/callback?error=access_denied&state=${STATE}&iss=${enc(ISSUER)}&ingest_setup_code=${receipt}`);
+    assert.deepEqual(await denied.waiting, { kind: "error", reason: "callback_invalid" });
+  } finally {
+    await denied.listener.close();
+  }
+});

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { detectRemoteSession, openBrowser } from "./auth-browser.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { startCallbackListener } from "./auth-callback.js";
@@ -37,6 +39,14 @@ const fail = (outcome, reason, status = "not_ready", receipt = null, next = null
 // keeps waiting; stdout has room for one line, so a second approval in the
 // same run is not started. The person approves, the run saves what it
 // finished, and the agent reruns setup, which resumes from the saved state.
+//
+// A first setup that has to sign in asks the sign-in consent to approve the
+// first ingest key as well, when the service advertises it, so the person
+// approves once. The sign-in grant and the ingest key stay separate
+// credentials: the receipt is redeemed here with its own PKCE verifier,
+// exactly as one from the ingest-only approval is. A service without that
+// support, a repair, a replacement or a project already signed in keeps the
+// separate ingest-only approval.
 export async function runSetup(options, progress = () => {}) {
   if (options.runtime !== "local" || detectRemoteSession() !== null) return fail("unsupported", "run_on_local_machine");
   const trap = trapSignals();
@@ -85,11 +95,22 @@ export async function runSetup(options, progress = () => {}) {
     if (bindingDiffers && !options.reconnect) return stop("conflict", "bound_to_other_workspace");
     let signedIn = bindingDiffers || options.reconnect ? { ok: false, outcome: "login_required" } :
       await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
+    // An approved, unredeemed receipt for a new family, from a combined sign in.
+    let combined = null;
     if (!signedIn.ok && signedIn.outcome === "login_required") {
+      const familyId = randomUUID();
+      const ingestSetup = saved || options.repair ? null : { familyId,
+        supported: async (origin, profile, cancel) => {
+          const discovered = await discoverSetup(origin, profile, cancel);
+          return discovered.ok && discovered.loginSetup;
+        } };
       const login = await runLogin({ ...options, origin: intendedOrigin, workspace: intendedWorkspace,
-        project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null,
+        project: root, reconnect: options.reconnect, expectedProfile: options.expectedProfile ?? null, ingestSetup,
         announce: announce && ((data) => announce("login_pending", data.next_action)) }, progress);
       if (login.outcome !== "ok") return stop(login.outcome, login.reason, "login_pending");
+      if (login.ingestSetup && login.ingestSetup.familyId === familyId && RECEIPT.test(login.ingestSetup.code)) {
+        combined = login.ingestSetup;
+      }
       signedIn = await verifiedSession({ project: root, configDir: options.configDir, cancel: trap.signal });
     }
     if (!signedIn.ok) return stop(signedIn.outcome, signedIn.reason, "login_pending");
@@ -159,15 +180,21 @@ export async function runSetup(options, progress = () => {}) {
       return stop("conflict", "repair_requires_saved_key");
     }
 
+    // A combined sign in already approved a key for a new family. Anything
+    // that makes this anything but a first create drops the receipt unused;
+    // it expires without issuing a key.
+    if (previous !== null || options.repair) combined = null;
     // A verified rerun returned above without approval. From here a person
-    // must open an approval URL. A run that already announced its sign in URL
-    // has used its one JSON line, so it stops here and the rerun continues.
-    if (announced) return stop("action_required", "browser_approval_required", "approval_pending");
+    // must open an approval URL, unless the sign in approved the key too. A
+    // run that already announced its sign in URL has used its one JSON line,
+    // so it stops here and the rerun continues.
+    if (announced && combined === null) return stop("action_required", "browser_approval_required", "approval_pending");
     const setup = await discoverSetup(origin, profile, trap.signal);
     if (!setup.ok) return stop(setup.outcome, setup.reason);
 
     if (previous === null) {
-      writeSetupState(root, newSetupState(origin, workspaceId, profile, options.client), null);
+      writeSetupState(root, combined === null ? newSetupState(origin, workspaceId, profile, options.client)
+        : newSetupState(origin, workspaceId, profile, options.client, combined.familyId), null);
       previous = readSetupState(root);
       receipt = setupReceipt(previous.value);
     }
@@ -177,40 +204,15 @@ export async function runSetup(options, progress = () => {}) {
     // An acknowledged family is never implicitly replaced. Repair requires
     // the explicit flag and the key ID saved from its original issuance.
     if (intent === "replace_pending" && state.phase === "delivered") return stop("conflict", "repair_required");
-    const listener = await startCallbackListener();
-    let callback;
-    let clientId;
-    let pkce;
-    try {
-      const client = await clientFor(endpointsFor(origin), setup.offeredClientId, listener.redirectUri,
-        deadline(AUTH_HTTP_TIMEOUT_MS, trap.signal).signal);
-      if (!client.ok) return stop(client.outcome, client.reason);
-      clientId = client.clientId;
-      pkce = newPkce();
-      const pending = listener.wait({ state: pkce.state, issuer: `${origin}/v1/oauth`, requireIss: false,
-        timeoutMs: options.timeoutMs, cancel: trap.signal });
-      const url = new URL(`${origin}${SETUP_PATHS.authorize}`);
-      const params = {
-        client_id: clientId, redirect_uri: listener.redirectUri, state: pkce.state,
-        code_challenge: pkce.challenge, code_challenge_method: "S256",
-        workspace_id: workspaceId, family_id: state.family_id, intent,
-      };
-      if (intent === "repair") params.expected_key_id = state.key_id;
-      url.search = new URLSearchParams(params).toString();
-      if (trap.signal.aborted) return stop("authorization_failed", "cancelled");
-      if (options.noBrowser && announce) {
-        announce("approval_pending", openUrl(url.href, Math.round(options.timeoutMs / 1000), "approve ingest-only setup"));
-      } else if (options.noBrowser) progress(`Open this URL on this machine to approve ingest-only setup:\n${url.href}`);
-      else if (!(await openBrowser(url.href))) return stop("authorization_failed", "browser_unavailable");
-      else progress("Opened your browser for ingest-only setup approval.");
-      callback = await pending;
-    } finally {
-      await listener.close();
+    let approval;
+    if (combined !== null && intent === "create" && state.family_id === combined.familyId) {
+      approval = combined;
+      progress("Your sign-in approval also approved this project's ingest key.");
+    } else {
+      approval = await approveInBrowser({ origin, setup, workspaceId, state, intent, options, announce, progress,
+        cancel: trap.signal });
+      if (!approval.ok) return stop(approval.outcome, approval.reason);
     }
-    if (callback.kind === "denied") return stop("authorization_failed", "access_denied");
-    if (callback.kind === "timeout") return stop("authorization_failed", "timeout");
-    if (callback.kind === "cancelled") return stop("authorization_failed", "cancelled");
-    if (callback.kind !== "code" || !RECEIPT.test(callback.code)) return stop("authorization_failed", "callback_invalid");
 
     // Persist the ambiguity boundary before a single-use receipt is sent.
     // If the response is lost, a later run asks the browser to replace only
@@ -221,8 +223,8 @@ export async function runSetup(options, progress = () => {}) {
     }
     writeSetupState(root, withSetupState(previous.value, { phase: "redeem_attempted" }), previous);
     previous = readSetupState(root);
-    const redeemed = await redeem(origin, { code: callback.code, client_id: clientId,
-      redirect_uri: listener.redirectUri, code_verifier: pkce.verifier,
+    const redeemed = await redeem(origin, { code: approval.code, client_id: approval.clientId,
+      redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal);
     if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending");
     const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: origin, signal: trap.signal });
@@ -237,6 +239,49 @@ export async function runSetup(options, progress = () => {}) {
     if (error instanceof Stop) return stop(error.outcome, error.reason);
     throw error;
   } finally { trap.release(); }
+}
+
+// The ingest-only approval at the setup authorization endpoint: the only
+// browser step for a repair or replacement, and the second one for a service
+// without the combined sign-in approval. Returns the receipt with the client,
+// redirect and verifier it must be redeemed with, or a stop reason.
+async function approveInBrowser({ origin, setup, workspaceId, state, intent, options, announce, progress, cancel }) {
+  const failed = (reason, outcome = "authorization_failed") => ({ ok: false, outcome, reason });
+  const listener = await startCallbackListener();
+  let callback;
+  let clientId;
+  let pkce;
+  try {
+    const client = await clientFor(endpointsFor(origin), setup.offeredClientId, listener.redirectUri,
+      deadline(AUTH_HTTP_TIMEOUT_MS, cancel).signal);
+    if (!client.ok) return failed(client.reason, client.outcome);
+    clientId = client.clientId;
+    pkce = newPkce();
+    const pending = listener.wait({ state: pkce.state, issuer: `${origin}/v1/oauth`, requireIss: false,
+      timeoutMs: options.timeoutMs, cancel });
+    const url = new URL(`${origin}${SETUP_PATHS.authorize}`);
+    const params = {
+      client_id: clientId, redirect_uri: listener.redirectUri, state: pkce.state,
+      code_challenge: pkce.challenge, code_challenge_method: "S256",
+      workspace_id: workspaceId, family_id: state.family_id, intent,
+    };
+    if (intent === "repair") params.expected_key_id = state.key_id;
+    url.search = new URLSearchParams(params).toString();
+    if (cancel.aborted) return failed("cancelled");
+    if (options.noBrowser && announce) {
+      announce("approval_pending", openUrl(url.href, Math.round(options.timeoutMs / 1000), "approve ingest-only setup"));
+    } else if (options.noBrowser) progress(`Open this URL on this machine to approve ingest-only setup:\n${url.href}`);
+    else if (!(await openBrowser(url.href))) return failed("browser_unavailable");
+    else progress("Opened your browser for ingest-only setup approval.");
+    callback = await pending;
+  } finally {
+    await listener.close();
+  }
+  if (callback.kind === "denied") return failed("access_denied");
+  if (callback.kind === "timeout") return failed("timeout");
+  if (callback.kind === "cancelled") return failed("cancelled");
+  if (callback.kind !== "code" || !RECEIPT.test(callback.code)) return failed("callback_invalid");
+  return { ok: true, code: callback.code, clientId, redirectUri: listener.redirectUri, verifier: pkce.verifier };
 }
 
 function finishSkill(root, options, envStatus) {
@@ -313,7 +358,9 @@ async function discoverSetup(origin, profile, cancel) {
   }
   const offered = offeredClientId(doc);
   if (offered === undefined) return { ok: false, outcome: "unsupported", reason: "setup_contract_mismatch" };
-  return { ok: true, offeredClientId: offered };
+  // Optional: a service that names it lets the sign-in consent approve the
+  // first ingest key too. Anything but true means the separate approval.
+  return { ok: true, offeredClientId: offered, loginSetup: doc.login_ingest_setup_supported === true };
 }
 
 async function redeem(origin, form, profile, cancel) {

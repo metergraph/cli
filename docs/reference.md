@@ -444,6 +444,17 @@ page shows the workspace and the consequence of approval. A signed-in browser
 on another workspace must switch in Metergraph and rerun; the CLI does not
 switch it automatically.
 
+When setup has to sign in for a first setup, and the service's setup discovery
+reports `login_ingest_setup_supported: true`, the sign-in consent page also
+asks to create the ingest key, so the person approves once. The page names
+both effects. The approval returns two separate credentials: the Metadata
+sign-in grant, and a single-use ingest receipt bound to a new setup family,
+each with its own PKCE verifier. Setup redeems the receipt exactly as above.
+Signing out does not revoke the ingest key, and revoking the key does not sign
+the CLI out. A service without that field, a project that is already signed
+in, `--repair` and a replacement after a lost response all use the separate
+ingest-only approval.
+
 `METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
 appends `/v1/ingest` itself. A setup rerun with a verified
 key repairs the endpoint value written by the first preview without minting a
@@ -848,10 +859,13 @@ therefore exits within seconds with the URL:
   from the saved sign in and setup state. A rerun before approval announces a fresh
   URL; the earlier one keeps working until its own timeout.
 - One run announces at most one URL. `setup` on a project that is not signed in
-  needs two approvals, so an agent runs it three times: sign in (`status:
-  "login_pending"`), ingest-only setup approval (`status: "approval_pending"`, with
-  the `receipt`), then a rerun that needs no approval and returns
-  `ready_for_instrumentation`.
+  needs one approval when the service supports the combined sign-in approval, so an
+  agent runs it twice: sign in and key approval together (`status:
+  "login_pending"`), then a rerun that needs no approval and returns
+  `ready_for_instrumentation`. Against a service without it, setup needs two
+  approvals, so an agent runs it three times: sign in (`status: "login_pending"`),
+  ingest-only setup approval (`status: "approval_pending"`, with the `receipt`), then
+  the rerun.
 - A denied approval, or one that times out, saves nothing. The rerun announces a fresh URL.
 
 ## Safe origins
