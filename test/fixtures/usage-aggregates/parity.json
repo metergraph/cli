@@ -30,7 +30,7 @@
       "preset": "utc_days",
       "since": "2026-10-14T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.248643+00:00",
+      "until": "2026-10-14T17:31:53.124257+00:00",
       "until_is_request_time": true
     }
   },
@@ -69,7 +69,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.267524+00:00",
+      "until": "2026-10-14T17:31:53.150064+00:00",
       "until_is_request_time": true
     }
   },
@@ -104,7 +104,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.288469+00:00",
+      "until": "2026-10-14T17:31:53.172312+00:00",
       "until_is_request_time": true
     }
   },
@@ -143,7 +143,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.305531+00:00",
+      "until": "2026-10-14T17:31:53.195090+00:00",
       "until_is_request_time": true
     }
   },
@@ -194,7 +194,7 @@
       ],
       "limit": 50,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T17:04:52.248643+00:00"
+      "until": "2026-10-13T17:31:53.124257+00:00"
     },
     "http_status": 200,
     "mcp_arguments": {
@@ -203,7 +203,7 @@
       ],
       "limit": 50,
       "since": "2026-10-13T00:00:00+00:00",
-      "until": "2026-10-13T17:04:52.248643+00:00"
+      "until": "2026-10-13T17:31:53.124257+00:00"
     },
     "mcp_is_error": false,
     "question": "Comparison with the prior period: the prior UTC day to the same elapsed time",
@@ -217,7 +217,7 @@
       "preset": null,
       "since": "2026-10-13T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-13T17:04:52.248643+00:00",
+      "until": "2026-10-13T17:31:53.124257+00:00",
       "until_is_request_time": false
     }
   },
@@ -252,7 +252,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.364861+00:00",
+      "until": "2026-10-14T17:31:53.257551+00:00",
       "until_is_request_time": true
     }
   },
@@ -326,7 +326,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.398573+00:00",
+      "until": "2026-10-14T17:31:53.292525+00:00",
       "until_is_request_time": true
     }
   },
@@ -361,7 +361,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.416051+00:00",
+      "until": "2026-10-14T17:31:53.310582+00:00",
       "until_is_request_time": true
     }
   },
@@ -400,7 +400,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.431893+00:00",
+      "until": "2026-10-14T17:31:53.328062+00:00",
       "until_is_request_time": true
     }
   },
@@ -435,7 +435,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.448987+00:00",
+      "until": "2026-10-14T17:31:53.392583+00:00",
       "until_is_request_time": true
     }
   },
@@ -470,7 +470,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.465390+00:00",
+      "until": "2026-10-14T17:31:53.412445+00:00",
       "until_is_request_time": true
     }
   },
@@ -507,7 +507,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.519279+00:00",
+      "until": "2026-10-14T17:31:53.433729+00:00",
       "until_is_request_time": true
     }
   },
@@ -546,7 +546,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.539326+00:00",
+      "until": "2026-10-14T17:31:53.459169+00:00",
       "until_is_request_time": true
     }
   },
@@ -618,7 +618,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.576962+00:00",
+      "until": "2026-10-14T17:31:53.499146+00:00",
       "until_is_request_time": true
     }
   },
@@ -655,7 +655,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.594610+00:00",
+      "until": "2026-10-14T17:31:53.520186+00:00",
       "until_is_request_time": true
     }
   },
@@ -698,7 +698,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.615718+00:00",
+      "until": "2026-10-14T17:31:53.543187+00:00",
       "until_is_request_time": true
     }
   },
@@ -733,7 +733,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.634856+00:00",
+      "until": "2026-10-14T17:31:53.565357+00:00",
       "until_is_request_time": true
     }
   },
@@ -772,7 +772,7 @@
       "preset": "utc_days",
       "since": "2026-10-08T00:00:00+00:00",
       "timezone": "UTC",
-      "until": "2026-10-14T17:04:52.653377+00:00",
+      "until": "2026-10-14T17:31:53.587518+00:00",
       "until_is_request_time": true
     }
   }
