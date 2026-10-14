@@ -1,4 +1,5 @@
-import { detectRemoteSession, openBrowser } from "./auth-browser.js";
+import { openBrowser } from "./auth-browser.js";
+import { classifyEnvironment, remoteSetupAction } from "./environment.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { startCallbackListener } from "./auth-callback.js";
 import { openUrl, runLogin } from "./auth-login.js";
@@ -38,7 +39,11 @@ const fail = (outcome, reason, status = "not_ready", receipt = null, next = null
 // same run is not started. The person approves, the run saves what it
 // finished, and the agent reruns setup, which resumes from the saved state.
 export async function runSetup(options, progress = () => {}) {
-  if (options.runtime !== "local" || detectRemoteSession() !== null) return fail("unsupported", "run_on_local_machine");
+  const environment = options.environment ?? classifyEnvironment();
+  if (options.runtime !== "local" || environment.remote) {
+    const where = options.runtime !== "local" ? { kind: "declared_cloud" } : environment;
+    return fail("unsupported", "run_on_local_machine", "not_ready", null, remoteSetupAction(where, options.origin));
+  }
   const trap = trapSignals();
   let receipt = null;
   let loginVerified = false;

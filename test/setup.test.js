@@ -636,3 +636,30 @@ test("JSON --no-browser reruns a ready setup without any approval URL", async ()
     assert.deepEqual(fs.readFileSync(path.join(box.project, ".env")), env);
   } finally { await server.close(); }
 });
+
+test("setup over SSH, in a cloud workspace or in CI hands off with a local command and a Metadata key path", async () => {
+  for (const [env, environment] of [
+    [{ SSH_TTY: "/dev/pts/1" }, "ssh_session"],
+    [{ GITPOD_WORKSPACE_ID: "synthetic" }, "cloud_workspace"],
+    [{ CI: "1" }, "ci"],
+  ]) {
+    const box = boxFor();
+    const run = await runCli(["--json", "setup", "--runtime", "local", "--client", "claude", "--project", box.project,
+      "--config-dir", box.config], { offline: true, env: { ...LOCAL_ENV, ...env } });
+    assert.equal(run.code, 6, run.stdout);
+    assert.equal(run.stderr, "");
+    assertNoLeak(assert, run.stdout);
+    const result = parseJsonLine(run.stdout);
+    assert.equal(result.error.reason, "run_on_local_machine");
+    const next = result.data.next_action;
+    assert.equal(next.kind, "run_on_local_machine");
+    assert.equal(next.environment, environment);
+    assert.equal(next.command, "metergraph setup --runtime local");
+    // Metadata reads stay possible here with a key that is separate from,
+    // and never replaces, the application's ingest key.
+    assert.equal(next.metadata_reads.kind, "use_agent_key");
+    assert.equal(next.metadata_reads.credential_env, "METERGRAPH_AGENT_TOKEN");
+    assert.equal(fs.existsSync(box.config), false);
+    assert.deepEqual(fs.readdirSync(box.project), []);
+  }
+});
