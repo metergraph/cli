@@ -8,6 +8,7 @@ import { parseJsonObject } from "./http.js";
 import {
   readQuery,
   groupedRequest,
+  READ_ENVIRONMENTS,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
@@ -268,6 +269,11 @@ export async function runRead(options) {
       const priorNotices = new Set();
       const prior = await fetchOne(readQuery(options, priorRequest), priorRequest, priorNotices);
       if (!prior.ok) return end(prior.outcome, prior.reason, prior.detail ?? null);
+      // Both windows must cover the same environments, or the change compares
+      // different populations.
+      if (JSON.stringify(prior.value[READ_ENVIRONMENTS]) !== JSON.stringify(current.value[READ_ENVIRONMENTS])) {
+        return end("verification_failed", "filter_mismatch");
+      }
       for (const token of priorNotices) if (token !== "current_day_partial") notices.add(`prior_${token}`);
       report = { ...report, comparison: compareReports(current.value, prior.value, options.grouped.compare, notices) };
     }

@@ -575,6 +575,9 @@ const AGGREGATE_ORDERING = "cost_usd desc, calls desc, group key asc";
 // value replaced by null for display (unsafe text) still compares by its
 // real identity across windows.
 export const GROUP_KEY = Symbol("group_key");
+// The environments a grouped read covered (the service's echo, or null for
+// all), kept off the printed result so comparisons can require the same set.
+export const READ_ENVIRONMENTS = Symbol("read_environments");
 
 // One group's or the population's metrics, shared by items and totals.
 // Latency is labelled as the service defines it: avg_ms is the mean over the
@@ -647,17 +650,6 @@ function usageWindow(value, request, reason) {
     ) {
       throw new Invalid("verification_failed", "window_mismatch");
     }
-    // A window that ends at the request time must end on the UTC day of this
-    // request (or, within an hour after midnight, the day before), so a
-    // response kept from an earlier day is never read as "today so far".
-    if (request.requestedAt !== undefined && request.requestedAt !== null) {
-      const today = utcMidnight(request.requestedAt);
-      const day = utcMidnight(until);
-      const nearMidnight = request.requestedAt - today < HOUR_MS;
-      if (day !== today && !(nearMidnight && day === today - DAY_MS)) {
-        throw new Invalid("verification_failed", "window_mismatch");
-      }
-    }
   } else if (
     value.preset !== null ||
     value.days !== null ||
@@ -667,6 +659,18 @@ function usageWindow(value, request, reason) {
       : value.until_is_request_time || until !== Date.parse(request.until))
   ) {
     throw new Invalid("verification_failed", "window_mismatch");
+  }
+  // A window that ends at the request time (a preset, or --since without
+  // --until) must end on the UTC day of this request (or, within an hour
+  // after midnight, the day before), so a response kept from an earlier day
+  // is never read as ending now.
+  if (value.until_is_request_time && request.requestedAt !== undefined && request.requestedAt !== null) {
+    const today = utcMidnight(request.requestedAt);
+    const day = utcMidnight(until);
+    const nearMidnight = request.requestedAt - today < HOUR_MS;
+    if (day !== today && !(nearMidnight && day === today - DAY_MS)) {
+      throw new Invalid("verification_failed", "window_mismatch");
+    }
   }
   const partialDays = [];
   if (since !== utcMidnight(since)) partialDays.push(new Date(since).toISOString().slice(0, 10));
@@ -725,6 +729,7 @@ function checkUsageFilters(raw, request, notices) {
   } else if (gotEnv !== null) {
     notices.add("environment_restricted_key");
   }
+  return gotEnv === null ? null : [...gotEnv].sort();
 }
 
 // Where a metadata grouping's calls went. Listed groups with a value, values
@@ -812,7 +817,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       throw new Invalid("unsupported", "coverage_not_reported");
     }
     if (!isObject(body.coverage)) throw new Invalid("verification_failed", reason);
-    checkUsageFilters(body.coverage, request, notices);
+    const readEnvironments = checkUsageFilters(body.coverage, request, notices);
     const coverage = coverageOf(body.coverage, notices, reason);
     if (coverage.rows.shape !== "top_n" || coverage.totals_scope !== "population" || coverage.rows.limit !== request.limit) {
       throw new Invalid("verification_failed", reason);
@@ -911,6 +916,10 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       // A top-N read has no cursor, so it fills the limit when more matched.
       (matched !== null && items.length !== Math.min(request.limit, matched)) ||
       (coverage.rows.truncated === false && matched !== null && matched !== items.length) ||
+      // The truncation flag must say exactly whether matched groups were left out.
+      (matched !== null && coverage.rows.truncated !== null && coverage.rows.truncated !== (matched > items.length)) ||
+      // Evidence describes the returned rows.
+      proof.rows !== items.length ||
       listedCalls > population.calls ||
       (!truncated && listedCalls !== population.calls) ||
       // The dashboard summary's completeness must match the coverage rows.
@@ -962,7 +971,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       throw new Invalid("verification_failed", reason);
     }
     const complete = proof.complete && !truncated && coverage.completeness === "complete";
-    return {
+    const result = {
       provenance: origin,
       source: "usage_aggregates",
       window: span,
@@ -990,6 +999,9 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       pricing: pricingOf(body.pricing, notices, reason, { calls: population.calls }),
       attribution: groupedAttribution,
     };
+    // Not printed (symbol keys are not serialized); compared by --compare.
+    result[READ_ENVIRONMENTS] = readEnvironments;
+    return result;
   });
 }
 

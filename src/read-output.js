@@ -592,9 +592,11 @@ function comparisonLines(report, lines) {
     `Total cost: ${usd(totals.current.cost_usd)} now, ${usd(totals.prior.cost_usd)} before, ` +
       (totals.cost_change_known
         ? `${signed(totals.cost_change.delta, usdChange)} (${percent(totals.cost_change.percent)})`
-        : "change unknown (a window's cost is a lower bound)"),
+        : "change unknown (a window's coverage is incomplete or its cost is a lower bound)"),
     `Calls: ${totals.current.calls} now, ${totals.prior.calls} before, ` +
-      `${signed(totals.calls_change.delta, String)} (${percent(totals.calls_change.percent)})`,
+      (totals.calls_change_known === false
+        ? "change unknown (a window's coverage is incomplete)"
+        : `${signed(totals.calls_change.delta, String)} (${percent(totals.calls_change.percent)})`),
   );
   if (comparison.partial_day_compared_with_full) {
     lines.push(

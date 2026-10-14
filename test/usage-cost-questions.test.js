@@ -960,3 +960,64 @@ test("unattributed metadata spend keeps eight decimals", async () => {
     assert.equal(result.data.result.metadata_groups.unattributed.cost_usd, expected);
   });
 });
+
+test("stale explicit windows, contradictory truncation, empty evidence, uncovered changes and mixed environments are refused", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite, reason) => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, reason);
+    };
+    // --since without --until: a window that claims to end "now" must end
+    // today. A recorded week that ended six days ago is refused.
+    const { usageAggregatesReport } = await import("../src/read-contract.js");
+    const week = aggregateFixture("compare-week-prior");
+    const stale = usageAggregatesReport(
+      { ...week, window: { ...week.window, until_is_request_time: true } },
+      { workspaceId: "00000000-0000-4000-8000-00000000c0de", profile: "local", origin: "http://127.0.0.1:9" },
+      {
+        days: null, since: week.window.since, until: null, limit: 50, groupBy: ["provider"], metadata: null,
+        filters: { route: null, provider: null, model: null, environment: null }, requestedAt: Date.now(),
+      },
+      new Set(),
+    );
+    assert.deepEqual([stale.ok, stale.reason], [false, "window_mismatch"]);
+    // Truncated although every matched group was returned.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, truncated: true } },
+    }), "usage_response_invalid");
+    // Evidence that covers no returned rows.
+    await refused(["--group-by", "model"], (doc) => ({ ...doc, evidence: { ...doc.evidence, rows: 0 } }), "usage_response_invalid");
+    // The prior read covered different environments than the current one.
+    let calls = 0;
+    server.behavior.usage = (doc) => {
+      calls += 1;
+      if (calls === 1) return doc;
+      return { ...doc, coverage: { ...doc.coverage, filters: { ...doc.coverage.filters, environments: ["staging"] } } };
+    };
+    const mixed = await usage(box, server, ["--group-by", "route", "--today", "--compare", "previous"]);
+    server.behavior.usage = (doc) => doc;
+    assert.equal(mixed.run.code, 11, mixed.run.stdout);
+    assert.equal(mixed.result.error.reason, "filter_mismatch");
+  });
+});
+
+test("a change is unknown when either window's coverage is incomplete", async () => {
+  const { compareReports } = await import("../src/usage-aggregates.js");
+  const pricing = { priced_calls: 1, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" };
+  const side = (cost, completeness) => ({
+    group_by: ["route"], truncated: false, complete: completeness === "complete", pricing,
+    evidence: { complete: true, rows: 1, sources: [] }, coverage: { completeness, reasons: [] },
+    items: [{ route: "a", calls: 1, error_calls: 0, cost_usd: cost, pricing }],
+    window: { hours: 24, partial_days: [] }, totals: { calls: 1, error_calls: 0, cost_usd: cost },
+  });
+  const pending = compareReports(side(10, "partial"), side(20, "complete"), "previous", new Set());
+  assert.deepEqual(pending.totals.cost_change, { delta: null, percent: null });
+  assert.deepEqual(pending.totals.calls_change, { delta: null, percent: null });
+  assert.equal(pending.totals.cost_change_known, false);
+  assert.deepEqual(pending.items[0].cost_change, { delta: null, percent: null });
+  const both = compareReports(side(10, "complete"), side(20, "complete"), "previous", new Set());
+  assert.deepEqual(both.totals.cost_change, { delta: -10, percent: -50 });
+});

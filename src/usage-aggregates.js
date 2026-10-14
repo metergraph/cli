@@ -102,6 +102,12 @@ const change = (now, before) => {
 const exact = (pricing) => pricing?.cost === "exact";
 const costChange = (now, before, nowPricing, beforePricing) =>
   exact(nowPricing) && exact(beforePricing) ? change(now, before) : { delta: null, percent: null };
+// A window's totals are the whole question only when its evidence and
+// coverage are complete (rows cut at --limit do not matter for totals);
+// otherwise unseen calls could reverse a change, so none is reported.
+const covered = (report) =>
+  report.evidence?.complete !== false &&
+  (report.coverage === null || report.coverage === undefined || report.coverage.completeness === "complete");
 
 const sideOf = (item) => ({ calls: item.calls, error_calls: item.error_calls, cost_usd: item.cost_usd, pricing: item.pricing });
 
@@ -124,12 +130,16 @@ export function compareReports(current, prior, mode, notices) {
     dimension.startsWith("metadata.")
       ? [["metadata_key", item.metadata_key], ["metadata_value", item.metadata_value], ["has_value", item.has_value]]
       : [[dimension, item[dimension]]]));
+  const bothCovered = covered(current) && covered(prior);
+  const unknownChange = { delta: null, percent: null };
   const row = (item, now, before) => ({
     ...group(item),
     current: now,
     prior: before,
-    cost_change: costChange(now?.cost_usd ?? null, before?.cost_usd ?? null, now?.pricing, before?.pricing),
-    calls_change: change(now?.calls ?? null, before?.calls ?? null),
+    cost_change: bothCovered
+      ? costChange(now?.cost_usd ?? null, before?.cost_usd ?? null, now?.pricing, before?.pricing)
+      : unknownChange,
+    calls_change: bothCovered ? change(now?.calls ?? null, before?.calls ?? null) : unknownChange,
   });
   const items = current.items.map((item) => {
     const match = priorByKey.get(key(item));
@@ -175,9 +185,12 @@ export function compareReports(current, prior, mode, notices) {
     totals: {
       current: totals(current),
       prior: totals(prior),
-      cost_change: costChange(current.totals.cost_usd, prior.totals.cost_usd, current.pricing, prior.pricing),
-      cost_change_known: exact(current.pricing) && exact(prior.pricing),
-      calls_change: change(current.totals.calls, prior.totals.calls),
+      cost_change: bothCovered
+        ? costChange(current.totals.cost_usd, prior.totals.cost_usd, current.pricing, prior.pricing)
+        : unknownChange,
+      cost_change_known: bothCovered && exact(current.pricing) && exact(prior.pricing),
+      calls_change: bothCovered ? change(current.totals.calls, prior.totals.calls) : unknownChange,
+      calls_change_known: bothCovered,
     },
     items: [...items, ...onlyPrior],
   };
