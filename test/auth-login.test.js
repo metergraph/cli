@@ -80,9 +80,12 @@ test("a fresh login binds the verified workspace with a Metadata-only grant", as
     assert.equal(run.code, 0, run.stdout);
     assert.equal(result.command, "login");
     assert.equal(result.error, null);
+    // A container on the test host is local too, never remote.
+    assert.ok(["local_shell", "local_container"].includes(result.data.environment));
     assert.deepEqual(result.data, {
       origin: server.origin,
       runtime: "local",
+      environment: result.data.environment,
       deployment_profile: "local",
       workspace: { id: WORKSPACE_A },
       scopes: ["agent:metadata"],
@@ -358,21 +361,32 @@ test("a bound project is never switched silently, only with --reconnect", async 
 
 test("cloud runtimes and remote sessions get a handoff before anything else, with or without a browser", async () => {
   const cases = [
-    [["--runtime", "cloud"], {}, "runtime_not_supported", "connection_guide"],
-    [["--runtime", "cloud-no-shell"], {}, "runtime_not_supported", "connection_guide"],
-    [["--runtime", "local"], { SSH_CONNECTION: "SYNTHETIC_HEADER_MARKER 22" }, "ssh_session", "connection_guide"],
-    [["--runtime", "local"], { CODESPACES: "true" }, "cloud_workspace", "connection_guide"],
-    [["--runtime", "local"], { CI: "true" }, "ci_environment", "connection_guide"],
-    [["--runtime", "local", "--no-browser"], { CI: "true" }, "ci_environment", "connection_guide"],
+    [["--runtime", "cloud"], {}, "runtime_not_supported", "declared_cloud"],
+    [["--runtime", "cloud-no-shell"], {}, "runtime_not_supported", "declared_cloud"],
+    [["--runtime", "local"], { SSH_CONNECTION: "SYNTHETIC_HEADER_MARKER 22" }, "ssh_session", "ssh_session"],
+    [["--runtime", "local"], { CODESPACES: "true" }, "cloud_workspace", "cloud_workspace"],
+    [["--runtime", "local"], { CI: "true" }, "ci_environment", "ci"],
+    [["--runtime", "local", "--no-browser"], { CI: "true" }, "ci_environment", "ci"],
   ];
-  for (const [flags, env, reason, next] of cases) {
+  for (const [flags, env, reason, environment] of cases) {
     const box = sandbox();
     const args = ["--json", "login", ...flags, "--url", "http://127.0.0.1:9", "--project", box.project, "--config-dir", box.config];
     const run = await runCli(args, { offline: true, env: { ...LOCAL_ENV, ...env } });
     const { result } = checked(assert, run, { box });
     assert.equal(run.code, 6, reason);
     assertFailure(result, "unsupported", reason);
-    assert.equal(result.data.next_action.kind, next);
+    // The handoff tells the agent how a person hands it a Metadata key,
+    // without the key ever passing through chat, argv or the project.
+    const next = result.data.next_action;
+    assert.equal(next.kind, "use_agent_key", reason);
+    assert.equal(next.environment, environment);
+    assert.equal(result.data.environment, environment);
+    assert.equal(next.credential_env, "METERGRAPH_AGENT_TOKEN");
+    // A non-hosted origin has no sign up page: a person asks for an invitation.
+    assert.deepEqual(next.person_steps.map((step) => step.action), ["request_invitation", "create_metadata_key", "store_secret"]);
+    assert.equal(next.person_steps[1].url, "http://127.0.0.1:9/#api-keys");
+    assert.deepEqual(next.then_run, ["metergraph status --json", "metergraph usage --json"]);
+    assert.equal(next.alternative.command, "metergraph login --runtime local");
     assert.equal(fs.existsSync(box.config), false, "the config directory was created");
     assert.deepEqual(filesUnder(box.project), []);
   }

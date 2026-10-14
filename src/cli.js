@@ -238,6 +238,7 @@ function setupText(result, style) {
   lines.push(...fields(style, rows), "");
   if (!result.ok) lines.push(...paragraph(style, result.error.message), `  ${style.dim(`Reason: ${result.error.reason}`)}`, "");
   lines.push(...handoffLines(data, style));
+  lines.push(...remoteLines(data, style));
   if (result.ok) lines.push(...steps(style, [["", "Instrument your application and verify an exact trace."]]));
   return render(lines);
 }
@@ -260,6 +261,21 @@ function handoffLines(data, style) {
     ? next.message : null;
   lines.push(...steps(style, [["", message], ["Guide", next?.url ?? null]]), "");
   return lines;
+}
+
+// A remote session's handoff: where setup runs instead, and how this
+// environment can still make Metadata reads with a separate agent key.
+function remoteLines(data, style) {
+  const next = data?.next_action;
+  if (next?.kind !== "run_on_local_machine") return [];
+  const keys = next.metadata_reads?.person_steps.find((step) => step.action === "create_metadata_key")?.url ?? null;
+  return [...steps(style, [
+    ["", next.message],
+    ["On the person's own machine", style.bold(next.command)],
+    ["Metadata key for reads here", keys],
+    ["Then run here", next.metadata_reads ? style.bold(next.metadata_reads.then_run.join(", then ")) : null],
+    ["Guide", next.url],
+  ]), ""];
 }
 
 // The repository identity setup found or recorded. The value is owner/name

@@ -1,6 +1,8 @@
 import childProcess from "node:child_process";
 import path from "node:path";
 
+import { classifyEnvironment } from "./environment.js";
+
 // Opens a URL with the operating system's own launcher: a fixed executable
 // and an argument array, never a shell. The URL is the authorization request
 // (public client ID, state and PKCE challenge); no token, code or verifier is
@@ -51,24 +53,8 @@ export function systemRoot() {
   return "C:\\Windows";
 }
 
-// Variables whose presence means the browser a person uses is not on this
-// machine, or no person is present. Only presence is checked; values are
-// never read into output.
-const REMOTE_MARKERS = [
-  ["ssh_session", ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]],
-  ["cloud_workspace", ["CODESPACES", "GITPOD_WORKSPACE_ID", "CLOUD_SHELL"]],
-  ["ci_environment", ["CI"]],
-];
-
-// Returns null for an ordinary local session, or a fixed reason token.
+// Returns null for an ordinary local session (including a local container),
+// or the fixed reason token of a remote or CI session. See environment.js.
 export function detectRemoteSession(env = process.env) {
-  for (const [reason, names] of REMOTE_MARKERS) {
-    for (const name of names) {
-      const value = env[name];
-      if (typeof value === "string" && value !== "" && value !== "0" && value.toLowerCase() !== "false") {
-        return reason;
-      }
-    }
-  }
-  return null;
+  return classifyEnvironment(env, { fileExists: () => false }).reason;
 }

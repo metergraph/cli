@@ -33,6 +33,7 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
   "package.json",
+  "src/agent-key.js",
   "src/approval-handoff.js",
   "src/args.js",
   "src/auth-binding.js",
@@ -47,6 +48,7 @@ const EXPECTED_FILES = [
   "src/deployment-credential.js",
   "src/deployment-route.js",
   "src/doctor.js",
+  "src/environment.js",
   "src/http.js",
   "src/origin.js",
   "src/output.js",
@@ -285,7 +287,8 @@ test("the installed CLI hands a cloud sign in off offline and writes nothing", a
   assert.equal(parsed.command, "login");
   assert.equal(parsed.error.reason, "runtime_not_supported");
   assert.equal(parsed.data.authenticated, false);
-  assert.equal(parsed.data.next_action.kind, "connection_guide");
+  assert.equal(parsed.data.next_action.kind, "use_agent_key");
+  assert.equal(parsed.data.next_action.credential_env, "METERGRAPH_AGENT_TOKEN");
   // --json --no-browser runs through the installed package's detached
   // waiter and relays its one line and exit code.
   const relayed = await run(process.execPath, [...args, "--no-browser"], { cwd: workDir });
