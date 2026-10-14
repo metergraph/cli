@@ -9,6 +9,7 @@ const HTTPS_ORIGIN = /^https:\/\/[^/?#@\\]+\/?$/i;
 // such as 127.1 or 0x7f000001 are rejected even though they resolve locally.
 const HTTP_LOOPBACK_ORIGIN = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?\/?$/i;
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const SAFE_HOSTNAME = /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])$/;
 
 // Returns the normalized origin (for example "https://example.com") or null.
 // The caller must not echo the raw input when this returns null.
@@ -32,6 +33,11 @@ export function parseOrigin(raw) {
   if (url.pathname !== "/" || url.search !== "" || url.hash !== "") return null;
   if (url.hostname === "" || url.port === "0") return null;
   if (url.protocol === "http:" && !LOOPBACK_HOSTNAMES.has(url.hostname)) return null;
+  // A DNS name (letters, digits, hyphens and dots) or a bracketed IPv6
+  // literal. The URL parser accepts characters such as ; $ ( ) ` & ' in a
+  // host, which no real deployment uses and which would be unsafe wherever
+  // the origin is shown inside a command.
+  if (!SAFE_HOSTNAME.test(url.hostname)) return null;
 
   return url.origin;
 }

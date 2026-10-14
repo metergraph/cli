@@ -446,19 +446,24 @@ function pricingOf(value, notices, reason, { note = true, calls = null } = {}) {
   return { ...Object.fromEntries(PRICING_COUNTS.map((key) => [key, value[key]])), cost };
 }
 
+// trace_total: each trace row aggregates the whole trace. matching_calls: a
+// route, status or request filter selected calls, so each row covers only
+// its matching calls.
+const TRACE_COST_BASES = Object.freeze(["trace_total", "matching_calls"]);
+
 // level, when given, is the only attribution level the read can have:
 // trace reads return whole-trace totals whatever the document claims.
 function attributionOf(value, reason, level = null) {
   if (value === undefined || value === null) return null;
   if (level !== null && isObject(value) && (value.level !== level ||
-      (level === "trace" && (value.cost_basis !== "trace_total" || value.per_provider_exact !== false)))) {
+      (level === "trace" && (!TRACE_COST_BASES.includes(value.cost_basis) || value.per_provider_exact !== false)))) {
     throw new Invalid("verification_failed", reason);
   }
   const nullableCount = (entry) => entry === null || isCount(entry);
   if (
     !isObject(value) ||
     (value.level !== "call" && value.level !== "trace") ||
-    (value.cost_basis !== "call" && value.cost_basis !== "trace_total") ||
+    (value.cost_basis !== "call" && !TRACE_COST_BASES.includes(value.cost_basis)) ||
     typeof value.per_provider_exact !== "boolean" ||
     !nullableCount(value.mixed_provider_rows) ||
     !nullableCount(value.mixed_model_rows)
