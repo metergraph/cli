@@ -57,6 +57,51 @@ pass the same `--workspace` UUID each time, and give each repository its own
 identity. The SDK warning that repository identity is not configured does not
 stop capture.
 
+## Pick the CLI path for where the agent runs
+
+Check `metergraph --help` first. If the read commands' help lists
+`--agent-token-file`, the CLI also accepts a coding-agent key with Metadata
+access from the `METERGRAPH_AGENT_TOKEN` environment variable. Use one sequence:
+
+| Where the agent runs | Sequence |
+|---|---|
+| Local shell, new workspace | `metergraph setup --runtime local --client <client> --json --no-browser`, rerun after each approval, then `metergraph status --json`. Add `--signup` for a person with no hosted account. |
+| Local shell, existing workspace | `metergraph login --runtime local --workspace <uuid> --json --no-browser`, then `metergraph status --json`. |
+| Local container (Docker, local dev container) | As a local shell. If the browser cannot reach the container's sign in callback, use the key sequence below. |
+| SSH, Codespaces, Gitpod, Cloud Shell, remote dev container, CI: hosted, customer-local or customer-owned AWS | The person signs in (or signs up, on the hosted service only) on their own device, opens the Keys page of the deployment and workspace the agent should read, creates a coding-agent key with Metadata access, and saves it in this environment's secret settings, or as a CI secret, named `METERGRAPH_AGENT_TOKEN`. Then run `metergraph status --json` and `metergraph usage --json`. Add `--workspace <uuid>` to make a key for another workspace fail. For a non-hosted deployment, pass `--url <origin>` (or set `METERGRAPH_URL`) with its address. |
+| SSH, cloud workspace or CI: open-source self-hosted server | There are no accounts and no Keys page. The operator gives the person one of the server's `MG_AGENT_TOKENS` values, which they save as `METERGRAPH_AGENT_TOKEN`. Then run the same commands with `--url <server address>`. |
+| Has a Metadata key but no saved sign in | The same key sequence. If the project has a `.metergraph/project.json`, it pins the origin and workspace the key must match. |
+
+`.metergraph/project.json` names the deployment origin and workspace ID. In a
+public repository, keep it uncommitted (for example in `.gitignore`) unless the
+person agrees to publish those values. In CI for a public repository, the read
+commands' JSON includes workspace IDs and per-route usage: write it to a file or
+a masked step instead of the public job log, and print only what the person
+needs.
+
+Before answering a cost question from the CLI, confirm the workspace and what
+it offers: `metergraph status --json` (the verified workspace must be the one
+the person means) and `metergraph capabilities --json`. Then run the smallest
+bounded `usage` read that answers it. Grouped usage needs a CLI that has it:
+run `metergraph help usage` first, and use `--group-by` only when that help
+lists it (for example `metergraph usage --group-by route --today --json` for
+the most expensive route today). An older CLI has only
+`metergraph usage --days N --json` (cost per route and day); say that grouping
+by provider, model or metadata needs a newer CLI or the
+`metergraph_get_usage_aggregates` tool, and do not invent flags. Windows are
+UTC. `metergraph-investigate` covers the rest. A deployment without grouped
+usage exits 14 with a `next_action` that names the read it supports.
+
+When `login`, `setup` or a read cannot finish where it runs, it prints
+`data.next_action`. Follow it: `use_agent_key` lists the person's steps and the
+commands to run afterwards; `replace_agent_key`, `use_metadata_only_key` and
+`use_workspace_key` mean the key was refused, was broader than Metadata, or
+belongs to another workspace. Never ask the person to paste the key into chat or
+a command, and never put it in a project file. Ingest setup cannot run over SSH,
+in a cloud workspace or in CI; it runs on the person's machine. The Metadata key
+is separate from the application's ingest key and never replaces it. Debug and
+Replay keys are refused by the CLI, not reduced.
+
 ## Route honestly
 
 | Client and runtime | Hosted | Customer-local bundle | Customer AWS | Open source self-hosted |
@@ -103,10 +148,12 @@ rather than improvising the analysis steps.
 
 ## When already connected: bounded investigation
 
-1. Call `metergraph_get_workspace_context` and `metergraph_get_capabilities` first. Verify the intended workspace, deployment profile, available tools, required scopes and privacy classes. Stop on wrong workspace, unavailable capabilities or failed authorization.
-2. Confirm the question, route and explicit time window. Choose the smallest available tool: bounded usage/route metadata for aggregate questions, incidents for known anomalies, or `metergraph_query_traces` with a small limit (start with 1) for a failed/anomalous trace. Follow cursors only within the agreed bound. Never request generic SQL or unbounded data.
+Read through the `metergraph` CLI first when it is installed and can read the workspace: it returns the same Metadata evidence as the MCP tools in far fewer tokens. Use the MCP tools for what the CLI does not cover (incidents, ingestion health, reports, retained content and replay) and in clients with no shell. Being connected means either one; stop for setup only when neither can read the workspace.
+
+1. Confirm the workspace and what it offers. With the CLI: `metergraph status --json` (continue only when `data.authenticated` is true and `data.workspace.match` is true; otherwise follow `data.next_action`) and `metergraph capabilities --json`. With MCP: `metergraph_get_workspace_context`, then `metergraph_get_capabilities`. Verify the intended workspace, deployment profile, available reads, required scopes and privacy classes. A wrong workspace or failed authorization on one path is a reason to use the other path when it can read the intended workspace; stop when neither can, or when the capability the question needs is unavailable.
+2. Confirm the question, route and explicit UTC time window. Choose the smallest available read, and always pass `--json` to the CLI: grouped usage (`metergraph usage --group-by ... --json`, or `metergraph_get_usage_aggregates`) or `metergraph usage --days N --json` / route metadata for aggregate questions, `metergraph traces --limit 1 --json` (or `metergraph_query_traces` with a small limit) for a failed or anomalous trace, and the incidents tool for known anomalies. Check that `metergraph help <command>` lists an option before using it, and use the matching MCP tool when it does not. Follow cursors only within the agreed bound. Never request generic SQL or unbounded data.
 3. Start with metadata. Retained-content debugging and report evidence are separate content-bearing tools; confirm the user's content intent and capability before calling them. Replay is a separate scope and can send data to a provider and spend money. Obtain explicit bounded execution/data-egress authority before any replay. Read access grants no eval-write, analysis-run or production-mutation authority.
-4. Explain the failure or anomaly using only returned evidence. Cite workspace, time window, provenance, trace/report IDs, completeness/coverage, warnings and working app links when returned. Do not fabricate links. Distinguish no data, incomplete evidence, unavailable capability, classification pending, stale/mismatched identity, failed analysis and missing report. An empty result alone does not prove absence of traffic.
+4. Explain the failure or anomaly using only returned evidence. Cite workspace, time window, provenance, trace/report IDs, completeness/coverage, warnings and working app links when returned. Do not fabricate links. Distinguish no data, incomplete evidence, unavailable capability, classification pending, stale/mismatched identity, failed analysis and missing report. An empty result alone does not prove absence of traffic. Never conclude that a commit, deploy or config change did or did not change cost from source code or a git diff alone; a diff is a hypothesis until bounded usage reads for the same route before and after the change reached production agree, with completeness and warnings cited.
 5. An optional approved replay must be eligible, bounded and non-persistent. Do not claim that it changed production telemetry or fixed the application. Refuse autonomous dashboard mutations or production configuration changes.
 
 For an empty workspace, use https://www.metergraph.dev/docs/agents/instrument-a-repo/. If `metergraph setup` already ran in this project, it delivered the ingest credential: the project's `.env` holds `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`. Use them; do not ask for or create another key, and never print their values. The SDK reads the process environment, not `.env`, so load it when you run the application (for example `set -a; . ./.env; set +a`, python-dotenv or `node --env-file=.env`). Otherwise confirm the ingestion destination and obtain a separate ingest credential securely. Ask before running anything that calls a paid model provider, and do not initiate provider calls or paid work merely to validate setup. Confirm the exact trace with `metergraph verify`; if the CLI is not installed, or `metergraph --version` lacks `verify`, use `npx --yes metergraph-cli@latest verify`. Ingestion accepted, processed, retained content, classification readiness and analysis readiness are distinct states. Label synthetic/demo fixtures; they do not prove a first real application trace.
