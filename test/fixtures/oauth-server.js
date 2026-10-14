@@ -570,13 +570,13 @@ const PRICED = (calls) => ({
 
 // The shared coverage envelope, added only to metadata reads so the existing
 // read tests keep exercising a service that does not report coverage.
-function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope }) {
+function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope, ordering = null }) {
   return {
     as_of: new Date().toISOString(),
     requested_window: null,
     effective_window: null,
     filters: { environments: null, metadata: metadataEcho(query) },
-    rows: { shape, ordering: null, returned, limit, truncated, matched },
+    rows: { shape, ordering, returned, limit, truncated, matched },
     next_cursor: null,
     totals_scope: totalsScope,
     completeness: truncated ? "partial" : "complete",
@@ -751,7 +751,7 @@ export function usageAggregatesDocument(provenance, query) {
   const absent = dimension === "metadata.activity_name";
   const groups = absent
     ? [{ value: null, calls: 64, cost_usd: 0.064 }]
-    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }];
+    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }].sort((a, b) => b.cost_usd - a.cost_usd);
   const listed = groups.slice(0, limit);
   const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
   const metrics = (calls, cost) => ({
@@ -786,6 +786,7 @@ export function usageAggregatesDocument(provenance, query) {
     ],
     coverage: {
       ...metadataCoverage(query, {
+        ordering: "cost_usd desc, calls desc, group key asc",
         shape: "top_n",
         returned: listed.length,
         limit,

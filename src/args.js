@@ -23,11 +23,11 @@ import {
   TRACES_DEFAULT_LIMIT,
   MAX_METADATA_FILTERS,
   MAX_METADATA_KEY_LENGTH,
-  MAX_METADATA_QUERY_LENGTH,
+  MAX_QUERY_LENGTH,
   MAX_METADATA_VALUE_LENGTH,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
-import { isCursor, isSafeFilter, metadataQueryValue } from "./read-contract.js";
+import { hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
 const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
@@ -511,7 +511,7 @@ function parseRead(command, values, json, fail) {
     const problem = metadataKeyProblem(groupByMetadata);
     if (problem !== null) return fail(problem.code, `--group-by-metadata ${problem.message}`);
   }
-  return {
+  const parsed = {
     ok: true,
     command,
     project: paths.project,
@@ -526,6 +526,16 @@ function parseRead(command, values, json, fail) {
     groupByMetadata,
     json,
   };
+  // Measure the exact query the command will send (URLSearchParams encoding,
+  // every parameter), so an over-long one fails here and not after sign in.
+  const query = readQuery(parsed);
+  if (query !== null && query.toString().length > MAX_QUERY_LENGTH) {
+    return fail(
+      "query_too_long",
+      "The filters are too long to send in one request. Use fewer or shorter metadata values, or a shorter route or cursor.",
+    );
+  }
+  return parsed;
 }
 
 // Exact customer-metadata filters. --metadata KEY=VALUE splits at the first
@@ -589,9 +599,6 @@ function parseMetadata(values, fail) {
   const filters = entries
     .map(([key, value]) => ({ key, value }))
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  if (encodeURIComponent(metadataQueryValue(filters)).length > MAX_METADATA_QUERY_LENGTH) {
-    return fail("metadata_too_long", "The metadata filters are too long to send. Use fewer or shorter values.");
-  }
   return { ok: true, filters };
 }
 
@@ -631,10 +638,18 @@ const SENSITIVE_KEY_SUFFIXES = Object.freeze([
 ]);
 
 function metadataKeyProblem(key) {
-  if (typeof key !== "string" || key.length === 0 || key.length > MAX_METADATA_KEY_LENGTH || key.includes("\0")) {
+  // Keys are printed back (filter and grouping lines), so control and
+  // formatting characters that could rewrite terminal or log output are
+  // refused, as they are for every other printed name.
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > MAX_METADATA_KEY_LENGTH ||
+    hasUnsafeText(key)
+  ) {
     return {
       code: "invalid_metadata_key",
-      message: `must be 1 to ${MAX_METADATA_KEY_LENGTH} characters without NUL.`,
+      message: `must be 1 to ${MAX_METADATA_KEY_LENGTH} characters without control or formatting characters.`,
     };
   }
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");

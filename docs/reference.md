@@ -638,7 +638,10 @@ and `usage` can group by one key.
 - `--metadata-json '{"a=b":"v"}'` gives the same filters as one JSON object, for a key
   that contains `=`. It cannot be combined with `--metadata`. Duplicate keys and
   non-string values exit 2.
-- Keys are 1 to 200 characters and values at most 1,000. Keys that look like
+- Keys are 1 to 200 characters without control or formatting characters (keys are
+  printed back), and values at most 1,000. The whole request query, measured as it is
+  sent, must fit in 2,048 characters, or the command exits 2 with `query_too_long`
+  before any request. Keys that look like
   credentials (ending in `api_key`, `token`, `secret`, `password`, `auth` and similar)
   are refused with exit 2, and the service refuses them too.
 - The CLI sends the filters as one JSON object in the `metadata` query parameter.
@@ -663,8 +666,10 @@ set. `--limit` caps the listed values. Truncation is read from the same coverage
 evidence as any other read. `coverage.rows` gives `returned`, `limit`, `truncated` and
 `matched` (the number of distinct values, including the no-value group), and
 `population_totals` covers every matching call. The CLI refuses a response where
-`coverage.rows` disagrees with the groups, or where the listed calls exceed the totals
-(or, untruncated, do not equal them). When values were cut, `truncated` is `true`,
+`coverage.rows` disagrees with the groups. It also refuses one whose rows are not
+highest cost first, one that returns fewer than `min(limit, matched)` rows (the read
+has no cursor), and one where the listed calls, errors, tokens or cost exceed the
+totals (or, untruncated, do not equal them). When values were cut, `truncated` is `true`,
 `complete` is `false`, `coverage.completeness` is `partial` and the notice
 `metadata_groups_truncated` is set. A response not grouped by the requested key exits
 11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same

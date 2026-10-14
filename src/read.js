@@ -5,7 +5,7 @@ import { Stop, openStore, resolveConfigDir } from "./auth-store.js";
 import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
-  metadataQueryValue,
+  readQuery,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
@@ -158,7 +158,7 @@ export async function runRead(options) {
       return end("unsupported", "exceeds_service_bounds");
     }
 
-    const response = await fetchRead(session.session, read.path, queryFor(options), limit.signal);
+    const response = await fetchRead(session.session, read.path, readQuery(options), limit.signal);
     if (!response.ok) {
       const settled = settle(response);
       return end(settled.outcome, settled.reason, response.retryAfter === undefined ? null : { retry_after_seconds: response.retryAfter });
@@ -187,25 +187,6 @@ function requestOf(options) {
     metadata: options.metadata ?? null,
     groupByMetadata: options.groupByMetadata ?? null,
   };
-}
-
-// The query string is built here from validated options only. The routes
-// endpoint takes none.
-function queryFor(options) {
-  if (options.command === "routes") return null;
-  const query = new URLSearchParams();
-  query.set("days", String(options.days));
-  query.set("limit", String(options.limit));
-  if (options.command === "usage" && options.groupByMetadata) {
-    query.set("group_by", `metadata.${options.groupByMetadata}`);
-  }
-  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
-  if (options.command === "traces") {
-    if (options.route !== null) query.set("route", options.route);
-    if (options.status !== null) query.set("status", options.status);
-    if (options.cursor !== null) query.set("cursor", options.cursor);
-  }
-  return query;
 }
 
 // Unauthenticated GET /healthz on the bound origin, so status can tell an

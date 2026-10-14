@@ -965,8 +965,11 @@ test("usage grouped by a metadata key reads the aggregates and reports coverage"
     // metadata reason does not lower completeness.
     const all = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
     const full = all.result.data.result;
-    assert.equal(full.items.at(-1).metadata_value, null);
-    assert.equal(full.items.at(-1).has_value, false);
+    const noValue = full.items.find((item) => !item.has_value);
+    assert.equal(noValue.metadata_value, null);
+    assert.equal(noValue.calls, 7);
+    // Highest cost first, the no-value group in its cost position.
+    assert.deepEqual(full.items.map((item) => item.metadata_value), ["reply-v3", "reply-v2", null, "triage=a:b/c"]);
     assert.equal(full.totals.calls, full.population_totals.calls);
     assert.equal(full.coverage.completeness, "complete");
     assert.equal(full.complete, true);
@@ -1061,4 +1064,33 @@ test("a truncated grouping prints its coverage once instead of three truncation 
     assert.ok(!out.includes("More metadata values exist than --limit"));
     assert.ok(!out.includes("cost is a lower bound."));
   });
+});
+
+test("grouped usage that breaks totals, ordering or the row limit is refused", async () => {
+  const cases = {
+    // Calls add up, but cost and tokens of the listed groups exceed the totals.
+    totals: (doc) => ({ ...doc, items: doc.items.map((item, index) =>
+      index === 0 ? { ...item, cost_usd: item.cost_usd + 1, input_tokens: item.input_tokens + 5 } : item) }),
+    // Not highest cost first.
+    order: (doc) => ({ ...doc, items: [...doc.items].reverse() }),
+    // The ordering the service claims is not by cost.
+    claimed: (doc) => ({ ...doc, coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, ordering: "calls desc" } } }),
+    // Truncated but fewer rows than the limit allows.
+    underfilled: (doc) => ({
+      ...doc,
+      items: doc.items.slice(0, 1),
+      coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, returned: 1, truncated: true } },
+    }),
+  };
+  for (const [name, usage] of Object.entries(cases)) {
+    const server = await startOAuthServer({ workspace: PLAIN_WORKSPACE, usage });
+    try {
+      const box = await signedIn(server);
+      const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
+      assert.equal(result.outcome, "verification_failed", name);
+      assert.equal(result.error.reason, "usage_response_invalid", name);
+    } finally {
+      await server.close();
+    }
+  }
 });

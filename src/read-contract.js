@@ -113,7 +113,7 @@ const isTimestamp = (value) =>
 const isDate = (value) =>
   typeof value === "string" && DATE.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
 
-function hasUnsafeText(value) {
+export function hasUnsafeText(value) {
   for (const char of value) {
     const code = char.codePointAt(0);
     if (UNSAFE_RANGES.some(([low, high]) => code >= low && code <= high)) return true;
@@ -133,6 +133,26 @@ export function isSafeFilter(value) {
 // already sorted by key, so the text is stable.
 export function metadataQueryValue(filters) {
   return JSON.stringify(Object.fromEntries(filters.map(({ key, value }) => [key, value])));
+}
+
+// The query string a read command sends, built only from validated options.
+// Argument validation measures this same object, so its length check and the
+// transport's agree exactly. The routes endpoint takes none.
+export function readQuery(options) {
+  if (options.command === "routes") return null;
+  const query = new URLSearchParams();
+  query.set("days", String(options.days));
+  query.set("limit", String(options.limit));
+  if (options.command === "usage" && options.groupByMetadata) {
+    query.set("group_by", `metadata.${options.groupByMetadata}`);
+  }
+  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
+  if (options.command === "traces") {
+    if (options.route !== null) query.set("route", options.route);
+    if (options.status !== null) query.set("status", options.status);
+    if (options.cursor !== null) query.set("cursor", options.cursor);
+  }
+  return query;
 }
 
 // Rows do not carry metadata, so the only proof a metadata filter applied is
@@ -707,6 +727,20 @@ function metadataSupplied(request) {
   return { count: filters.length, keys: filters.map((filter) => filter.key) };
 }
 
+// The listed groups cannot exceed the population totals on any metric, and
+// when nothing was cut they must equal them. Cost is compared with a small
+// tolerance for per-group rounding.
+const COST_TOLERANCE_USD = 1e-6;
+function groupsMatchTotals(items, population, truncated) {
+  for (const field of ["calls", "error_calls", "input_tokens", "output_tokens", "cost_usd"]) {
+    const listed = items.reduce((total, item) => total + item[field], 0);
+    const slack = field === "cost_usd" ? COST_TOLERANCE_USD * Math.max(1, items.length) : 0;
+    if (listed > population[field] + slack) return false;
+    if (!truncated && Math.abs(listed - population[field]) > slack) return false;
+  }
+  return true;
+}
+
 // Usage grouped by one metadata key, from the usage aggregates read. Calls
 // without an eligible value for the key are the group whose value is null,
 // so the groups add up to the population totals. Truncation is trusted only
@@ -762,17 +796,20 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
   });
   const rows = coverage.rows;
   const truncated = rows.truncated === true;
-  const listedCalls = items.reduce((total, item) => total + item.calls, 0);
   if (
     rows.shape !== "top_n" ||
+    // Rows must be the promised order: highest cost first.
+    typeof rows.ordering !== "string" ||
+    !rows.ordering.startsWith("cost_usd desc") ||
+    items.some((item, index) => index > 0 && item.cost_usd > items[index - 1].cost_usd) ||
     rows.returned !== items.length ||
     rows.limit !== request.limit ||
     rows.matched === null ||
-    rows.matched < items.length ||
+    // A top-N read has no cursor, so it must fill the limit when more matched.
+    items.length !== Math.min(rows.limit, rows.matched) ||
     truncated !== rows.matched > items.length ||
     coverage.totals_scope !== "population" ||
-    listedCalls > population.calls ||
-    (!truncated && listedCalls !== population.calls)
+    !groupsMatchTotals(items, population, truncated)
   ) {
     throw new Invalid("verification_failed", reason);
   }
