@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
-import { BROWSER, LOCAL_ENV, completeInBrowser, login, sandboxes, secretsOf } from "./auth-helpers.js";
+import { BROWSER, LOCAL_ENV, browserLog, completeInBrowser, login, sandboxes, secretsOf } from "./auth-helpers.js";
 import { BIN, FAKE_SECRETS, assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
 import { startOAuthServer } from "./fixtures/oauth-server.js";
 import { aclStatus } from "../src/setup-env-acl.js";
@@ -101,6 +101,8 @@ test("one setup command signs in an unbound project, chooses the verified worksp
     assert.ok(fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")));
     assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+    // A service that does not advertise the combined approval is never asked for it.
+    assert.equal(server.requestsTo("/v1/oauth/authorize")[0].query.ingest_setup, undefined);
   } finally { await server.close(); }
 });
 
@@ -453,7 +455,7 @@ test("an explicitly repaired family can recover after its private env file was l
     assert.equal(refused.outcome, "conflict");
     assert.equal(refused.error.reason, "repair_required");
     const repaired = await setup(box, server, ["--repair"]);
-    assert.equal(repaired.outcome, "ok");
+    assert.equal(repaired.outcome, "ok", JSON.stringify(repaired));
     const authorize = server.requestsTo("/v1/cli/setup/authorize").at(-1);
     assert.equal(authorize.query.intent, "repair");
     assert.equal(authorize.query.expected_key_id, state.key_id);
@@ -636,6 +638,122 @@ test("JSON --no-browser reruns a ready setup without any approval URL", async ()
     assert.deepEqual(fs.readFileSync(path.join(box.project, ".env")), env);
   } finally { await server.close(); }
 });
+
+// One browser approval for a first setup against a service that supports it.
+
+test("a first setup signs in and approves its ingest key in one browser approval", async () => {
+  const server = await startOAuthServer({ setup: true, loginSetup: "combined" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.status, "ready_for_instrumentation");
+    assert.deepEqual(result.data.receipt.completed_steps, ["login", "credential", "skill"]);
+    // One browser trip: the sign-in consent. No ingest-only approval.
+    assert.equal(browserLog(box).filter((entry) => entry.url).length, 1);
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    assert.equal(state.phase, "delivered");
+    const signIn = server.requestsTo("/v1/oauth/authorize")[0].query;
+    assert.equal(signIn.scope, "agent:metadata");
+    assert.equal(signIn.ingest_setup, "1");
+    assert.equal(signIn.ingest_setup_family_id, state.family_id);
+    assert.match(signIn.ingest_setup_code_challenge, /^[A-Za-z0-9_-]{43}$/);
+    assert.notEqual(signIn.ingest_setup_code_challenge, signIn.code_challenge);
+    // Two separate credentials, redeemed at separate endpoints with separate verifiers.
+    const exchange = new URLSearchParams(server.requestsTo("/v1/oauth/token")[0].body);
+    const redeem = new URLSearchParams(server.requestsTo("/v1/cli/setup/redeem")[0].body);
+    assert.match(redeem.get("code"), /^mgbs_/);
+    assert.notEqual(redeem.get("code"), exchange.get("code"));
+    assert.notEqual(redeem.get("code_verifier"), exchange.get("code_verifier"));
+    assert.equal(redeem.get("client_id"), exchange.get("client_id"));
+    assert.equal(redeem.get("redirect_uri"), exchange.get("redirect_uri"));
+    assert.equal(redeem.get("family_id"), state.family_id);
+    assert.equal(server.state.setupFamilies.get(state.family_id).delivery, "acknowledged");
+    const env = fs.readFileSync(path.join(box.project, ".env"), "utf8");
+    assert.match(env, /^METERGRAPH_APP_TOKEN=mg_/m);
+    assert.ok(!JSON.stringify(state).includes("mg_") && !JSON.stringify(state).includes("mgbs_"));
+
+    // A rerun needs no approval at all.
+    const again = await setup(box, server);
+    assert.equal(again.outcome, "ok");
+    assert.equal(again.data.env, "unchanged");
+    assert.equal(browserLog(box).filter((entry) => entry.url).length, 1);
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+  } finally { await server.close(); }
+});
+
+test("a service that advertises but does not return the combined receipt falls back to the ingest-only approval", async () => {
+  const server = await startOAuthServer({ setup: true, loginSetup: "advertise-only" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/oauth/authorize")[0].query.ingest_setup, "1");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize")[0].query.family_id, state.family_id);
+    assert.equal(state.phase, "delivered");
+  } finally { await server.close(); }
+});
+
+test("a project already signed in uses the ingest-only approval, and login alone never asks for a key", async () => {
+  const server = await startOAuthServer({ setup: true, loginSetup: "combined" });
+  try {
+    const box = boxFor();
+    assert.equal((await login(assert, box, server)).result.ok, true);
+    assert.equal(server.requestsTo("/v1/oauth/authorize")[0].query.ingest_setup, undefined);
+    const result = await setup(box, server);
+    assert.equal(result.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize")[0].query.intent, "create");
+  } finally { await server.close(); }
+});
+
+test("repair keeps its own explicit approval even when the combined approval is available", async () => {
+  const server = await startOAuthServer({ setup: true, loginSetup: "combined" });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    const state = JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json")));
+    server.state.setupFamilies.get(state.family_id).token = "mg_revoked_synthetic_00000000000000000000";
+    const repaired = await setup(box, server, ["--repair"]);
+    assert.equal(repaired.outcome, "ok", JSON.stringify(repaired));
+    const approvals = server.requestsTo("/v1/cli/setup/authorize");
+    assert.equal(approvals.length, 1);
+    assert.equal(approvals[0].query.intent, "repair");
+    assert.equal(approvals[0].query.expected_key_id, state.key_id);
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("JSON --no-browser first setup returns one combined URL and the waiter completes delivery", async () => {
+  const server = await startOAuthServer({ setup: true, loginSetup: "combined" });
+  try {
+    const box = boxFor();
+    const first = await agentSetup(box, server);
+    const url = assertAnnounced(first, server);
+    assert.equal(first.result.data.status, "login_pending");
+    assert.equal(`${url.origin}${url.pathname}`, `${server.origin}/v1/oauth/authorize`);
+    assert.equal(url.searchParams.get("ingest_setup"), "1");
+    assert.match(first.result.data.next_action.message, /approve an ingest-only key for this project/);
+    assert.equal(await completeInBrowser(url.href), 200);
+    await until(() => setupPhase(box) === "delivered" &&
+      fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")), "the waiter to deliver the key");
+    assert.match(fs.readFileSync(path.join(box.project, ".env"), "utf8"), /^METERGRAPH_APP_TOKEN=mg_/m);
+
+    const done = await setup(box, server, ["--no-browser"]);
+    assert.equal(done.outcome, "ok");
+    assert.equal(done.data.status, "ready_for_instrumentation");
+    assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 0);
+    for (const secret of secretsOf(server)) assert.ok(!first.run.stdout.includes(secret), "a credential was printed");
+  } finally { await server.close(); }
+});
+
 
 test("setup over SSH, in a cloud workspace or in CI hands off with a local command and a Metadata key path", async () => {
   for (const [env, environment] of [

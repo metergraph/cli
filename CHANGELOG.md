@@ -7,8 +7,8 @@
 
 - `usage` answers cost questions with grouped usage from the service: `--group-by`
   any of provider, model, route and UTC day, plus one `metadata.KEY`, exact `--route`,
-  `--provider`, `--model`, `--environment` and `--metadata` filters, and a UTC window (`--days N`, `--today`, or `--since`
-  with `--until`). Groups are attributed per call, totals cover every matching call,
+  `--provider`, `--model`, `--environment` and `--metadata` filters, and a UTC window
+  (`--days N`, `--today`, or `--since` with `--until`). Groups are attributed per call, totals cover every matching call,
   and coverage, pricing and attribution are shown in text and JSON. `--sort` ranks by
   cost, cost per call, calls, errors, mean latency or estimated p95 latency (labelled
   as an estimate) and says when a ranking covers only the listed groups. `--compare
@@ -17,6 +17,13 @@
   A deployment without grouped usage exits 14 with a `next_action` naming the read
   it does support. Plain `usage` without these options is unchanged. `usage --help`
   lists tested examples, also in `--help --json`.
+- A first `setup` that has to sign in now needs one browser approval instead of two
+  when the service supports it: the sign-in consent also approves the project's
+  ingest key and names both. The sign-in grant and the ingest key stay separate
+  credentials with separate PKCE verifiers and separate revocation. Services without
+  support, projects already signed in, `--repair` and replacement keep the separate
+  ingest-only approval. With `--json --no-browser`, a first setup then takes two
+  runs instead of three.
 - `usage` and `traces` carry the service's coverage, pricing and cost attribution
   evidence when it is reported: requested and read window, completeness with reasons,
   whole-window totals separate from the returned rows, known zero prices apart from

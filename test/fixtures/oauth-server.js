@@ -57,6 +57,10 @@ export async function startOAuthServer(initial = {}) {
     setupAuthorize: () => {},
     setupRedeem: "issue", // issue, drop-before-issue, drop-after-issue, reject
     setupCredentialReject: false,
+    // "combined": discovery advertises one approval for sign in and the first
+    // ingest key and the sign-in consent honors it. "advertise-only": it is
+    // advertised but the consent returns no receipt. false: an older service.
+    loginSetup: false,
     // A pre-registered CLI client ID that both metadata documents offer, or
     // null for a service that only supports dynamic registration.
     cliClientId: null,
@@ -156,6 +160,7 @@ export async function startOAuthServer(initial = {}) {
         deployment_profile: behavior.profile, profiles_supported: ["local", "managed", "byoc-core"],
         purpose: "ingest-bootstrap-v1", intents_supported: ["create", "replace_pending", "repair"],
         code_challenge_methods_supported: ["S256"], credential_scope: "ingest", receipt_lifetime_seconds: 300,
+        ...(behavior.loginSetup ? { login_ingest_setup_supported: true } : {}),
         ...offered() }));
     if (path === "/v1/cli/setup/authorize" && request.method === "GET") {
       const params = url.searchParams;
@@ -310,6 +315,22 @@ export async function startOAuthServer(initial = {}) {
         workspaceId: behavior.workspaceId,
       });
       target.searchParams.set("code", code);
+      // A server without the combined approval ignores the extra fields, as
+      // the real one does, and returns only the sign-in code.
+      if (params.get("ingest_setup") !== null) {
+        if (behavior.loginSetup === "combined") {
+          const family = params.get("ingest_setup_family_id");
+          const challenge = params.get("ingest_setup_code_challenge") ?? "";
+          if (params.get("ingest_setup") !== "1" || state.setupFamilies.has(family) ||
+              !/^[A-Za-z0-9_-]{43}$/.test(challenge) || challenge === params.get("code_challenge")) {
+            return send(response, 400, { error: "invalid_request" });
+          }
+          const receipt = `mgbs_${randomBytes(32).toString("base64url")}`;
+          state.setupReceipts.set(receipt, { familyId: family, intent: "create", challenge,
+            clientId: params.get("client_id"), redirectUri, workspaceId: behavior.workspaceId });
+          target.searchParams.set("ingest_setup_code", receipt);
+        }
+      }
     }
     response.writeHead(302, { location: target.href });
     return response.end();

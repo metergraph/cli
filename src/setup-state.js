@@ -101,10 +101,12 @@ export function readSetupState(root) {
   }
 }
 
-export function newSetupState(origin, workspaceId, profile, client) {
+// familyId is given when the family was already named in an approval, as a
+// combined sign-in and ingest approval does; otherwise a new one is chosen.
+export function newSetupState(origin, workspaceId, profile, client, familyId = randomUUID()) {
   return withSetupState({ schema_version: 1, origin, workspace_id: workspaceId,
     deployment_profile: profile, selected_client: client, skill_status: client === null ? "skipped" : "pending",
-    family_id: randomUUID(), key_id: null, phase: "unsubmitted" });
+    family_id: familyId, key_id: null, phase: "unsubmitted" });
 }
 
 // Compare-and-swap under a project-local exclusive lock. A concurrent setup
