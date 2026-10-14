@@ -216,7 +216,13 @@ function textNotices(tokens, report) {
     if (report.metadata_groups) shown.delete("metadata_values_missing");
     if (report.comparison) {
       for (const token of ["partial_day_comparison", "comparison_incomplete"]) shown.delete(token);
-      for (const token of tokens) if (token.startsWith("prior_")) shown.delete(token);
+      // Only the prior notices the comparison lines state (coverage, pricing,
+      // completeness, truncation); any other prior notice is still shown.
+      for (const token of [
+        "prior_coverage_partial", "prior_coverage_unknown", "prior_coverage_not_reported",
+        "prior_pricing_lower_bound", "prior_evidence_incomplete", "prior_groups_truncated",
+        "prior_warning_messages_omitted",
+      ]) shown.delete(token);
     }
   }
   if (shown.has("metadata_key_mostly_missing")) shown.delete("metadata_values_missing");
@@ -577,7 +583,9 @@ function comparisonLines(report, lines) {
     `Compared with ${comparison.mode === "previous" ? "the whole previous period" : "the previous period to the same elapsed time"}: ` +
       windowLine(comparison.prior.window),
     `Total cost: ${usd(totals.current.cost_usd)} now, ${usd(totals.prior.cost_usd)} before, ` +
-      `${signed(totals.cost_change.delta, (value) => `$${value.toFixed(4)}`)} (${percent(totals.cost_change.percent)})`,
+      (totals.cost_change_known
+        ? `${signed(totals.cost_change.delta, (value) => `$${value.toFixed(4)}`)} (${percent(totals.cost_change.percent)})`
+        : "change unknown (a window's cost is a lower bound)"),
     `Calls: ${totals.current.calls} now, ${totals.prior.calls} before, ` +
       `${signed(totals.calls_change.delta, String)} (${percent(totals.calls_change.percent)})`,
   );

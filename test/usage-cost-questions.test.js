@@ -267,10 +267,19 @@ test("comparison with the prior period warns when a partial UTC day meets a whol
     assert.equal(result.data.next_action.kind, "compare_like_for_like");
     assert.match(result.data.next_action.message, /--compare previous-same-time/);
     assert.equal(comparison.totals.prior.cost_usd, prior.totals.cost_usd);
-    assert.equal(comparison.totals.cost_change.delta, Math.round((current.totals.cost_usd - prior.totals.cost_usd) * 1e6) / 1e6);
+    // The prior day's cost is a lower bound, so the total change is unknown,
+    // not a number that could have the wrong sign.
+    assert.equal(prior.pricing.cost, "lower_bound");
+    assert.deepEqual(comparison.totals.cost_change, { delta: null, percent: null });
+    assert.equal(comparison.totals.cost_change_known, false);
+    assert.deepEqual(comparison.totals.calls_change.delta, current.totals.calls - prior.totals.calls);
+    // A group priced exactly in both windows has a known change; one with a
+    // lower bound does not.
     const support = comparison.items.find((item) => item.route === "support");
     assert.deepEqual([support.current.cost_usd, support.prior.cost_usd], [0.8, 0.35]);
-    assert.equal(support.cost_change.percent, 128.6);
+    assert.deepEqual(support.cost_change, { delta: 0.45, percent: 128.6 });
+    const research = comparison.items.find((item) => item.route === "research");
+    assert.deepEqual(research.cost_change, { delta: null, percent: null });
 
     const text = await usage(box, server, ["--group-by", "route", "--today", "--compare", "previous"], { json: false });
     assert.match(text.run.stdout, /Compared with the whole previous period: \S+ to \S+ UTC, 24 h/);
@@ -509,20 +518,32 @@ test("prior windows are whole periods or the same elapsed time, in UTC", async (
   assert.deepEqual(priorWindow(explicit, "previous"), { since: "2026-01-08T00:00:00.000Z", until: "2026-01-10T00:00:00.000Z" });
 
   // A group missing from a cut prior window is unknown, never zero.
+  const exactPricing = { priced_calls: 1, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" };
   const side = (items, truncated) => ({
     group_by: ["route"], truncated, complete: !truncated, items,
     window: { hours: 24, partial_days: [] },
     totals: { calls: 9, error_calls: 0, cost_usd: 1 },
+    pricing: exactPricing,
   });
-  const item = (route, cost) => ({ route, calls: 1, error_calls: 0, cost_usd: cost });
+  const item = (route, cost) => ({ route, calls: 1, error_calls: 0, cost_usd: cost, pricing: exactPricing });
   const notices = new Set();
   const cut = compareReports(side([item("a", 1)], false), side([item("b", 2)], true), "previous", notices);
   const a = cut.items.find((row) => row.route === "a");
   const b = cut.items.find((row) => row.route === "b");
   assert.equal(a.prior, null);
   assert.deepEqual(a.cost_change, { delta: null, percent: null });
-  assert.deepEqual(b.current, { calls: 0, error_calls: 0, cost_usd: 0 });
+  assert.equal(b.current.cost_usd, 0);
+  assert.equal(b.current.pricing.cost, "exact");
   assert.equal(cut.complete, false);
+  // Changes keep the service's 8-decimal precision.
+  const tiny = compareReports(side([item("a", 0.0000014)], false), side([item("a", 0.000001)], false), "previous", new Set());
+  assert.deepEqual(tiny.items[0].cost_change, { delta: 0.0000004, percent: 40 });
+  // A lower-bound side makes the cost change unknown.
+  const lower = { ...exactPricing, unknown_calls: 1, cost: "lower_bound" };
+  const unknown = compareReports(
+    side([{ ...item("a", 10), pricing: lower }], false), side([item("a", 20)], false), "previous", new Set(),
+  );
+  assert.deepEqual(unknown.items[0].cost_change, { delta: null, percent: null });
   assert.ok(notices.has("comparison_incomplete"));
 });
 
@@ -574,7 +595,7 @@ test("metadata.KEY combines with a past week, week over week, day, route and pro
     assert.equal(ticket.has_value, true);
     // The group without a value this week has no counterpart in a complete prior week: zero there.
     const none = wowReport.comparison.items.find((item) => item.has_value === false);
-    assert.deepEqual(none.prior, { calls: 0, error_calls: 0, cost_usd: 0 });
+    assert.deepEqual([none.prior.calls, none.prior.error_calls, none.prior.cost_usd], [0, 0, 0]);
     assert.equal(wowReport.comparison.partial_day_compared_with_full, true);
     assert.ok(wow.result.data.notices.includes("partial_day_comparison"));
     const wowText = await usage(box, server, ["--group-by", "metadata.workflow_name", "--days", "7", "--compare", "previous"], { json: false });
@@ -729,4 +750,81 @@ test("comparison joins groups by their real values, not by display values", asyn
   );
   const rows = comparison.items.map((row) => [row.current?.cost_usd ?? null, row.prior?.cost_usd ?? null]);
   assert.deepEqual(rows, [[1, 0], [2, 5]]);
+});
+
+test("filter echoes, buckets, pricing, attribution and coverage windows must match exactly", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite, reason = "usage_response_invalid") => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, reason);
+    };
+    const coverage = (doc, change) => ({ ...doc, coverage: { ...doc.coverage, ...change(doc.coverage) } });
+    // An echo that repeats a value is not the requested set.
+    server.behavior.usage = (doc) => coverage(doc, (value) => ({ filters: { ...value.filters, provider: ["provider-a", "provider-a"] } }));
+    const dup = await usage(box, server, ["--group-by", "provider", "--provider", "provider-a", "--days", "7"]);
+    assert.equal(dup.run.code, 11);
+    assert.equal(dup.result.error.reason, "filter_mismatch");
+    server.behavior.usage = (doc) => doc;
+    // Metadata buckets whose cost exceeds the population.
+    await refused(["--group-by", "metadata.prompt_id"], (doc) => ({
+      ...doc,
+      metadata_groups: {
+        ...doc.metadata_groups,
+        unlisted: { ...doc.metadata_groups.unlisted, missing_key: { ...doc.metadata_groups.unlisted.missing_key, cost_usd: 50 } },
+      },
+    }));
+    // Pricing that accounts for fewer calls than the population or a group.
+    await refused(["--group-by", "model"], (doc) => ({ ...doc, pricing: { ...doc.pricing, priced_calls: 1 } }));
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, items: [{ ...doc.items[0], pricing: { ...doc.items[0].pricing, priced_calls: 0 } }, ...doc.items.slice(1)],
+    }));
+    // Whole-trace attribution is not the per-call split grouped usage promises.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, attribution: { ...doc.attribution, level: "trace", cost_basis: "trace_total", per_provider_exact: false },
+    }));
+    // Coverage that describes another window than the one validated.
+    await refused(["--group-by", "model"], (doc) => coverage(doc, (value) => ({
+      requested_window: { ...value.requested_window, since: "2020-01-01T00:00:00+00:00" },
+    })), "window_mismatch");
+    await refused(["--group-by", "model"], (doc) => coverage(doc, (value) => ({
+      effective_window: { ...value.effective_window, since: new Date(Date.parse(value.effective_window.since) + 3600000).toISOString() },
+    })), "window_mismatch");
+  });
+});
+
+test("the suggested --limit never exceeds the deployment's max_rows", async () => {
+  await withSignedIn(async (server, box) => {
+    server.behavior.capabilities = (doc) => ({ ...doc, bounds: { ...doc.bounds, max_rows: 2 } });
+    const { run, result } = await usage(box, server, ["--group-by", "provider,model", "--limit", "2", "--sort", "calls"]);
+    assert.equal(run.code, 0, run.stdout);
+    assert.equal(result.data.next_action.kind, "narrow_read");
+  });
+});
+
+test("prior-window notices the comparison does not state are still shown", async () => {
+  const { readText } = await import("../src/read-output.js");
+  const report = {
+    source: "usage_aggregates", group_by: ["route"], filters: { route: 0, provider: 0, model: 0, environment: 0, metadata: { count: 0, keys: [] } },
+    window: { preset: "utc_days", days: 1, since: "2026-01-02T00:00:00Z", until: "2026-01-02T06:00:00Z", hours: 6, partial_days: ["2026-01-02"] },
+    sort: { by: "cost", meaning: "cost, highest first", complete: true }, items: [], empty: true, rows: 0, matched_groups: 0,
+    totals: { calls: 0, error_calls: 0, cost_usd: 0, cost_per_call_usd: null, input_tokens: 0, output_tokens: 0 },
+    coverage: null, pricing: null, attribution: null, complete: true, metadata_groups: null,
+    comparison: {
+      mode: "previous", hours: { current: 6, prior: 24 }, partial_day_compared_with_full: true, complete: true, items: [],
+      prior: { window: { preset: null, days: null, since: "2026-01-01T00:00:00Z", until: "2026-01-02T00:00:00Z", hours: 24, partial_days: [] }, coverage: null, pricing: null },
+      totals: {
+        current: { calls: 0, cost_usd: 0 }, prior: { calls: 0, cost_usd: 0 }, cost_change_known: true,
+        cost_change: { delta: 0, percent: null }, calls_change: { delta: 0, percent: null },
+      },
+    },
+  };
+  const text = readText({ command: "usage", ok: true, outcome: "ok", data: {
+    origin: "http://127.0.0.1:9", workspace: { id: "x" }, result: report,
+    notices: ["prior_pricing_lower_bound", "prior_unsafe_text_omitted"], next_action: null,
+  } }, null);
+  assert.match(text, /Prior window: Some names contained control or formatting characters/);
+  assert.ok(!text.includes("Prior window: Some calls have missing"));
 });

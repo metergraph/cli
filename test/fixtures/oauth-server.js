@@ -779,18 +779,19 @@ function syntheticMetadataAggregates(provenance, query) {
     latency: { avg_ms: 500, p95_ms: 900, p95_method: "histogram_estimate", samples: calls },
   });
   const allCalls = sum(groups, "calls");
+  const window = {
+    days,
+    // The current UTC day so far and the days - 1 whole UTC days before it.
+    since: new Date(Math.floor(Date.now() / DAY_MS) * DAY_MS - (days - 1) * DAY_MS).toISOString(),
+    until: new Date().toISOString(),
+    preset: "utc_days",
+    until_is_request_time: true,
+    timezone: "UTC",
+  };
   return {
     schema_version: CONTRACT_VERSION,
     provenance,
-    window: {
-      days,
-      // The current UTC day so far and the days - 1 whole UTC days before it.
-      since: new Date(Math.floor(Date.now() / DAY_MS) * DAY_MS - (days - 1) * DAY_MS).toISOString(),
-      until: new Date().toISOString(),
-      preset: "utc_days",
-      until_is_request_time: true,
-      timezone: "UTC",
-    },
+    window,
     evidence: { sources: ["calls"], rows: listed.length, complete: listed.length === groups.length },
     warnings: [
       ...(listed.length === groups.length ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }]),
@@ -807,6 +808,8 @@ function syntheticMetadataAggregates(provenance, query) {
         matched: groups.length,
         totalsScope: "population",
       }),
+      requested_window: { since: window.since, until: window.until, days: window.days },
+      effective_window: { since: window.since, until: window.until, days: window.days },
       rows: {
         shape: "top_n", ordering: "cost_usd desc, calls desc, group key asc", returned: listed.length, limit,
         truncated: listed.length < groups.length, matched: groups.length,

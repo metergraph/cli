@@ -666,8 +666,11 @@ function usageWindow(value, request, reason) {
 function checkUsageFilters(raw, request, notices) {
   const echoed = raw?.filters;
   if (!isObject(echoed)) throw new Invalid("verification_failed", "usage_response_invalid");
+  // Exactly the same values: no duplicates, nothing missing, nothing extra.
   const sameSet = (left, right) =>
-    left.length === right.length && left.every((entry) => right.includes(entry));
+    new Set(left).size === left.length &&
+    left.length === right.length &&
+    left.every((entry) => right.includes(entry));
   for (const key of ["route", "provider", "model"]) {
     const asked = request.filters[key];
     const got = echoed[key] ?? null;
@@ -718,9 +721,12 @@ function metadataGroupsOf(value, items, population, dimension, reason) {
     calls: valued.reduce((sum, item) => sum + item.calls, 0),
     cost_usd: round(valued.reduce((sum, item) => sum + item.cost_usd, 0)),
   };
+  const bucketCost =
+    unlisted.other_values.cost_usd + unlisted.missing_key.cost_usd + unlisted.ineligible_value.cost_usd;
   if (
     listed.calls + unlisted.other_values.calls + unlisted.missing_key.calls + unlisted.ineligible_value.calls !==
-    population.calls
+      population.calls ||
+    Math.abs(listed.cost_usd + bucketCost - population.cost_usd) > costTolerance(items.length + 3)
   ) {
     throw new Invalid("verification_failed", reason);
   }
@@ -764,6 +770,22 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (coverage.rows.shape !== "top_n" || coverage.totals_scope !== "population" || coverage.rows.limit !== request.limit) {
       throw new Invalid("verification_failed", reason);
     }
+    // Coverage must describe the window validated above: the same requested
+    // window, and an effective window inside it that ends at the same time
+    // (only metadata retention may clip its start, and it names that).
+    const requested = coverage.requested_window;
+    const effective = coverage.effective_window;
+    if (
+      requested === null ||
+      effective === null ||
+      Date.parse(requested.since) !== Date.parse(span.since) ||
+      Date.parse(requested.until) !== Date.parse(span.until) ||
+      Date.parse(effective.until) !== Date.parse(span.until) ||
+      Date.parse(effective.since) < Date.parse(span.since) ||
+      (Date.parse(effective.since) !== Date.parse(span.since) && !coverage.reasons.includes("retention_clipped"))
+    ) {
+      throw new Invalid("verification_failed", "window_mismatch");
+    }
     if (!Array.isArray(body.items) || body.items.length > request.limit) {
       throw new Invalid("verification_failed", reason);
     }
@@ -805,7 +827,11 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       if (seen.has(key)) throw new Invalid("verification_failed", reason);
       seen.add(key);
       const metrics = usageMetrics(row, reason);
-      const item = { ...group, ...metrics, pricing: pricingOf(row.pricing, notices, reason, { note: false }) };
+      const item = {
+        ...group,
+        ...metrics,
+        pricing: pricingOf(row.pricing, notices, reason, { note: false, calls: metrics.calls }),
+      };
       if (group.day !== undefined) item.partial_day = span.partial_days.includes(group.day);
       Object.defineProperty(item, GROUP_KEY, { value: key, enumerable: true });
       return item;
@@ -863,6 +889,15 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
     if (codes.some((entry) => entry.code === "metadata_key_mostly_missing")) notices.add("metadata_key_mostly_missing");
     const metadataGroups = metadataDimension === null ? null : metadataGroupsOf(body.metadata_groups, items, population, metadataDimension, reason);
+    // Grouped usage is attributed per call; anything else is not the promised split.
+    const groupedAttribution = attributionOf(body.attribution, reason, "call");
+    if (
+      groupedAttribution === null ||
+      groupedAttribution.cost_basis !== "call" ||
+      groupedAttribution.per_provider_exact !== true
+    ) {
+      throw new Invalid("verification_failed", reason);
+    }
     const complete = proof.complete && !truncated && coverage.completeness === "complete";
     return {
       provenance: origin,
@@ -889,8 +924,8 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       metadata_groups: metadataGroups,
       coverage,
       completeness: dashboard,
-      pricing: pricingOf(body.pricing, notices, reason),
-      attribution: attributionOf(body.attribution, reason),
+      pricing: pricingOf(body.pricing, notices, reason, { calls: population.calls }),
+      attribution: groupedAttribution,
     };
   });
 }

@@ -87,13 +87,23 @@ export function priorWindow(window, mode) {
   return { since: new Date(priorSince).toISOString(), until: new Date(priorUntil).toISOString() };
 }
 
+// The service reports amounts to 8 decimals; keep that precision and take the
+// percentage from the unrounded difference.
 const change = (now, before) => {
   if (now === null || before === null) return { delta: null, percent: null };
-  const delta = Math.round((now - before) * 1e6) / 1e6;
-  return { delta, percent: before === 0 ? null : Math.round((delta / before) * 1000) / 10 };
+  const raw = now - before;
+  return {
+    delta: Math.round(raw * 1e8) / 1e8,
+    percent: before === 0 ? null : Math.round((raw / before) * 1000) / 10,
+  };
 };
+// A cost change is known only when both sides' cost is exact: a lower bound
+// can hide a larger true cost and reverse the direction.
+const exact = (pricing) => pricing?.cost === "exact";
+const costChange = (now, before, nowPricing, beforePricing) =>
+  exact(nowPricing) && exact(beforePricing) ? change(now, before) : { delta: null, percent: null };
 
-const sideOf = (item) => ({ calls: item.calls, error_calls: item.error_calls, cost_usd: item.cost_usd });
+const sideOf = (item) => ({ calls: item.calls, error_calls: item.error_calls, cost_usd: item.cost_usd, pricing: item.pricing });
 
 // Joins the current and prior reports group by group. A group missing from a
 // window whose groups are all listed had no calls there (zero); missing from
@@ -102,7 +112,11 @@ export function compareReports(current, prior, mode, notices) {
   const key = byKey(current.group_by);
   const priorByKey = new Map(prior.items.map((item) => [key(item), item]));
   const currentKeys = new Set(current.items.map(key));
-  const zero = { calls: 0, error_calls: 0, cost_usd: 0 };
+  // No calls in a fully listed window: zero, and exactly so.
+  const zero = {
+    calls: 0, error_calls: 0, cost_usd: 0,
+    pricing: { priced_calls: 0, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" },
+  };
   const absent = (report) => (report.truncated ? null : zero);
   const group = (item) => Object.fromEntries(current.group_by.flatMap((dimension) =>
     dimension.startsWith("metadata.")
@@ -112,7 +126,7 @@ export function compareReports(current, prior, mode, notices) {
     ...group(item),
     current: now,
     prior: before,
-    cost_change: change(now?.cost_usd ?? null, before?.cost_usd ?? null),
+    cost_change: costChange(now?.cost_usd ?? null, before?.cost_usd ?? null, now?.pricing, before?.pricing),
     calls_change: change(now?.calls ?? null, before?.calls ?? null),
   });
   const items = current.items.map((item) => {
@@ -159,7 +173,8 @@ export function compareReports(current, prior, mode, notices) {
     totals: {
       current: totals(current),
       prior: totals(prior),
-      cost_change: change(current.totals.cost_usd, prior.totals.cost_usd),
+      cost_change: costChange(current.totals.cost_usd, prior.totals.cost_usd, current.pricing, prior.pricing),
+      cost_change_known: exact(current.pricing) && exact(prior.pricing),
       calls_change: change(current.totals.calls, prior.totals.calls),
     },
     items: [...items, ...onlyPrior],

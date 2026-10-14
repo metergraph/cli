@@ -462,7 +462,9 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
   if (grouped && reason === "response_too_large") return { kind: "narrow_read", message: NARROW };
   if (outcome === "ok" && report?.sort && !report.sort.complete && report.matched_groups !== null) {
     const needed = report.matched_groups;
-    return needed <= READ_MAX_LIMIT
+    // The largest --limit this deployment accepts, not only the CLI's own.
+    const maxLimit = Math.min(READ_MAX_LIMIT, capabilities?.bounds?.max_rows ?? READ_MAX_LIMIT);
+    return needed <= maxLimit
       ? {
           kind: "raise_limit",
           message: `The ranking covers the ${report.rows} highest-cost groups of ${needed}. ` +
