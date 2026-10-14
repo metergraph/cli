@@ -826,7 +826,10 @@ function syntheticMetadataAggregates(provenance, query) {
           calls: sum(groups.slice(limit).filter((group) => group.value !== null), "calls"),
           cost_usd: sum(groups.slice(limit).filter((group) => group.value !== null), "cost_usd"),
         },
-        missing_key: { calls: 7, cost_usd: 0.007 },
+        missing_key: {
+          calls: sum(groups.filter((group) => group.value === null), "calls"),
+          cost_usd: sum(groups.filter((group) => group.value === null), "cost_usd"),
+        },
         ineligible_value: { calls: 0, cost_usd: 0 },
       },
     },

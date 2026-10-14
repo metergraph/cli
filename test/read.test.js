@@ -1041,7 +1041,8 @@ test("a grouping no call has a value for says so once, without repeated notices"
     assert.equal(json.run.code, 0, json.run.stdout);
     const report = json.result.data.result;
     assert.deepEqual(report.items.map((item) => item.has_value), [false]);
-    assert.equal(report.items[0].calls, report.population_totals.calls);
+    assert.equal(report.items[0].calls, report.totals.calls);
+    assert.equal(report.metadata_groups.unattributed.calls, report.totals.calls);
     // JSON keeps every notice token.
     assert.ok(json.result.data.notices.includes("metadata_key_mostly_missing"));
     assert.ok(json.result.data.notices.includes("metadata_values_missing"));
@@ -1049,7 +1050,11 @@ test("a grouping no call has a value for says so once, without repeated notices"
     const text = await read(box, server, ["usage", "--group-by-metadata", "activity_name"], { json: false });
     const out = text.run.stdout;
     assert.match(out, /No call in this window has a value for activity_name\./);
-    assert.match(out, /Service warnings: metadata_key_mostly_missing, pricing_incomplete/);
+    // A recorded service document answers this query; codes print once, in service order.
+    const warningLines = out.split("\n").filter((line) => line.includes("Service warnings"));
+    assert.equal(warningLines.length, 1);
+    assert.match(warningLines[0], /metadata_key_mostly_missing/);
+    assert.match(warningLines[0], /pricing_incomplete/);
     // The explicit line replaces the generic notices; nothing is said twice.
     assert.ok(!out.includes("Most of this window"));
     assert.ok(!out.includes("Some calls have no usable value"));

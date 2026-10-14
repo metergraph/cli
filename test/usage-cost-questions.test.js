@@ -275,7 +275,11 @@ test("comparison with the prior period warns when a partial UTC day meets a whol
     const text = await usage(box, server, ["--group-by", "route", "--today", "--compare", "previous"], { json: false });
     assert.match(text.run.stdout, /Compared with the whole previous period: \S+ to \S+ UTC, 24 h/);
     assert.match(text.run.stdout, /Not like for like: [\d.]+ h now against 24 h before/);
-    assert.match(text.run.stdout, /partial current UTC day is compared with a whole prior period/);
+    // The comparison lines say it once; the notice is not repeated in text.
+    assert.ok(!text.run.stdout.includes("partial current UTC day is compared with a whole prior period"));
+    assert.ok(!text.run.stdout.includes("ends now, part way through the current UTC day"));
+    const bullets = text.run.stdout.split("\n").filter((line) => line.trimStart().startsWith("! "));
+    assert.equal(new Set(bullets).size, bullets.length);
     assert.match(text.run.stdout, /--compare previous-same-time/);
 
     const same = await usage(box, server, ["--group-by", "route", "--today", "--compare", "previous-same-time"]);
@@ -599,5 +603,34 @@ test("metadata.KEY combines with a past week, week over week, day, route and pro
       ["provider-a", "model-large", "ticket-reply"],
     ]);
     assert.equal(routedReport.filters.route, 1);
+  });
+});
+
+test("a key no call carries is said once, with the unattributed spend and no repeated notices", async () => {
+  await withSignedIn(async (server, box) => {
+    const json = await usage(box, server, ["--group-by", "metadata.activity_name"]);
+    assert.equal(json.run.code, 0, json.run.stdout);
+    const report = assertEnvelope(json.result, "absent-key");
+    assert.deepEqual(report.items.map((item) => item.has_value), [false]);
+    assert.equal(report.metadata_groups.unattributed.calls, report.totals.calls);
+    assert.ok(report.warnings.some((entry) => entry.code === "metadata_key_mostly_missing"));
+    // JSON keeps every notice token.
+    for (const token of ["metadata_key_mostly_missing", "metadata_values_missing", "current_day_partial"]) {
+      assert.ok(json.result.data.notices.includes(token), token);
+    }
+    const text = await usage(box, server, ["--group-by", "metadata.activity_name"], { json: false });
+    assert.equal(text.run.code, 0, text.run.stdout);
+    const out = text.run.stdout;
+    assert.equal(out.match(/No call in this window has a value for activity_name\./g).length, 1);
+    assert.equal(out.split("\n").filter((line) => line.includes("Service warnings")).length, 1);
+    assert.match(out, /Not attributed to any activity_name value: \d+ calls/);
+    for (const repeated of [
+      "Most of this window", "Some calls have no usable value", "Service warning messages are not printed",
+      "ends now, part way through", "cost is a lower bound.",
+    ]) {
+      assert.ok(!out.includes(repeated), repeated);
+    }
+    const bullets = out.split("\n").filter((line) => line.trimStart().startsWith("! "));
+    assert.equal(new Set(bullets).size, bullets.length);
   });
 });
