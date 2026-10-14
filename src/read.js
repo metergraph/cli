@@ -3,17 +3,21 @@ import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
 import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.js";
-import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_PATHS } from "./constants.js";
+import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
   readQuery,
+  groupedRequest,
+  READ_ENVIRONMENTS,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
   tracesReport,
+  usageAggregatesReport,
   usageReport,
   workspaceContext,
 } from "./read-contract.js";
+import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
@@ -35,12 +39,10 @@ const READS = Object.freeze({
   routes: { capability: "routes", path: READ_PATHS.routes, validate: routesReport },
   traces: { capability: "trace_metadata", path: READ_PATHS.traces, validate: tracesReport },
 });
-// usage --group-by-metadata groups server-side on the aggregates read; the
-// same usage validator checks it and the same output code prints it.
 const GROUPED_USAGE = Object.freeze({
   capability: "usage_aggregates",
   path: READ_PATHS.usageAggregates,
-  validate: usageReport,
+  validate: usageAggregatesReport,
 });
 
 export async function runRead(options) {
@@ -66,8 +68,11 @@ export async function runRead(options) {
   const limit = deadline(options.timeoutMs, trap.signal);
   // Token values this run holds. Filled after the session is verified.
   let known = [];
+  const grouped = options.command === "usage" && options.grouped !== undefined && options.grouped !== null;
   const build = (outcome, report) =>
-    options.command === "status" ? statusData(ctx, notices, outcome, options) : readData(ctx, report, notices, outcome, options);
+    options.command === "status"
+      ? statusData(ctx, notices, outcome, options)
+      : readData(ctx, report, notices, outcome, options, { grouped, report });
   const end = (outcome, reason, report = null) => {
     ctx.reason = reason;
     const data = build(outcome, report);
@@ -75,6 +80,7 @@ export async function runRead(options) {
     // printed string holds a credential this run knows, nothing is printed.
     if (holdsKnown(data, known)) {
       notices.clear();
+      ctx.reason = "credential_in_metadata_response";
       return {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
@@ -206,26 +212,73 @@ export async function runRead(options) {
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
 
-    const read = options.command === "usage" && options.groupByMetadata ? GROUPED_USAGE : READS[options.command];
+    const read = grouped ? GROUPED_USAGE : READS[options.command];
     const entry = capabilities.value.agent[read.capability];
-    if (entry === null || entry.available !== true) return end("capability_unavailable", "capability_unavailable");
+    if (entry === null || entry.available !== true) {
+      return end("capability_unavailable", grouped ? "usage_aggregates_unavailable" : "capability_unavailable");
+    }
     // The service's own bounds; a request beyond them is refused, never
     // clamped into a different question.
     const { bounds } = capabilities.value;
-    if ((options.days !== null && options.days > bounds.max_days) || options.limit > bounds.max_rows) {
+    // An explicit grouped window is held to the same day bound as --days.
+    const explicitDays = grouped && options.grouped.since !== null
+      ? ((options.grouped.until === null ? Date.now() : Date.parse(options.grouped.until)) -
+          Date.parse(options.grouped.since)) / (24 * 60 * 60 * 1000)
+      : null;
+    if (
+      (options.days !== null && options.days > bounds.max_days) ||
+      (explicitDays !== null && explicitDays > bounds.max_days) ||
+      options.limit > bounds.max_rows
+    ) {
       return end("unsupported", "exceeds_service_bounds");
     }
 
-    const response = await fetchRead(session.session, read.path, readQuery(options), limit.signal);
-    if (!response.ok) {
-      // A key refused moments after it was verified was revoked meanwhile.
-      if (ctx.credential === "agent_key" && response.reason === "access_revoked") response.reason = "agent_key_rejected";
-      const settled = settle(response);
-      return end(settled.outcome, settled.reason, response.retryAfter === undefined ? null : { retry_after_seconds: response.retryAfter });
+    const fetchOne = async (query, request, into) => {
+      // When this read was asked for, to check a window that ends "now".
+      request = { ...request, requestedAt: Date.now() };
+      const response = await fetchRead(session.session, read.path, query, limit.signal);
+      if (!response.ok) {
+        // A key refused moments after it was verified was revoked meanwhile.
+        if (ctx.credential === "agent_key" && response.reason === "access_revoked") response.reason = "agent_key_rejected";
+        const settled = settle(response);
+        return {
+          ok: false,
+          ...settled,
+          detail: response.retryAfter === undefined ? null : { retry_after_seconds: response.retryAfter },
+        };
+      }
+      return read.validate(response.body, ctx, request, into);
+    };
+    if (!grouped) {
+      const report = await fetchOne(readQuery(options), requestOf(options), notices);
+      if (!report.ok) return end(report.outcome, report.reason, report.detail ?? null);
+      return end("ok", null, report.value);
     }
-    const report = read.validate(response.body, ctx, requestOf(options), notices);
-    if (!report.ok) return end(report.outcome, report.reason);
-    return end("ok", null, report.value);
+
+    // Grouped usage: the current window, then for --compare the prior
+    // window computed from the window the service actually read.
+    const request = groupedRequest(options);
+    const current = await fetchOne(readQuery(options, request), request, notices);
+    if (!current.ok) return end(current.outcome, current.reason, current.detail ?? null);
+    let report = rankReport(current.value, options.grouped.sort, notices);
+    if (options.grouped.compare !== null) {
+      const window = priorWindow(current.value.window, options.grouped.compare);
+      const priorRequest = { ...request, days: null, since: window.since, until: window.until, limit: options.limit };
+      // The prior read's own coverage notices describe the prior window; they
+      // are kept apart and summarised by the comparison.
+      const priorNotices = new Set();
+      const prior = await fetchOne(readQuery(options, priorRequest), priorRequest, priorNotices);
+      if (!prior.ok) return end(prior.outcome, prior.reason, prior.detail ?? null);
+      // Both windows must cover the same environments, or the change compares
+      // different populations.
+      if (JSON.stringify(prior.value[READ_ENVIRONMENTS]) !== JSON.stringify(current.value[READ_ENVIRONMENTS])) {
+        return end("verification_failed", "filter_mismatch");
+      }
+      for (const token of priorNotices) if (token !== "current_day_partial") notices.add(`prior_${token}`);
+      // The ranked report, so comparison rows follow the requested --sort.
+      report = { ...report, comparison: compareReports(report, prior.value, options.grouped.compare, notices) };
+    }
+    return end("ok", null, report);
   } catch (error) {
     if (error instanceof Stop) {
       const settled = settle(error);
@@ -248,6 +301,7 @@ function requestOf(options) {
     groupByMetadata: options.groupByMetadata ?? null,
   };
 }
+
 
 // Unauthenticated GET /healthz on the bound origin, so status can tell an
 // unreachable service from a refused grant. status then checks GET
@@ -284,6 +338,14 @@ function holdsKnown(value, known) {
   return false;
 }
 
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function retryAfterOf(response) {
+  const header = response.headers["retry-after"];
+  const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
+  return seconds !== null && seconds <= 86400 ? seconds : null;
+}
+
 // One GET with the session's access token. A refused token is never
 // refreshed and retried here: the grant was valid moments ago, so a refusal
 // means it was revoked or access was lost.
@@ -306,16 +368,18 @@ async function fetchRead(session, path, query, signal) {
       return { ok: false, outcome: "permission_denied", reason: scope ? "insufficient_scope" : "forbidden" };
     }
     if (status === 429) {
-      const header = response.headers["retry-after"];
-      const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
-      return {
-        ok: false,
-        outcome: "rate_limited",
-        reason: "rate_limited",
-        retryAfter: seconds !== null && seconds <= 86400 ? seconds : null,
-      };
+      return { ok: false, outcome: "rate_limited", reason: "rate_limited", retryAfter: retryAfterOf(response) };
     }
     if (status === 404) return { ok: false, outcome: "unsupported", reason: "endpoint_unavailable" };
+    if (status === 413) return { ok: false, outcome: "unsupported", reason: "response_too_large" };
+    if (status === 503) {
+      // The service's read budget (time or pool) was exceeded. Nothing is
+      // retried here; the result says when to retry and how to narrow it.
+      const body = parseJsonObject(response);
+      if (isObject(body?.error) && body.error.code === "temporarily_unavailable") {
+        return { ok: false, outcome: "unhealthy", reason: "temporarily_unavailable", retryAfter: retryAfterOf(response) };
+      }
+    }
     if (status === 400 || status === 422) return { ok: false, outcome: "unsupported", reason: "request_rejected" };
   }
   const failure = failureOf(response);
@@ -327,7 +391,7 @@ async function fetchRead(session, path, query, signal) {
 }
 
 // The shape shared by context, capabilities, usage, routes and traces.
-function readData(ctx, report, notices, outcome, options) {
+function readData(ctx, report, notices, outcome, options, extra = {}) {
   return {
     origin: ctx.origin,
     workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
@@ -337,9 +401,10 @@ function readData(ctx, report, notices, outcome, options) {
     authenticated: ctx.authenticated,
     scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
     result: outcome === "ok" ? report : null,
-    retry_after_seconds: outcome === "rate_limited" ? report?.retry_after_seconds ?? null : null,
+    retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
+      ? report?.retry_after_seconds ?? null : null,
     notices: [...notices].sort(),
-    next_action: nextAction(outcome, ctx, options),
+    next_action: nextAction(outcome, ctx, options, extra),
   };
 }
 
@@ -380,14 +445,59 @@ function statusData(ctx, notices, outcome, options) {
   };
 }
 
-// The next action for a failed read, by credential and environment. Where
-// browser sign in cannot finish (SSH, a cloud workspace, CI), the answer is
-// always the agent key handoff, never "run login".
-function nextAction(outcome, ctx, options) {
+const NARROW =
+  "Narrow the read: a shorter --days or --since/--until window, exact --route, --provider or --model filters, " +
+  "fewer --group-by dimensions or a lower --limit.";
+
+// The next action for a read, by credential and environment. Where browser
+// sign in cannot finish (SSH, a cloud workspace, CI), the answer is always
+// the agent key handoff, never "run login". Grouped usage adds its own steps
+// (a supported read, retry, narrow, raise the limit, compare like for like);
+// their text is fixed except a window and limit computed from validated values.
+function nextAction(outcome, ctx, options, { grouped = false, report = null } = {}) {
   const origin = ctx.origin ?? options.origin ?? DEFAULT_ORIGIN;
   const keyed = ctx.credential === "agent_key";
   const reason = ctx.reason;
+  const capabilities = ctx.capabilities;
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
+  if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
+    // Offer the route-by-day read only when this grant actually has it.
+    if (capabilities?.agent?.usage?.available !== true) return null;
+    return {
+      kind: "use_supported_read",
+      message:
+        "This deployment does not offer grouped usage to this grant. \"metergraph usage --days N\" still lists " +
+        "cost per route and day over the last N x 24 hours. Grouping by provider, model, UTC day or a metadata key " +
+        "needs a service that offers grouped usage; nothing was read.",
+      command: "metergraph usage --days 7 --json",
+    };
+  }
+  if (grouped && reason === "temporarily_unavailable") {
+    return { kind: "retry_later", message: `The service stopped the read at its time budget. Wait, then retry. ${NARROW}` };
+  }
+  if (grouped && reason === "response_too_large") return { kind: "narrow_read", message: NARROW };
+  if (outcome === "ok" && report?.sort && !report.sort.complete && report.matched_groups !== null) {
+    const needed = report.matched_groups;
+    // The largest --limit this deployment accepts, not only the CLI's own.
+    const maxLimit = Math.min(READ_MAX_LIMIT, capabilities?.bounds?.max_rows ?? READ_MAX_LIMIT);
+    return needed <= maxLimit
+      ? {
+          kind: "raise_limit",
+          message: `The ranking covers the ${report.rows} highest-cost groups of ${needed}. ` +
+            `Run the same command with --limit ${needed} to rank every group.`,
+        }
+      : { kind: "narrow_read", message: `The ranking covers the ${report.rows} highest-cost groups of ${needed}. ${NARROW}` };
+  }
+  if (outcome === "ok" && report?.comparison?.partial_day_compared_with_full) {
+    const window = report.comparison.like_for_like_window;
+    return {
+      kind: "compare_like_for_like",
+      message:
+        "The current window ends part way through today (UTC) and the prior period is whole days. " +
+        "For equal lengths, run the same command with --compare previous-same-time " +
+        `(prior window ${window.since} to ${window.until}).`,
+    };
+  }
   if (keyed && (reason === "agent_key_rejected" || reason === "agent_key_insufficient_scope")) {
     return {
       kind: "replace_agent_key",

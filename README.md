@@ -48,6 +48,7 @@ Then read what Metergraph has recorded:
 
 ```sh
 npx --yes metergraph-cli@latest usage --days 7      # calls, errors, cost and tokens per route per day
+npx --yes metergraph-cli@latest usage --group-by route --today   # most expensive route today (UTC)
 npx --yes metergraph-cli@latest traces --limit 20   # one page of trace metadata
 ```
 
@@ -136,7 +137,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | --- | --- | --- |
 | `setup` | Sign in, choose a workspace, write the ingest key to `.env`, record the repository, install the skill | Yes |
 | `verify` | Confirm that one exact trace, by trace ID or request ID, reached the workspace | Yes |
-| `usage` | Daily calls, errors, cost, tokens and latency per route, filtered by exact metadata or grouped by one metadata key | Yes |
+| `usage` | Daily calls, errors, cost, tokens and latency per route, or cost grouped by provider, model, route or UTC day with exact filters, rankings and a prior-period comparison; filtered by exact metadata or grouped by one metadata key | Yes |
 | `traces` | One page of trace metadata, filtered by route, status or exact metadata, with a cursor for the next page | Yes |
 | `routes` | Routes with call counts and evaluation contract status | Yes |
 | `status` | Whether the project is signed in, and to which workspace | Yes |

@@ -1,0 +1,10 @@
+{
+  "body": {
+    "error": {
+      "code": "response_too_large",
+      "message": "The usage aggregate response exceeded its size budget. Narrow the window, filters or group_by."
+    },
+    "schema_version": "metergraph.agent-access/v1"
+  },
+  "status": 413
+}

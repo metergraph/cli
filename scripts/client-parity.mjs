@@ -172,7 +172,7 @@ try {
   mkdirSync(matrixProject);
   for (const [name, command, outcome, reason] of [
     ["cloud_login", ["login", "--runtime", "cloud"], "unsupported", "runtime_not_supported"],
-    ["environment_selector", ["usage", "--environment", "production"], "unsupported", "environment_selector_unsupported"],
+    ["environment_selector", ["traces", "--environment", "production"], "unsupported", "environment_selector_unsupported"],
     ["workload_filter", ["traces", "--workload", "example"], "unsupported", "workload_filter_unsupported"],
     ["content_access", ["traces", "--content"], "unsupported", "content_access_unsupported"],
     ["missing_trace_identity", ["verify", "--since", since, "--until", until], "invalid_input", "invalid_trace_identity"],

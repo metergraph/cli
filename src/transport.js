@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 
-import { MAX_QUERY_LENGTH, PACKAGE_NAME, READ_QUERY_KEYS, VERSION } from "./constants.js";
+import { MAX_QUERY_LENGTH, PACKAGE_NAME, READ_QUERY_KEYS, READ_QUERY_REPEATABLE, VERSION } from "./constants.js";
 import { classifyError } from "./http.js";
 
 const USER_AGENT = `${PACKAGE_NAME}/${VERSION}`;
@@ -10,7 +10,8 @@ const USER_AGENT = `${PACKAGE_NAME}/${VERSION}`;
 // Builds the request URL. Without a query the path must be a fixed path on
 // the origin with no search part. A query is accepted only as a
 // URLSearchParams the caller built, only on a path in READ_QUERY_KEYS, only
-// with that path's keys, each at most once. Anything else is a programming
+// with that path's keys, each at most once unless READ_QUERY_REPEATABLE lists
+// it for that path. Anything else is a programming
 // error, so no input can choose another path, origin or header.
 function requestUrl(origin, pathname, query) {
   const url = new URL(pathname, origin);
@@ -23,9 +24,12 @@ function requestUrl(origin, pathname, query) {
   if (!(query instanceof URLSearchParams) || allowed === null) {
     throw new Error("a query is not allowed on this path");
   }
+  const repeatable = READ_QUERY_REPEATABLE[pathname] ?? [];
   const seen = new Set();
   for (const key of query.keys()) {
-    if (!allowed.includes(key) || seen.has(key)) throw new Error("query key is not allowed");
+    if (!allowed.includes(key) || (seen.has(key) && !repeatable.includes(key))) {
+      throw new Error("query key is not allowed");
+    }
     seen.add(key);
   }
   const search = query.toString();

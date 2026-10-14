@@ -1,0 +1,11 @@
+{
+  "body": {
+    "error": {
+      "code": "temporarily_unavailable",
+      "message": "The usage query is taking too long. Narrow the time range or filters and try again."
+    },
+    "schema_version": "metergraph.agent-access/v1"
+  },
+  "retry_after": "5",
+  "status": 503
+}

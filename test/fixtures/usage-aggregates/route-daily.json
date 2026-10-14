@@ -1,0 +1,238 @@
+{
+  "attribution": {
+    "cost_basis": "call",
+    "level": "call",
+    "mixed_model_rows": 0,
+    "mixed_provider_rows": 0,
+    "per_provider_exact": true
+  },
+  "completeness": {
+    "complete": true,
+    "from": "2026-10-08T00:00:00+00:00",
+    "limit": 50,
+    "mode": "top_n",
+    "returned": 5,
+    "to": "2026-10-14T17:54:38.105879+00:00"
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T17:54:38.107782+00:00",
+    "completeness": "complete",
+    "effective_window": {
+      "days": 6.746274,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T17:54:38.105879+00:00"
+    },
+    "filters": {
+      "environments": null,
+      "metadata": [],
+      "model": null,
+      "provider": null,
+      "route": [
+        "support"
+      ]
+    },
+    "next_cursor": null,
+    "reasons": [],
+    "requested_window": {
+      "days": 6.746274,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T17:54:38.105879+00:00"
+    },
+    "rows": {
+      "limit": 50,
+      "matched": 5,
+      "ordering": "cost_usd desc, calls desc, group key asc",
+      "returned": 5,
+      "shape": "top_n",
+      "truncated": false
+    },
+    "totals_scope": "population"
+  },
+  "evidence": {
+    "complete": true,
+    "rows": 5,
+    "sources": [
+      "calls",
+      "ingest_batches"
+    ]
+  },
+  "group_by": [
+    "day"
+  ],
+  "items": [
+    {
+      "cache_read_tokens": 20,
+      "cache_write_tokens": 24,
+      "calls": 2,
+      "cost_per_call_usd": 0.4,
+      "cost_usd": 0.8,
+      "day": "2026-10-14",
+      "error_calls": 1,
+      "input_tokens": 200,
+      "latency": {
+        "avg_ms": 1300,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 1475,
+        "samples": 2
+      },
+      "output_tokens": 100,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 2,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 4
+    },
+    {
+      "cache_read_tokens": 10,
+      "cache_write_tokens": 12,
+      "calls": 1,
+      "cost_per_call_usd": 0.35,
+      "cost_usd": 0.35,
+      "day": "2026-10-13",
+      "error_calls": 0,
+      "input_tokens": 100,
+      "latency": {
+        "avg_ms": 1100,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 1475,
+        "samples": 1
+      },
+      "output_tokens": 50,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 2
+    },
+    {
+      "cache_read_tokens": 10,
+      "cache_write_tokens": 12,
+      "calls": 1,
+      "cost_per_call_usd": 0.3,
+      "cost_usd": 0.3,
+      "day": "2026-10-12",
+      "error_calls": 0,
+      "input_tokens": 100,
+      "latency": {
+        "avg_ms": 1000,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 988,
+        "samples": 1
+      },
+      "output_tokens": 50,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 2
+    },
+    {
+      "cache_read_tokens": 10,
+      "cache_write_tokens": 12,
+      "calls": 1,
+      "cost_per_call_usd": 0.25,
+      "cost_usd": 0.25,
+      "day": "2026-10-11",
+      "error_calls": 0,
+      "input_tokens": 100,
+      "latency": {
+        "avg_ms": 900,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 988,
+        "samples": 1
+      },
+      "output_tokens": 50,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 2
+    },
+    {
+      "cache_read_tokens": 10,
+      "cache_write_tokens": 12,
+      "calls": 1,
+      "cost_per_call_usd": 0.2,
+      "cost_usd": 0.2,
+      "day": "2026-10-09",
+      "error_calls": 0,
+      "input_tokens": 100,
+      "latency": {
+        "avg_ms": 950,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 988,
+        "samples": 1
+      },
+      "output_tokens": 50,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 1,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "reasoning_tokens": 2
+    }
+  ],
+  "pricing": {
+    "cost": "exact",
+    "partial_calls": 0,
+    "priced_calls": 6,
+    "unknown_calls": 0,
+    "unpriced_calls": 0,
+    "zero_cost_calls": 0
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": null,
+    "generated_at": "2026-10-14T17:54:38.107782+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "totals": {
+    "cache_read_tokens": 60,
+    "cache_write_tokens": 72,
+    "calls": 6,
+    "cost_per_call_usd": 0.31666667,
+    "cost_usd": 1.9,
+    "error_calls": 1,
+    "input_tokens": 600,
+    "latency": {
+      "avg_ms": 1092,
+      "p95_method": "histogram_estimate",
+      "p95_ms": 1450,
+      "samples": 6
+    },
+    "output_tokens": 300,
+    "reasoning_tokens": 12,
+    "scope": "population"
+  },
+  "warnings": [],
+  "window": {
+    "days": 7,
+    "preset": "utc_days",
+    "since": "2026-10-08T00:00:00+00:00",
+    "timezone": "UTC",
+    "until": "2026-10-14T17:54:38.105879+00:00",
+    "until_is_request_time": true
+  }
+}

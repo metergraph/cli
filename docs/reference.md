@@ -45,7 +45,7 @@ metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
-metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] [--group-by-metadata KEY] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph usage [--days N | --today | --since TIME [--until TIME]] [--group-by DIMS] [--route NAME]... [--provider NAME]... [--model NAME]... [--environment NAME]... [--sort ORDER] [--compare previous|previous-same-time] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] [--group-by-metadata KEY] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
@@ -633,7 +633,8 @@ times for the grant.
 | `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
 | `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
 | `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
-| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=]`, or with `--group-by-metadata KEY` `GET /v1/agent/usage/aggregates?days=N&limit=N&group_by=metadata.KEY[&metadata=]` (needs the `usage_aggregates` capability) | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. With `--group-by-metadata KEY`, one row per value of that key instead (see [Metadata filters and grouping](#metadata-filters-and-grouping)). |
+| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=]` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. |
+| `usage` (grouped) | `GET /v1/agent/usage/aggregates?group_by=...&(days= or since=&until=)&limit=[&route=&provider=&model=&environment=&metadata=]` (one `group_by` per dimension) | Groups by provider, model, route, UTC day or one metadata key with calls, errors, cost, cost per call, tokens and labelled latency, totals over every matching call, the UTC window, coverage, pricing and attribution, and an optional prior-period comparison (see [Grouped usage and cost questions](#grouped-usage-and-cost-questions)). |
 | `routes` | `GET /v1/agent/routes` | Route name, calls, replay eligible calls, evaluation contract version and hash, and whether a description or contract exists. |
 | `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&metadata=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
 
@@ -695,7 +696,8 @@ Bounds and honesty rules:
   workspace binding.
 - `--environment`, `--workload`, `--since`, `--until`, `--sql`, `--query`, `--content`,
   `--include-content`, `--debug` and `--replay` are recognized and refused with exit 6
-  before any request. The agent access contract has no environment selector or
+  before any request, except `--environment`, `--since` and `--until` on `usage`, which
+  send them to the grouped usage read. The other reads have no environment selector or
   absolute time range, and these commands never read content or replay. `--workload`
   is refused by this CLI version because the returned trace rows do not show which
   workload they belong to, so a filtered page could not be verified.
@@ -736,40 +738,139 @@ and `usage` can group by one key.
 - On `traces`, a metadata filter selects spans, like `--route`, so a trace's totals
   cover its matching spans.
 
-`--group-by-metadata KEY` groups the whole window by one key, highest cost first, using
-the service's usage aggregates (`group_by=metadata.KEY`). A route is not a prompt: one
-route usually carries several prompt IDs, so
-`metergraph usage --group-by-metadata prompt_id` is how to split a route's cost by
-prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and
-pricing. Calls without the key, or with a non-string value or one over 1,000
-characters, form one row with `metadata_value: null` and `has_value: false`. Human
-output shows that row as `(no KEY value)`, and the notice `metadata_values_missing` is
-set. `--limit` caps the listed values. Truncation is read from the same coverage
-evidence as any other read. `coverage.rows` gives `returned`, `limit`, `truncated` and
-`matched` (the number of distinct values, including the no-value group), and
-`population_totals` covers every matching call. The CLI refuses a response where
-`coverage.rows` disagrees with the groups. It also refuses one whose rows are not
-highest cost first, one that returns fewer than `min(limit, matched)` rows (the read
-has no cursor), and one where the listed calls, errors, tokens or cost exceed the
-totals (or, untruncated, do not equal them). When values were cut, `truncated` is `true`,
-`complete` is `false`, `coverage.completeness` is `partial` and the notice
-`metadata_groups_truncated` is set. A response not grouped by the requested key exits
-11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same
-reason. A service without the `usage_aggregates` capability exits 14. When the service
-warns `metadata_key_mostly_missing` (calls without a usable value hold at least half of
-the window's calls or cost), the notice `metadata_key_mostly_missing` is set. When no
-call has the key at all, human output says so in one line and suggests checking the
-key's spelling.
+`--group-by metadata.KEY` (or `--group-by-metadata KEY`, the same dimension and the
+way to give a key that contains a comma) groups by one metadata key through grouped
+usage; see [Grouped usage and cost questions](#grouped-usage-and-cost-questions). A
+route is not a prompt: one route usually carries several prompt IDs, so
+`metergraph usage --group-by metadata.prompt_id` is how to split a route's cost by
+prompt, and `--group-by route,metadata.prompt_id` shows which prompts ran on each
+route. The key is sent whole as its own `group_by` parameter, so commas and dots in it
+survive. Each metadata group has `metadata_key`, `metadata_value` and `has_value`. Calls
+without the key, or with a non-string value or one over 1,000 characters, form a group
+with `metadata_value: null` and `has_value: false`, shown as `(no value)`, and the
+notice `metadata_values_missing` is set; the coverage reasons `metadata_key_missing`
+and `metadata_value_ineligible` name them without lowering completeness.
+`result.metadata_groups` accounts for every call: `listed_with_value`, then
+`unlisted.other_values` (values past `--limit`, with a group count),
+`unlisted.missing_key` and `unlisted.ineligible_value`, which add up to
+`totals.calls` exactly, and `unattributed`, the calls and cost no value of the key
+accounts for. Human output prints both lines. A response whose buckets do not add up
+is refused (exit 11). A service without the `usage_aggregates` capability exits 14.
+When the service warns `metadata_key_mostly_missing` (calls without a usable value
+hold at least half of the window's calls or cost), the notice
+`metadata_key_mostly_missing` is set. When no call has the key at all, human output
+says so in one line and suggests checking the key's spelling.
+Like every grouped read, a metadata grouping is refused when its rows are not highest
+cost first, when it returns fewer than `min(limit, matched)` rows (the read has no
+cursor), or when the listed calls, errors, tokens or cost exceed the totals (or,
+untruncated, do not equal them).
 
 In human output, notices that repeat a printed line are left out: the Coverage line
 replaces the incomplete-evidence and truncation notices, the Pricing line replaces the
-lower-bound notice, and service warning codes are printed once on a `Service warnings`
+lower-bound notice, the Window line replaces the partial-day notice, the metadata
+attribution lines replace the missing-values notice, the comparison lines replace the
+comparison notices, and service warning codes are printed once on a `Service warnings`
 line. `--json` keeps every notice token.
 
 ```sh
-metergraph usage --days 7 --group-by-metadata prompt_id --json
+metergraph usage --days 7 --group-by metadata.prompt_id --json
 metergraph usage --metadata workflow_id=wf-2041 --json
 metergraph traces --route support-reply --metadata prompt_id=reply-v3 --limit 5 --json
+```
+
+#### Grouped usage and cost questions
+
+`usage` reads grouped usage when it is given `--group-by`, `--route`, `--provider`,
+`--model`, `--environment`, `--today`, `--since`, `--until`, `--sort` or `--compare`.
+The service groups calls (spans) by any ordered subset of `provider`, `model`, `route`
+and `day` (default `provider,model`), so a trace that used two providers adds each
+call's cost to that call's provider. The same read is the MCP tool
+`metergraph_get_usage_aggregates`; both return one document. It needs the
+`usage_aggregates` capability. A deployment without it exits 14 with
+`usage_aggregates_unavailable` and a `next_action` of kind `use_supported_read` that
+names the route-by-day read (`metergraph usage --days 7 --json`), which still works
+there. Nothing is read.
+
+| Question | Command |
+| --- | --- |
+| Most expensive route today | `metergraph usage --group-by route --today` |
+| Spend with one provider | `metergraph usage --group-by provider --provider NAME --days 7` |
+| Spend by model | `metergraph usage --group-by model --days 7` |
+| One route's daily trend | `metergraph usage --route NAME --group-by day --days 14` |
+| Cost by a prompt metadata key | `metergraph usage --group-by metadata.prompt_id --days 7` |
+| Today against yesterday | `metergraph usage --group-by route --today --compare previous` |
+
+Windows are UTC. In grouped usage, `--days N` is the current UTC day so far and the N - 1
+whole UTC days before it, ending at the request time (`window.kind: "utc_days"`); plain
+`usage --days N` instead reads the last N x 24 hours, rolling and not aligned to UTC days
+(`window.kind: "rolling"`, `aligned_to_utc_days: false`), and its text output says so; `--today` is `--days 1`. `--since` (inclusive)
+and `--until` (exclusive, default now) take a UTC date (`YYYY-MM-DD`, 00:00 UTC) or an
+ISO 8601 timestamp with `Z` or an offset; a timestamp without one exits 2, so a local
+time is never read as UTC. A window spans at most 90 days. `result.window` echoes
+`since`, `until`, `timezone: "UTC"`, `preset`, `until_is_request_time`, `hours` and
+`partial_days`, the UTC days the window covers only in part, and `kind` (`utc_days` or
+`explicit`). A `day` group in
+`partial_days` has `partial_day: true`, and the `current_day_partial` notice is set
+when the window ends part way through today. A window, grouping or filter the service
+did not apply as asked exits 11 (`window_mismatch`, `group_by_mismatch`,
+`filter_mismatch`).
+
+Filters are exact. `--route`, `--provider` and `--model` may each be repeated up to 20
+times; `(unrouted)` and `(unknown)` select calls without a route, provider or model.
+`--environment` may be repeated; a grant restricted to some environments reads only
+those and sets `environment_restricted_key`. The service must echo every filter in
+`coverage.filters`. Filter values are not printed back, only how many applied.
+`--metadata` on grouped usage needs a service that echoes it in
+`coverage.filters.metadata`; one that does not exits 6 with
+`metadata_filter_unsupported`, and nothing is printed.
+
+Each item has its group fields, `rank`, `calls`, `error_calls`, `error_rate`,
+`cost_usd`, `cost_per_call_usd` (`cost_usd / calls`), input, output, cache read, cache
+write and reasoning tokens, `latency` and its own `pricing`. `latency.avg_ms` is the
+mean over the `latency.samples` calls that reported latency. `latency.p95_ms` is
+estimated from a fixed latency histogram of the group's own calls
+(`p95_method: "histogram_estimate"`), never an exact percentile and never a maximum or
+mean of daily values; text output labels it `P95_MS_EST`. `totals` (`scope:
+"population"`) cover every call the window and filters match, whatever `--limit` is.
+
+`--sort` orders the groups: `cost` (default), `cost-per-call`, `calls`, `errors`,
+`avg-latency`, `p95-latency` or `day` (oldest first, the default for
+`--group-by day`). The service returns the `--limit` highest-cost groups. When more
+groups matched (`truncated: true`, `coverage.rows.matched` above `rows`, the
+`groups_truncated` notice), a ranking by anything but cost covers only the listed
+groups: `sort.complete` is `false`, the `ranking_partial` notice is set and
+`next_action` (`raise_limit`) names the `--limit` that lists every group, or asks for a
+narrower read when that is over 200.
+
+`--compare previous` reads the period before as a second request and adds
+`result.comparison`: the prior window, totals, coverage and pricing, the change in cost
+and calls overall and per group, and `hours` for both windows. For `--days N` the
+prior period is the N whole UTC days before the current window, so a window that ends
+part way through today is shorter than its prior period:
+`partial_day_compared_with_full` is `true`, the `partial_day_comparison` notice is
+set, and `next_action` (`compare_like_for_like`) gives the equal-length prior window.
+`--compare previous-same-time` uses that window: the prior period up to the same
+elapsed time. A group absent from a window whose groups are all listed is zero there;
+absent from a cut window it is `null` (unknown), and `comparison.complete` is `false`.
+Notices from the prior read are prefixed `prior_`. `--compare` cannot be combined with
+`--group-by day`, since a day is never in both windows.
+
+The service bounds each read in time and size. A read stopped at its time budget exits
+5 with `temporarily_unavailable`, `retry_after_seconds` from the service and a
+`next_action` of kind `retry_later`; a response over the size budget (the service's
+413 or the CLI's own 1 MiB bound) exits 6 with `response_too_large` and a
+`narrow_read` next action. Nothing is retried.
+
+The tests replay documents the service returned over HTTP for one synthetic dataset
+in a real PostgreSQL database, recorded with the MCP tool's document for the same
+arguments (`test/fixtures/usage-aggregates/parity.json`); for each, the CLI's totals,
+groups and window match the service's.
+
+```sh
+metergraph usage --group-by route --today --json
+metergraph usage --route support-reply --group-by day --days 14
+metergraph usage --group-by provider,model --days 30 --sort cost-per-call --limit 200
+metergraph usage --group-by route --since 2026-01-01 --until 2026-01-08 --compare previous
 ```
 
 A successful `usage`, shortened:
@@ -837,8 +938,9 @@ On failure `result` is `null`, `authenticated` says whether the grant was verifi
 before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
 `evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted`,
 `trace_links_unavailable`, `coverage_partial`, `coverage_unknown`,
-`coverage_not_reported`, `pricing_lower_bound`, `mixed_provider_traces` or
-`unpriced_traces`.
+`coverage_not_reported`, `pricing_lower_bound`, `mixed_provider_traces`,
+`unpriced_traces`, `groups_truncated`, `ranking_partial`, `current_day_partial`,
+`partial_day_comparison`, `comparison_incomplete` or `environment_restricted_key`.
 
 #### Reads with a Metadata key
 
