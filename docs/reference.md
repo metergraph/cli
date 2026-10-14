@@ -45,9 +45,9 @@ metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph context [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph capabilities [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
-metergraph usage [--days N] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] [--group-by-metadata KEY] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
-metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
+metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
 ```
 
@@ -559,9 +559,9 @@ times for the grant.
 | `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
 | `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
 | `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
-| `usage` | `GET /v1/agent/usage?days=N&limit=N` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. |
+| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=&group_by_metadata=]` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. With `--group-by-metadata KEY`, one row per value of that key instead (see [Metadata filters and grouping](#metadata-filters-and-grouping)). |
 | `routes` | `GET /v1/agent/routes` | Route name, calls, replay eligible calls, evaluation contract version and hash, and whether a description or contract exists. |
-| `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
+| `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&metadata=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
 
 Bounds and honesty rules:
 
@@ -621,6 +621,54 @@ Bounds and honesty rules:
   refused read exits 15 (`insufficient_scope` or `forbidden`), rate limiting exits 16
   with `retry_after_seconds` when the service sends a whole number of seconds, and a
   token refused during the read exits 12. Nothing is retried. Ctrl+C exits 17.
+
+#### Metadata filters and grouping
+
+Metadata is the string dictionary your application attaches to calls with the SDK's
+tags (for example `metergraph.tags(prompt_id="reply-v3")` or
+`mg.withTags({ prompt_id: "reply-v3" }, ...)`). `usage` and `traces` can filter on it,
+and `usage` can group by one key.
+
+- `--metadata KEY=VALUE` keeps only calls whose metadata has exactly that value. It is
+  case-sensitive and opaque: nothing is trimmed, case folded or split on a prefix, so
+  `queue:job/Run-1` matches only itself. Repeat it for up to 5 keys; a call must
+  match all of them. The argument splits at the first `=`, so a value may contain `=`.
+- `KEY=` matches only calls where the key is present with an empty value. A call
+  without the key never matches any filter.
+- `--metadata-json '{"a=b":"v"}'` gives the same filters as one JSON object, for a key
+  that contains `=`. It cannot be combined with `--metadata`. Duplicate keys and
+  non-string values exit 2.
+- Keys are 1 to 200 characters and values at most 1,000. Keys that look like
+  credentials (ending in `api_key`, `token`, `secret`, `password`, `auth` and similar)
+  are refused with exit 2, and the service refuses them too.
+- The CLI sends the filters as one JSON object in the `metadata` query parameter.
+  Trace and usage rows do not carry metadata, so the service must echo exactly the
+  requested pairs in `metadata_filters`. A service that does not echo them exits 6
+  with `metadata_filter_unsupported`; a different echo exits 11 with
+  `metadata_filter_mismatch`. Filter values are never printed back; only the keys and
+  how many were applied (`metadata_filters` in `usage`, `filters.metadata` in
+  `traces`).
+- On `traces`, a metadata filter selects spans, like `--route`, so a trace's totals
+  cover its matching spans.
+
+`--group-by-metadata KEY` groups the whole window by one key, highest cost first. A
+route is not a prompt: one route usually carries several prompt IDs, so
+`metergraph usage --group-by-metadata prompt_id` is how to split a route's cost by
+prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and up to
+10 `routes` the value ran on (`route_count` is the full count). `--limit` caps the
+listed values. Nothing is dropped: `metadata_groups.unlisted` totals calls in values
+past the limit (`other_values`, with a group count), without the key (`missing_key`),
+with a non-string value (`non_string_value`) and with a value over 1,000 characters
+(`oversize_value`), and `metadata_groups.window_calls` is the sum of all of them. When
+values were cut, `truncated` is `true`, `complete` is `false` and the notice
+`metadata_groups_truncated` is set. A response not grouped by the requested key exits
+11 with `group_by_mismatch`.
+
+```sh
+metergraph usage --days 7 --group-by-metadata prompt_id --json
+metergraph usage --metadata workflow_id=wf-2041 --json
+metergraph traces --route support-reply --metadata prompt_id=reply-v3 --limit 5 --json
+```
 
 A successful `usage`, shortened:
 

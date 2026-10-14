@@ -404,6 +404,7 @@ test("traces return one page with an opaque cursor, never follow it, and check f
       route_supplied: true,
       status: "error",
       cursor_supplied: false,
+      metadata: { count: 0, keys: [] },
     });
 
     // A workload filter cannot be verified from the returned rows, so it is
@@ -872,4 +873,100 @@ test("read command help works offline and states what is not done", async () => 
   }
   const json = parseJsonLine((await runCli(["help", "traces", "--json"], { offline: true })).stdout);
   assert.equal(json.data.topic, "traces");
+});
+
+test("metadata filters go out as one JSON object and must be echoed exactly", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    const { run, result } = await read(box, server, [
+      "traces", "--metadata", "prompt_id=reply-v3", "--metadata-json", "{}",
+    ]);
+    assert.equal(run.code, 2, "--metadata and --metadata-json together must be refused");
+    assert.equal(server.requestsTo("/v1/agent/traces").length, 0);
+    assert.equal(result.outcome, "invalid_input");
+
+    const exact = await read(box, server, ["traces", "--metadata-json", '{"prompt_id":"reply-v3","a=b":"x"}']);
+    assert.equal(exact.run.code, 0, exact.run.stdout);
+    assert.deepEqual(server.requestsTo("/v1/agent/traces")[0].query, {
+      days: "7",
+      limit: "20",
+      metadata: '{"a=b":"x","prompt_id":"reply-v3"}',
+    });
+    const page = exact.result.data.result;
+    assert.deepEqual(page.traces.map((trace) => trace.trace_id), ["trace-0001"]);
+    assert.deepEqual(page.filters.metadata, { count: 2, keys: ["a=b", "prompt_id"] });
+
+    const empty = await read(box, server, ["traces", "--metadata", "prompt_id="]);
+    assert.deepEqual(empty.result.data.result.traces.map((trace) => trace.trace_id), ["trace-0003"]);
+
+    const text = await read(box, server, ["traces", "--metadata", "prompt_id=reply-v3"], { json: false });
+    assert.match(text.run.stdout, /Metadata filter +exact match on prompt_id/);
+    assert.ok(!text.run.stdout.includes("reply-v3"), "a filter value was printed back");
+  });
+});
+
+test("a service that does not confirm the metadata filter is refused, not trusted", async () => {
+  const server = await startOAuthServer({
+    workspace: PLAIN_WORKSPACE,
+    traces: (doc) => {
+      delete doc.metadata_filters;
+      return doc;
+    },
+    usage: (doc) => ({ ...doc, metadata_filters: [{ key: "prompt_id", value: "other" }] }),
+  });
+  try {
+    const box = await signedIn(server);
+    const traces = await read(box, server, ["traces", "--metadata", "prompt_id=reply-v3"]);
+    assertFailure(traces.result, "unsupported", "metadata_filter_unsupported");
+    const usage = await read(box, server, ["usage", "--metadata", "prompt_id=reply-v3"]);
+    assertFailure(usage.result, "verification_failed", "metadata_filter_mismatch");
+    // Without a filter, an older service without the echo still works.
+    const plain = await read(box, server, ["traces"]);
+    assert.equal(plain.run.code, 0, plain.run.stdout);
+  } finally {
+    await server.close();
+  }
+});
+
+test("usage grouped by a metadata key lists values with their routes and totals the rest", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    const { run, result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id", "--limit", "2"]);
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(server.requestsTo("/v1/agent/usage")[0].query, {
+      days: "7",
+      limit: "2",
+      group_by_metadata: "prompt_id",
+    });
+    const report = result.data.result;
+    assert.deepEqual(report.group_by, { dimension: "metadata", metadata_key: "prompt_id" });
+    assert.deepEqual(report.items.map((item) => item.metadata_value), ["reply-v3", "reply-v2"]);
+    // One route, several prompt IDs.
+    assert.deepEqual(report.items.map((item) => item.routes), [["checkout-summary"], ["checkout-summary"]]);
+    assert.equal(report.truncated, true);
+    assert.equal(report.complete, false);
+    assert.deepEqual(report.metadata_groups.unlisted.other_values, { groups: 1, calls: 5, cost_usd: 0.005 });
+    assert.equal(report.metadata_groups.window_calls, 40 + 12 + 5 + 7);
+    assert.ok(result.data.notices.includes("metadata_groups_truncated"));
+
+    const text = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"], { json: false });
+    assert.match(text.run.stdout, /Grouped by metadata +prompt_id/);
+    assert.match(text.run.stdout, /triage=a:b\/c/);
+    assert.match(text.run.stdout, /Groups: 3 shown of 3 values/);
+    assert.match(text.run.stdout, /without prompt_id: 7 calls/);
+  });
+});
+
+test("a usage response not grouped by the requested key is refused", async () => {
+  const server = await startOAuthServer({
+    workspace: PLAIN_WORKSPACE,
+    usage: (doc) => ({ ...doc, group_by: null }),
+  });
+  try {
+    const box = await signedIn(server);
+    const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
+    assertFailure(result, "verification_failed", "group_by_mismatch");
+  } finally {
+    await server.close();
+  }
 });

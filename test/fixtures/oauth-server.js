@@ -548,9 +548,73 @@ export const USAGE_ROWS = Object.freeze([
   },
 ]);
 
+// Synthetic metadata per usage group: one route carries several prompt IDs.
+export const PROMPT_GROUPS = Object.freeze([
+  { value: "reply-v3", calls: 40, cost_usd: 0.04, routes: ["checkout-summary"] },
+  { value: "reply-v2", calls: 12, cost_usd: 0.012, routes: ["checkout-summary"] },
+  { value: "triage=a:b/c", calls: 5, cost_usd: 0.005, routes: ["checkout-summary", "support-triage"] },
+]);
+
+// Echoes the metadata pairs a request applied, sorted by key, as the service does.
+function metadataEcho(query) {
+  if (!query.has("metadata")) return [];
+  return Object.entries(JSON.parse(query.get("metadata")))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => ({ key, value }));
+}
+
 export function usageDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
+  const window = {
+    days,
+    since: new Date(Date.now() - days * DAY_MS).toISOString(),
+    until: new Date().toISOString(),
+  };
+  if (query.has("group_by_metadata")) {
+    const key = query.get("group_by_metadata");
+    const listed = PROMPT_GROUPS.slice(0, limit);
+    const rest = PROMPT_GROUPS.slice(limit);
+    const items = listed.map((group) => ({
+      metadata_key: key,
+      metadata_value: group.value,
+      calls: group.calls,
+      cost_usd: group.cost_usd,
+      input_tokens: group.calls * 100,
+      output_tokens: group.calls * 20,
+      avg_latency_ms: 500,
+      p95_latency_ms: 900,
+      error_calls: 0,
+      routes: group.routes,
+      route_count: group.routes.length,
+    }));
+    const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
+    return {
+      schema_version: CONTRACT_VERSION,
+      provenance,
+      window,
+      evidence: { sources: ["calls"], rows: items.length, complete: rest.length === 0 },
+      warnings: rest.length === 0 ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }],
+      days,
+      content_included: false,
+      metadata_filters: metadataEcho(query),
+      group_by: { dimension: "metadata", metadata_key: key },
+      items,
+      metadata_groups: {
+        key,
+        groups_total: PROMPT_GROUPS.length,
+        groups_returned: items.length,
+        limit,
+        unlisted: {
+          other_values: { groups: rest.length, calls: sum(rest, "calls"), cost_usd: sum(rest, "cost_usd") },
+          missing_key: { calls: 7, cost_usd: 0.007 },
+          non_string_value: { calls: 0, cost_usd: 0 },
+          oversize_value: { calls: 0, cost_usd: 0 },
+        },
+      },
+      truncated: rest.length > 0,
+    };
+  }
   const items = USAGE_ROWS.slice(0, limit).map((row) => ({ ...row }));
   return {
     schema_version: CONTRACT_VERSION,
@@ -564,6 +628,8 @@ export function usageDocument(provenance, query) {
     warnings: [],
     days,
     content_included: false,
+    metadata_filters: metadataEcho(query),
+    group_by: null,
     truncated: USAGE_ROWS.length > limit,
     items,
   };
@@ -635,15 +701,24 @@ export const TRACE_ROWS = Object.freeze(
   })),
 );
 
+// Synthetic SDK tags per trace. Rows never carry them; only the echo does.
+const TRACE_METADATA = Object.freeze({
+  "trace-0001": { prompt_id: "reply-v3", "a=b": "x" },
+  "trace-0002": { prompt_id: "reply-v30" },
+  "trace-0003": { prompt_id: "" },
+});
+
 // The cursor is opaque to the CLI. Here it is "page:OFFSET".
 export function tracesDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
   const offset = query.has("cursor") ? Number(query.get("cursor").slice(5)) : 0;
+  const metadata = query.has("metadata") ? JSON.parse(query.get("metadata")) : {};
   const rows = TRACE_ROWS.filter(
     (row) =>
       (!query.has("status") || row.status === query.get("status")) &&
-      (!query.has("route") || row.routes.includes(query.get("route"))),
+      (!query.has("route") || row.routes.includes(query.get("route"))) &&
+      Object.entries(metadata).every(([key, value]) => TRACE_METADATA[row.trace_id]?.[key] === value),
   );
   const traces = rows.slice(offset, offset + limit).map((row) => ({ ...row }));
   const truncated = offset + limit < rows.length;
@@ -660,6 +735,7 @@ export function tracesDocument(provenance, query) {
     warnings: [],
     page: { limit, truncated, next_cursor: next },
     content_included: false,
+    metadata_filters: metadataEcho(query),
     truncated,
     next_cursor: next,
     traces,

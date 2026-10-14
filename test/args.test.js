@@ -237,6 +237,8 @@ test("parses read commands with bounded defaults and explicit values", () => {
     route: null,
     status: null,
     cursor: null,
+    metadata: null,
+    groupByMetadata: null,
     json: false,
   });
   const usage = parseArgs(["--json", "usage", "--days=90", "--limit", "200", "--project", "app", "--timeout-ms", "60000"]);
@@ -304,4 +306,45 @@ test("rejects bad input with fixed messages that never contain the input", () =>
       assert.ok(!parsed.message.includes(arg), "error message echoes an argument value");
     }
   }
+});
+
+test("metadata filters are exact opaque pairs, sorted, bounded and never echoed in errors", () => {
+  const usage = parseArgs([
+    "usage", "--metadata", "workflow_id=wf=1", "--metadata", "prompt_id= Queue:X ", "--group-by-metadata", "prompt_id",
+  ]);
+  assert.deepEqual(usage.metadata, [
+    { key: "prompt_id", value: " Queue:X " },
+    { key: "workflow_id", value: "wf=1" },
+  ]);
+  assert.equal(usage.groupByMetadata, "prompt_id");
+  assert.deepEqual(parseArgs(["traces", "--metadata", "prompt_id="]).metadata, [{ key: "prompt_id", value: "" }]);
+  assert.deepEqual(parseArgs(["traces", "--metadata-json", '{"a=b":"c","é":"東京"}']).metadata, [
+    { key: "a=b", value: "c" },
+    { key: "é", value: "東京" },
+  ]);
+  const cases = [
+    [["traces", "--metadata", "novalue"], "invalid_metadata"],
+    [["traces", "--metadata", "=v"], "invalid_metadata"],
+    [["traces", "--metadata", "k=1", "--metadata", "k=2"], "duplicate_metadata_key"],
+    [["traces", "--metadata-json", '{"k":"1","k":"2"}'], "duplicate_metadata_key"],
+    [["traces", "--metadata-json", '{"k":1}'], "invalid_metadata"],
+    [["traces", "--metadata-json", '["k"]'], "invalid_metadata"],
+    [["traces", "--metadata-json", "{bad"], "invalid_metadata"],
+    [["traces", "--metadata", "a=1", "--metadata-json", '{"b":"2"}'], "metadata_conflict"],
+    [["traces", ...[1, 2, 3, 4, 5, 6].flatMap((n) => ["--metadata", `k${n}=v`])], "too_many_metadata_filters"],
+    [["traces", "--metadata", `${"k".repeat(201)}=v`], "invalid_metadata_key"],
+    [["traces", "--metadata", `k=${"v".repeat(1001)}`], "invalid_metadata"],
+    [["traces", "--metadata", "sk-live-SECRET_api_key=v"], "metadata_key_ineligible"],
+    [["usage", "--group-by-metadata", "aws_secret_access_key"], "metadata_key_ineligible"],
+    [["traces", "--group-by-metadata", "prompt_id"], "unknown_argument"],
+    [["routes", "--metadata", "a=b"], "unknown_argument"],
+  ];
+  for (const [argv, code] of cases) {
+    const parsed = parseArgs(argv);
+    assert.equal(parsed.ok, false, argv.join(" "));
+    assert.equal(parsed.code, code, argv.join(" "));
+    assert.ok(!parsed.message.includes("sk-live"), "an argument value was echoed");
+  }
+  const long = Array.from({ length: 5 }, (_, n) => ["--metadata", `k${n}=${"\"".repeat(400)}`]).flat();
+  assert.equal(parseArgs(["traces", ...long]).code, "metadata_too_long");
 });

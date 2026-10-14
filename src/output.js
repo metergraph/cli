@@ -204,6 +204,22 @@ const DAYS_OPTION = {
   value: "N",
   summary: `Window of the last N days, 1 to ${READ_MAX_DAYS}. Default ${READ_DEFAULT_DAYS}.`,
 };
+const METADATA_OPTIONS = [
+  {
+    name: "--metadata",
+    value: "KEY=VALUE",
+    summary:
+      "Only calls whose metadata (SDK tags) has exactly this string value: case-sensitive, no prefix or " +
+      "trimming. Repeat for up to 5 keys, all must match. A call without the key never matches; KEY= " +
+      "matches only an empty value. Splits at the first =, so a value may contain =.",
+  },
+  {
+    name: "--metadata-json",
+    value: "JSON",
+    summary:
+      'The same filters as one JSON object, for keys that contain = (for example {"a=b":"v"}). Not with --metadata.',
+  },
+];
 const limitOption = (fallback, extra = "") => ({
   name: "--limit",
   value: "N",
@@ -240,9 +256,27 @@ export const READ_HELP = Object.freeze([
   },
   {
     name: "usage",
-    usage: `metergraph usage [--days N] [--limit N] ${READ_BASE_USAGE}`,
-    summary: "Show daily calls, errors, cost, tokens and latency per route for a recent window. Metadata only.",
-    options: [...READ_BASE_OPTIONS, DAYS_OPTION, limitOption(READ_DEFAULT_LIMIT), JSON_OPTION],
+    usage:
+      `metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] ` +
+      `[--group-by-metadata KEY] ${READ_BASE_USAGE}`,
+    summary:
+      "Show daily calls, errors, cost, tokens and latency per route for a recent window, or group the window " +
+      "by one metadata key. Metadata only. A route is not a prompt: one route can carry several prompt IDs, " +
+      'so "metergraph usage --group-by-metadata prompt_id" splits cost by prompt.',
+    options: [
+      ...READ_BASE_OPTIONS,
+      DAYS_OPTION,
+      limitOption(READ_DEFAULT_LIMIT, " With --group-by-metadata it caps the listed values."),
+      ...METADATA_OPTIONS,
+      {
+        name: "--group-by-metadata",
+        value: "KEY",
+        summary:
+          "Group by one metadata key, highest cost first, with the routes each value ran on. Calls in further " +
+          "values, without the key, or with a non-string value are totalled, never dropped.",
+      },
+      JSON_OPTION,
+    ],
   },
   {
     name: "routes",
@@ -263,7 +297,7 @@ export const READ_HELP = Object.freeze([
     name: "traces",
     usage:
       `metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] ` +
-      `[--cursor CURSOR] ${READ_BASE_USAGE}`,
+      `[--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] ${READ_BASE_USAGE}`,
     summary:
       "List one page of trace metadata: status, span count, tokens, cost, routes, providers and models. " +
       "No prompts, responses or tool calls.",
@@ -273,6 +307,7 @@ export const READ_HELP = Object.freeze([
       limitOption(TRACES_DEFAULT_LIMIT),
       { name: "--route", value: "NAME", summary: "Only traces that include this route." },
       { name: "--status", value: "STATUS", summary: "Only success or error traces." },
+      ...METADATA_OPTIONS,
       {
         name: "--cursor",
         value: "CURSOR",

@@ -23,6 +23,14 @@ const READ_MESSAGES = {
   filter_mismatch: "The service reported different trace filters than the ones requested. Nothing from it was printed.",
   filter_not_applied:
     "The service returned traces that do not match the requested filter. Nothing from it was printed.",
+  metadata_filter_unsupported:
+    "The service did not confirm the metadata filter, so the CLI cannot show that it applied. " +
+    "The service may predate metadata filters. Nothing from it was printed.",
+  metadata_filter_mismatch:
+    "The service reported different metadata filters than the ones requested. Nothing from it was printed.",
+  group_by_mismatch:
+    "The service did not group by the requested metadata key. The service may predate metadata grouping. " +
+    "Nothing from it was printed.",
   read_response_invalid: "The service's response is not usable JSON. Nothing from it was printed.",
   usage_response_invalid: "The service's usage response does not match the contract. Nothing from it was printed.",
   routes_response_invalid: "The service's routes response does not match the contract. Nothing from it was printed.",
@@ -49,6 +57,8 @@ const NOTICES = {
   evidence_incomplete: "The service marked this evidence as incomplete.",
   rows_truncated: "The service returned fewer rows than exist. Totals cover the returned rows only.",
   more_pages: "More traces exist. Pass --cursor with next_cursor to read the next page.",
+  metadata_groups_truncated:
+    "More metadata values exist than --limit. Their calls and cost are totalled under Not listed, not dropped.",
   routes_truncated_locally:
     "The service returned more routes than --limit. Only the first rows are shown; the routes endpoint has no server limit or window.",
   route_details_omitted: "Route descriptions, constraints and evaluation contract bodies are not printed.",
@@ -231,8 +241,14 @@ function resultLines(command, report, lines) {
     );
     return;
   }
+  if (command === "usage" && report.group_by !== null) {
+    groupedUsageLines(report, lines);
+    return;
+  }
   if (command === "usage") {
-    lines.push(`Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`, "");
+    lines.push(`Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`);
+    if (report.metadata_filters.count > 0) lines.push(metadataFilterLine(report.metadata_filters));
+    lines.push("");
     if (report.empty) {
       lines.push("No usage rows in this window.");
     } else {
@@ -284,7 +300,9 @@ function resultLines(command, report, lines) {
     return;
   }
   if (command === "traces") {
-    lines.push(`Window: last ${report.window.days} days`, "");
+    lines.push(`Window: last ${report.window.days} days`);
+    if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
+    lines.push("");
     if (report.empty) {
       lines.push("No traces on this page.");
     } else {
@@ -310,4 +328,47 @@ function resultLines(command, report, lines) {
     lines.push(`Evidence: ${report.complete ? "complete" : "incomplete"}`);
     lines.push("Trace links: not available from the service yet");
   }
+}
+
+// Filter values are not printed back; only the keys they applied to.
+function metadataFilterLine(filters) {
+  return `Metadata filter: exact match on ${filters.keys.join(", ")}`;
+}
+
+function groupedUsageLines(report, lines) {
+  const key = report.group_by.metadata_key;
+  lines.push(
+    `Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`,
+    `Grouped by metadata: ${key}`,
+  );
+  if (report.metadata_filters.count > 0) lines.push(metadataFilterLine(report.metadata_filters));
+  lines.push("");
+  if (report.empty) {
+    lines.push(`No calls in this window carry ${key} as a string value.`);
+  } else {
+    const rows = report.items.map((item) => [
+      show(item.metadata_value),
+      String(item.calls),
+      String(item.error_calls),
+      usd(item.cost_usd),
+      String(item.input_tokens),
+      String(item.output_tokens),
+      show(item.p95_latency_ms),
+      (item.routes.join(",") || "-") + (item.route_count > item.routes.length ? ` +${item.route_count - item.routes.length}` : ""),
+    ]);
+    lines.push(...table(["VALUE", "CALLS", "ERRORS", "COST", "IN_TOKENS", "OUT_TOKENS", "P95_MS", "ROUTES"], rows));
+  }
+  const groups = report.metadata_groups;
+  const { other_values: other, missing_key: missing, non_string_value: nonString, oversize_value: oversize } =
+    groups.unlisted;
+  lines.push(
+    "",
+    `Groups: ${groups.groups_returned} shown of ${groups.groups_total} values.`,
+    `Not listed: ${other.groups} more values (${other.calls} calls, ${usd(other.cost_usd)}); ` +
+      `without ${key}: ${missing.calls} calls (${usd(missing.cost_usd)}); ` +
+      `non-string value: ${nonString.calls} calls (${usd(nonString.cost_usd)}); ` +
+      `value over 1000 characters: ${oversize.calls} calls (${usd(oversize.cost_usd)}).`,
+    `Calls in the window: ${groups.window_calls}.`,
+    `Evidence: ${report.complete ? "complete" : "incomplete"}`,
+  );
 }

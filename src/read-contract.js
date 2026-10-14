@@ -1,5 +1,10 @@
 import { normalizeUuid } from "./auth-oauth.js";
-import { AGENT_CONTRACT_VERSION, MAX_CURSOR_LENGTH, METADATA_SCOPE } from "./constants.js";
+import {
+  AGENT_CONTRACT_VERSION,
+  MAX_CURSOR_LENGTH,
+  MAX_METADATA_VALUE_LENGTH,
+  METADATA_SCOPE,
+} from "./constants.js";
 import { traceLink } from "./trace-contract.js";
 
 // Validators for the service's Metadata read documents. Each one checks the
@@ -121,6 +126,51 @@ export function isCursor(value) {
 
 export function isSafeFilter(value) {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_TEXT && !hasUnsafeText(value);
+}
+
+// The one JSON object sent as the metadata query parameter. filters are
+// already sorted by key, so the text is stable.
+export function metadataQueryValue(filters) {
+  return JSON.stringify(Object.fromEntries(filters.map(({ key, value }) => [key, value])));
+}
+
+// Rows do not carry metadata, so the only proof a metadata filter applied is
+// the service's echo. It must list exactly the requested pairs, in key
+// order. A service that does not echo them (an older one) is refused rather
+// than trusted, and an echo the CLI did not ask for is refused too.
+function checkMetadataEcho(body, request) {
+  const requested = request.metadata ?? [];
+  const echoed = body.metadata_filters;
+  if (echoed === undefined) {
+    if (requested.length > 0) throw new Invalid("unsupported", "metadata_filter_unsupported");
+    return;
+  }
+  if (!Array.isArray(echoed) || echoed.length !== requested.length) {
+    throw new Invalid("verification_failed", "metadata_filter_mismatch");
+  }
+  echoed.forEach((entry, index) => {
+    if (
+      !isObject(entry) ||
+      entry.key !== requested[index].key ||
+      entry.value !== requested[index].value
+    ) {
+      throw new Invalid("verification_failed", "metadata_filter_mismatch");
+    }
+  });
+}
+
+// A metadata value is a customer's opaque string. Like a route name it is
+// untrusted text: one that could change how a terminal shows output is
+// replaced with null and noted.
+function metadataText(value, notices, reason) {
+  if (typeof value !== "string" || value.length > MAX_METADATA_VALUE_LENGTH) {
+    throw new Invalid("verification_failed", reason);
+  }
+  if (hasUnsafeText(value)) {
+    notices.add("unsafe_text_omitted");
+    return null;
+  }
+  return value;
 }
 
 // Text a person reads, such as a route or model name. It is untrusted
@@ -573,6 +623,14 @@ export function usageReport(body, ctx, request, notices) {
     if (!Array.isArray(body.items) || body.items.length > request.limit) {
       throw new Invalid("verification_failed", reason);
     }
+    checkMetadataEcho(body, request);
+    const metadataFilters = metadataSupplied(request);
+    if (request.groupByMetadata) {
+      return groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters });
+    }
+    if (body.group_by !== undefined && body.group_by !== null) {
+      throw new Invalid("verification_failed", reason);
+    }
     const items = body.items.map((raw) => {
       const row = rowObject(raw, reason);
       const nullableCount = (value) => value === null || isCount(value);
@@ -612,6 +670,8 @@ export function usageReport(body, ctx, request, notices) {
       evidence: proof,
       warnings: codes,
       content_included: false,
+      group_by: null,
+      metadata_filters: metadataFilters,
       truncated: body.truncated,
       complete,
       empty: items.length === 0,
@@ -624,6 +684,131 @@ export function usageReport(body, ctx, request, notices) {
       attribution: attributionOf(body.attribution, reason),
     };
   });
+}
+
+// Filter values are not printed back, like any other free-text argument;
+// only the keys and how many were applied.
+function metadataSupplied(request) {
+  const filters = request.metadata ?? [];
+  return { count: filters.length, keys: filters.map((filter) => filter.key) };
+}
+
+// Usage grouped by one metadata key. Every call in the window is accounted
+// for: listed groups, further groups past the limit, calls without the key,
+// with a non-string value, or with a value too long to filter on.
+function groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters }) {
+  const reason = "usage_response_invalid";
+  const key = request.groupByMetadata;
+  const group = body.group_by;
+  if (!isObject(group) || group.dimension !== "metadata" || group.metadata_key !== key) {
+    throw new Invalid("verification_failed", "group_by_mismatch");
+  }
+  const bucket = (value, withGroups = false) => {
+    if (
+      !isObject(value) ||
+      !isCount(value.calls) ||
+      !isAmount(value.cost_usd) ||
+      (withGroups && !isCount(value.groups))
+    ) {
+      throw new Invalid("verification_failed", reason);
+    }
+    return withGroups
+      ? { groups: value.groups, calls: value.calls, cost_usd: value.cost_usd }
+      : { calls: value.calls, cost_usd: value.cost_usd };
+  };
+  const meta = body.metadata_groups;
+  if (
+    !isObject(meta) ||
+    meta.key !== key ||
+    !isCount(meta.groups_total) ||
+    !isCount(meta.groups_returned) ||
+    meta.limit !== request.limit ||
+    !isObject(meta.unlisted)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  const unlisted = {
+    other_values: bucket(meta.unlisted.other_values, true),
+    missing_key: bucket(meta.unlisted.missing_key),
+    non_string_value: bucket(meta.unlisted.non_string_value),
+    oversize_value: bucket(meta.unlisted.oversize_value),
+  };
+  const seen = new Set();
+  const items = body.items.map((raw) => {
+    const row = rowObject(raw, reason);
+    const nullableCount = (value) => value === null || isCount(value);
+    if (
+      row.metadata_key !== key ||
+      typeof row.metadata_value !== "string" ||
+      seen.has(row.metadata_value) ||
+      !isCount(row.calls) ||
+      !isAmount(row.cost_usd) ||
+      !isCount(row.input_tokens) ||
+      !isCount(row.output_tokens) ||
+      !nullableCount(row.avg_latency_ms) ||
+      !nullableCount(row.p95_latency_ms) ||
+      !isCount(row.error_calls) ||
+      row.error_calls > row.calls ||
+      !isCount(row.route_count) ||
+      !Array.isArray(row.routes) ||
+      row.routes.length > row.route_count
+    ) {
+      throw new Invalid("verification_failed", reason);
+    }
+    seen.add(row.metadata_value);
+    return {
+      metadata_key: key,
+      metadata_value: metadataText(row.metadata_value, notices, reason),
+      calls: row.calls,
+      error_calls: row.error_calls,
+      cost_usd: row.cost_usd,
+      input_tokens: row.input_tokens,
+      output_tokens: row.output_tokens,
+      avg_latency_ms: row.avg_latency_ms,
+      p95_latency_ms: row.p95_latency_ms,
+      routes: nameList(row.routes, notices, reason),
+      route_count: row.route_count,
+    };
+  });
+  const truncated = unlisted.other_values.groups > 0;
+  if (
+    meta.groups_returned !== items.length ||
+    meta.groups_total !== items.length + unlisted.other_values.groups ||
+    body.truncated !== truncated
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  const complete = proof.complete && !truncated;
+  if (!proof.complete) notices.add("evidence_incomplete");
+  if (truncated) notices.add("metadata_groups_truncated");
+  const listed = totalsOf(items, complete);
+  return {
+    provenance: origin,
+    window: span,
+    evidence: proof,
+    warnings: codes,
+    content_included: false,
+    group_by: { dimension: "metadata", metadata_key: key },
+    metadata_filters: metadataFilters,
+    truncated,
+    complete,
+    empty: items.length === 0,
+    rows: items.length,
+    items,
+    totals: listed,
+    metadata_groups: {
+      groups_total: meta.groups_total,
+      groups_returned: meta.groups_returned,
+      unlisted,
+      // Every call in the window: the listed groups plus every unlisted bucket.
+      window_calls:
+        listed.calls +
+        unlisted.other_values.calls +
+        unlisted.missing_key.calls +
+        unlisted.non_string_value.calls +
+        unlisted.oversize_value.calls,
+    },
+  };
 }
 
 // Sums over the returned rows only. complete says whether those rows are the
@@ -731,6 +916,7 @@ export function tracesReport(body, ctx, request, notices) {
     }
     const rawRows = body.traces.map((raw) => rowObject(raw, reason));
     checkFilters(body, rawRows, request);
+    checkMetadataEcho(body, request);
     const traces = rawRows.map((row) => {
       const nullableAmount = (value) => value === null || isAmount(value);
       if (
@@ -804,6 +990,7 @@ export function tracesReport(body, ctx, request, notices) {
         route_supplied: request.route !== null,
         status: request.status,
         cursor_supplied: request.cursor !== null,
+        metadata: metadataSupplied(request),
       },
       page: { limit: page.limit, rows: traces.length, truncated: page.truncated, next_cursor: page.next_cursor },
       truncated: page.truncated,

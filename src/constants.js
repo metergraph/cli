@@ -99,8 +99,8 @@ export const READ_PATHS = Object.freeze({
   traces: "/v1/agent/traces",
 });
 export const READ_QUERY_KEYS = Object.freeze({
-  "/v1/agent/usage": Object.freeze(["days", "limit"]),
-  "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor"]),
+  "/v1/agent/usage": Object.freeze(["days", "limit", "metadata", "group_by_metadata"]),
+  "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor", "metadata"]),
   "/v1/cli/setup/credential": Object.freeze(["family_id"]),
 });
 
@@ -119,6 +119,14 @@ export const READ_DEFAULT_LIMIT = 50;
 export const TRACES_DEFAULT_LIMIT = 20;
 export const MAX_CURSOR_LENGTH = 512;
 export const MAX_FILTER_LENGTH = 256;
+// Exact customer-metadata filters, matching the service's bounds. The service
+// also refuses credential-like keys; the CLI checks the same rule first.
+export const MAX_METADATA_FILTERS = 5;
+export const MAX_METADATA_KEY_LENGTH = 200;
+export const MAX_METADATA_VALUE_LENGTH = 1000;
+// The encoded metadata query value must leave room for the other parameters
+// inside the transport's 2048-character query bound.
+export const MAX_METADATA_QUERY_LENGTH = 1500;
 
 // One exit code per outcome. Documented in README.md; changing a value is a
 // breaking change for scripts. New outcomes are appended.

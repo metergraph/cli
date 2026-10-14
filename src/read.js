@@ -5,6 +5,7 @@ import { Stop, openStore, resolveConfigDir } from "./auth-store.js";
 import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
+  metadataQueryValue,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
@@ -176,6 +177,8 @@ function requestOf(options) {
     route: options.route ?? null,
     status: options.status ?? null,
     cursor: options.cursor ?? null,
+    metadata: options.metadata ?? null,
+    groupByMetadata: options.groupByMetadata ?? null,
   };
 }
 
@@ -186,6 +189,10 @@ function queryFor(options) {
   const query = new URLSearchParams();
   query.set("days", String(options.days));
   query.set("limit", String(options.limit));
+  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
+  if (options.command === "usage" && options.groupByMetadata) {
+    query.set("group_by_metadata", options.groupByMetadata);
+  }
   if (options.command === "traces") {
     if (options.route !== null) query.set("route", options.route);
     if (options.status !== null) query.set("status", options.status);

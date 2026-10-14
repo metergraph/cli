@@ -11,6 +11,13 @@
   missing or unknown ones, and mixed-provider traces whose cost is never split by
   provider. A read the service reports as incomplete stays `complete: false` even on
   a last page without a cursor. Existing JSON fields are unchanged.
+- `usage` and `traces` take `--metadata KEY=VALUE` (repeatable, up to 5 keys, all must
+  match) and `--metadata-json JSON` to keep only calls whose SDK tags have exactly
+  those string values. `usage --group-by-metadata KEY` groups the window by one key,
+  highest cost first, with the routes each value ran on, and totals calls in further
+  values, without the key or with a non-string value instead of dropping them. The
+  service must echo the applied filters; an older service that does not is refused
+  with `metadata_filter_unsupported`.
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line
