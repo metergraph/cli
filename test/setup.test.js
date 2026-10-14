@@ -1000,3 +1000,46 @@ test("a rerun aimed at another deployment is refused as a binding change and kee
     assert.equal(here.data.next_action.url, `${server.origin}/#api-keys`);
   } finally { await server.close(); }
 });
+
+test("a live waiter's record for another family does not block this setup", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    // Not yet delivered: saved family B, a live record for family A.
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    server.behavior.setupKeyLimit = false;
+    writeRecord(box, { family_id: "00000000-0000-4000-8000-00000000000a" });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    // Delivered: any record is cleared, even one for this family from a live process.
+    writeRecord(box, {});
+    const again = await setup(box, server);
+    assert.equal(again.outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a second waiter never takes over a live waiter's record unless it wins the setup state", async () => {
+  const { waiterRecord } = await import("../src/setup-refusal.js");
+  const root = fs.mkdtempSync(path.join(dir, "waiters "));
+  fs.mkdirSync(path.join(root, ".metergraph"));
+  const file = path.join(root, ".metergraph", "setup-refusal.json");
+  const family = "00000000-0000-4000-8000-0000000000bb";
+  // Another live process stands in for the first waiter.
+  const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+  try {
+    await new Promise((resolve) => other.once("spawn", resolve));
+    const first = { schema_version: 2, family_id: family, approval_id: "00000000-0000-4000-8000-0000000000a1",
+      pid: other.pid, state: "redeeming", reason: null, retry_at: null,
+      expires_at: new Date(Date.now() + 60000).toISOString() };
+    fs.writeFileSync(file, JSON.stringify(first));
+    const second = waiterRecord(root, family);
+    assert.equal(second.redeeming(), false);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).approval_id, first.approval_id);
+    // Losing the setup state, the second waiter leaves the first one's record.
+    second.settle();
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).approval_id, first.approval_id);
+    // Winning it, the second waiter takes the record over.
+    assert.equal(second.redeeming({ force: true }), true);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).pid, process.pid);
+  } finally { other.kill(); }
+});

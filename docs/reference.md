@@ -477,7 +477,10 @@ the waiter alone records what it is doing in `.metergraph/setup-refusal.json`
 never a credential). As soon as it receives an approval it records that it is
 redeeming; a rerun while that process is alive exits `conflict`
 (`setup_in_progress`) with a `retry_later` next action instead of asking for
-another approval. If the service refuses the redemption, the waiter records
+another approval. That applies only to the saved family, or before any
+setup state is saved; a second waiter never replaces a live one's record
+unless it wins the setup state for its own redemption. If the service
+refuses the redemption, the waiter records
 the refusal, and the next run reports it: a rate refusal until its retry
 time, a key-limit refusal once. Any successful run, including one that reuses
 a verified key, removes the record, and a record for another family, an

@@ -108,7 +108,15 @@ export function waiterRecord(root, familyId, now = Date.now) {
   const base = () => ({ schema_version: 2, family_id: familyId, approval_id: approvalId, pid: process.pid,
     expires_at: new Date(now() + MAX_RECORD_MS).toISOString() });
   return {
-    redeeming: () => write(root, { ...base(), state: "redeeming", reason: null, retry_at: null }),
+    // Early, as soon as an approval arrives: never replaces another waiter
+    // that is still alive. With force, once this waiter has won the setup
+    // state for its redemption, it takes the record over.
+    redeeming: ({ force = false } = {}) => {
+      const current = read(root);
+      if (!force && current?.state === "redeeming" && current.approval_id !== approvalId &&
+          current.pid !== process.pid && alive(current.pid) && Date.parse(current.expires_at) > now()) return false;
+      return write(root, { ...base(), state: "redeeming", reason: null, retry_at: null });
+    },
     refused: (reason, retryAfterSeconds = null) => write(root, { ...base(), state: "refused", reason,
       retry_at: reason === "setup_rate_limited"
         ? new Date(now() + Math.min((retryAfterSeconds ?? 60) * 1000, MAX_RATE_WAIT_MS)).toISOString()
@@ -133,12 +141,23 @@ export function pendingRefusal(root, { familyId, delivered }, now = Date.now()) 
     clearSetupRefusal(root);
     return null;
   }
-  if (record.state === "redeeming") {
-    if (record.pid !== process.pid && alive(record.pid)) return { reason: "setup_in_progress", retryAfter: 5 };
+  // A delivered family has nothing pending, whatever the record says.
+  if (delivered) {
     clearSetupRefusal(root);
     return null;
   }
-  if (record.family_id !== familyId || delivered) {
+  if (record.state === "redeeming") {
+    if (record.pid === process.pid || !alive(record.pid)) {
+      clearSetupRefusal(root);
+      return null;
+    }
+    // A live waiter matters only for the saved family, or before any state
+    // is saved (a combined sign in writes it after the approval). A record
+    // for another family does not block this setup.
+    if (familyId !== null && record.family_id !== familyId) return null;
+    return { reason: "setup_in_progress", retryAfter: 5 };
+  }
+  if (record.family_id !== familyId) {
     clearSetupRefusal(root);
     return null;
   }

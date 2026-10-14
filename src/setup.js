@@ -257,6 +257,12 @@ export async function runSetup(options, progress = () => {}) {
       return stop("conflict", "setup_state_changed");
     }
     writeSetupState(root, withSetupState(previous.value, { phase: "redeem_attempted" }), previous);
+    // This waiter won the state for its redemption: the record is now its own,
+    // even if another waiter's approval arrived first and wrote it.
+    if (waiter) {
+      record ??= waiterRecord(root, state.family_id);
+      record.redeeming({ force: true });
+    }
     previous = readSetupState(root);
     const redeemed = await redeem(origin, { code: approval.code, client_id: approval.clientId,
       redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
