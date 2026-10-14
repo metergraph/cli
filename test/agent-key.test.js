@@ -348,3 +348,21 @@ test("in a local container, login and setup offer the key path when the browser 
     assert.equal(result.data.next_action.alternative.kind, "use_agent_key");
   });
 });
+
+test("handoff commands never carry shell syntax from an origin, binding or option", async () => {
+  const { shellArg, agentKeyAction, remoteSetupAction } = await import("../src/environment.js");
+  const { parseOrigin } = await import("../src/origin.js");
+  // Hosts the URL parser accepts but no deployment uses are refused outright,
+  // so they can reach neither a binding nor a command.
+  for (const host of ["a;id", "a$(id)", "a`id`", "x&y", "a'b", "a(b)"]) {
+    assert.equal(parseOrigin(`https://${host}.example.com`), null, host);
+  }
+  assert.equal(shellArg("https://metergraph.example.com"), "https://metergraph.example.com");
+  assert.equal(shellArg("http://[::1]:8080"), "'http://[::1]:8080'");
+  assert.equal(shellArg("a'b;c"), "'a'\\''b;c'");
+  const local = agentKeyAction({ kind: "ssh_session", remote: true }, "http://[::1]:8080");
+  assert.deepEqual(local.then_run, ["metergraph status --url 'http://[::1]:8080' --json", "metergraph usage --url 'http://[::1]:8080' --json"]);
+  // No placeholder with < | > that a shell would treat as redirection.
+  const setup = remoteSetupAction({ kind: "ci", remote: true }, "https://app.metergraph.dev", {});
+  assert.equal(setup.command, "metergraph setup --runtime local --skip-skill");
+});

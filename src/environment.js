@@ -101,7 +101,7 @@ export function agentKeyAction(environment, origin) {
   // sent there, so the commands name its origin; without it they would use
   // the hosted default.
   const hosted = origin === DEFAULT_ORIGIN;
-  const url = hosted ? "" : ` --url ${origin}`;
+  const url = hosted ? "" : ` --url ${shellArg(origin)}`;
   return {
     kind: "use_agent_key",
     environment: environment.kind,
@@ -146,14 +146,24 @@ export function remoteSetupAction(environment, origin, options = {}) {
   };
 }
 
-// Every value here is already validated by the argument parser: a fixed
-// deployment and client name, a normalized origin and a UUID.
+// Agents run these commands in a shell, and an origin may come from a
+// committed project file, so every interpolated value is quoted even though
+// the parsers already restrict it. Without a client choice the command skips
+// the skill rather than show a placeholder a shell would misread.
 function setupCommand(origin, options) {
   const parts = ["metergraph setup --runtime local"];
-  if (options.deployment && options.deployment !== "managed") parts.push(`--deployment ${options.deployment}`);
-  if (origin !== DEFAULT_ORIGIN) parts.push(`--url ${origin}`);
-  if (options.workspace) parts.push(`--workspace ${options.workspace}`);
-  if (options.skipSkill) parts.push("--skip-skill");
-  else parts.push(`--client ${options.client ?? "<codex|claude|cursor>"}`);
+  if (options.deployment && options.deployment !== "managed") parts.push(`--deployment ${shellArg(options.deployment)}`);
+  if (origin !== DEFAULT_ORIGIN) parts.push(`--url ${shellArg(origin)}`);
+  if (options.workspace) parts.push(`--workspace ${shellArg(options.workspace)}`);
+  if (options.skipSkill || !options.client) parts.push("--skip-skill");
+  else parts.push(`--client ${shellArg(options.client)}`);
   return parts.join(" ");
+}
+
+// A value as one POSIX shell word: as is when it holds only characters no
+// shell treats specially, otherwise single-quoted.
+export function shellArg(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9._:/=-]+$/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
 }
