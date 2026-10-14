@@ -93,8 +93,11 @@ test("status keeps configured, reachable, authenticated and the verified workspa
     const { run, result } = await read(box, server, ["status"]);
     assert.equal(run.code, 0, run.stdout);
     assert.equal(result.command, "status");
+    assert.ok(["local_shell", "local_container"].includes(result.data.environment));
     assert.deepEqual(result.data, {
       origin: server.origin,
+      environment: result.data.environment,
+      credential: "oauth_grant",
       configured: true,
       reachable: true,
       healthy: true,
@@ -842,7 +845,10 @@ test("invalid read arguments and credential arguments exit 2 without echo or req
     [["status", "--timeout-ms", "60001"], "invalid_timeout"],
     [["status", "--limit", "5"], "unknown_argument"],
     [["routes", "--days", "5"], "unknown_argument"],
-    [["status", "--url", "https://example.com"], "unknown_argument"],
+    [["status", "--url", "http://example.com"], "invalid_url"],
+    [["usage", "--workspace", "hunter2"], "invalid_workspace"],
+    [["usage", "--agent-token-file", ""], "invalid_agent_token_file"],
+    [["verify", "--agent-token-file", "/tmp/x"], "unknown_argument"],
     [["usage", "--token", "hunter2"], "unknown_argument"],
     [["traces", "--api-key=sk-fake-2222222222222222"], "unknown_argument"],
     [["context", "--access-token", "fake-token-1111111111111111"], "unknown_argument"],

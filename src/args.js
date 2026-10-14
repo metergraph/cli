@@ -35,6 +35,10 @@ const HELP_TOPICS = new Set(["doctor", "skill", "skills", "login", "logout", "se
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
+// The read commands may name where an agent key is sent and which workspace
+// it must be for, and a private file holding the key. The key itself is
+// never an argument.
+const READ_KEY = ["--url", "--workspace", "--agent-token-file"];
 const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
@@ -42,12 +46,12 @@ const OPTIONS = {
   login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
   setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file", "--repository"]),
   logout: new Set(["--project", "--config-dir"]),
-  status: new Set(READ_BASE),
-  context: new Set(READ_BASE),
-  capabilities: new Set(READ_BASE),
-  usage: new Set([...READ_BASE, "--days", "--limit", "--metadata", "--metadata-json", "--group-by-metadata"]),
-  routes: new Set([...READ_BASE, "--limit"]),
-  traces: new Set([...READ_BASE, "--days", "--limit", "--route", "--status", "--cursor", "--metadata", "--metadata-json"]),
+  status: new Set([...READ_BASE, ...READ_KEY]),
+  context: new Set([...READ_BASE, ...READ_KEY]),
+  capabilities: new Set([...READ_BASE, ...READ_KEY]),
+  usage: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit", "--metadata", "--metadata-json", "--group-by-metadata"]),
+  routes: new Set([...READ_BASE, ...READ_KEY, "--limit"]),
+  traces: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit", "--route", "--status", "--cursor", "--metadata", "--metadata-json"]),
   verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
 };
 // Requests the read commands recognize and refuse, so a script gets an
@@ -504,6 +508,19 @@ function parseRead(command, values, json, fail) {
       "--cursor must be the next_cursor value from an earlier traces result, at most 512 printable characters.",
     );
   }
+  let origin = null;
+  if (values["--url"] !== undefined) {
+    origin = parseOrigin(values["--url"]);
+    if (origin === null) return fail("invalid_url", INVALID_URL);
+  }
+  const rawWorkspace = values["--workspace"];
+  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
+    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  const agentTokenFile = values["--agent-token-file"] ?? null;
+  if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
+    return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
+  }
   const metadata = parseMetadata(values, fail);
   if (!metadata.ok) return metadata;
   const groupByMetadata = values["--group-by-metadata"] ?? null;
@@ -514,6 +531,9 @@ function parseRead(command, values, json, fail) {
   const parsed = {
     ok: true,
     command,
+    origin,
+    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    agentTokenFile,
     project: paths.project,
     configDir: paths.configDir,
     timeoutMs,

@@ -6,7 +6,33 @@ import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./st
 // a server response other than validated metadata printed by readText.
 
 const READ_MESSAGES = {
-  not_signed_in: 'This project is not signed in. Run "metergraph login --runtime local" first.',
+  not_signed_in:
+    'This project is not signed in and no Metadata key was given. Run "metergraph login --runtime local" first, ' +
+    "or, where browser sign in cannot finish, give the CLI a coding-agent key with Metadata access in " +
+    "METERGRAPH_AGENT_TOKEN.",
+  agent_key_rejected:
+    "The service refused the Metadata key: it is unknown, expired or revoked. Nothing was read.",
+  agent_key_insufficient_scope:
+    "The key is valid but lacks Metadata access to this workspace, for example because it is an ingest key. " +
+    "No broader access was requested. Nothing was read.",
+  agent_token_malformed:
+    "METERGRAPH_AGENT_TOKEN does not hold exactly one key with no label, spaces or extra lines. Its value is not " +
+    "shown. Nothing was sent.",
+  agent_token_missing: "No Metadata key was found. Nothing was sent.",
+  metergraph_url_invalid:
+    "METERGRAPH_URL is not a bare https origin, or an http origin on localhost. Its value is not shown. Nothing was sent.",
+  bound_to_other_origin:
+    "This project is bound to a different origin than --url or METERGRAPH_URL names. Nothing was sent.",
+  bound_to_other_workspace: "This project is bound to a different workspace than --workspace names. Nothing was sent.",
+  agent_key_origin_unconfirmed:
+    "This project's binding names a non-hosted origin, and a key is never sent to an origin taken only from a " +
+    "project file. Set METERGRAPH_URL or pass --url with the same origin to confirm it. Nothing was sent.",
+  scope_mismatch:
+    "The credential is not limited to exactly the Metadata scope, so it was not used. The CLI never uses broader access.",
+  content_access_granted:
+    "The credential would allow content, replay or provider access, so it was not used. The CLI never uses broader access.",
+  platform_credential_handoff:
+    "--agent-token-file cannot be checked for privacy on this platform. Use METERGRAPH_AGENT_TOKEN instead.",
   capability_unavailable:
     "The service does not offer this read to the project's Metadata grant. No data was read and no broader access was requested.",
   exceeds_service_bounds:
@@ -47,11 +73,22 @@ const READ_MESSAGES = {
     "The service's Metadata response contained a credential this CLI holds for the project. Nothing from it was printed.",
 };
 
+const AGENT_TOKEN_FILE_MESSAGE =
+  "The --agent-token-file file is not usable. It must be an existing regular file owned by this user with mode " +
+  "0600 and one link, in a directory only this user can write, holding exactly one key. Its path and content are " +
+  "not shown. Nothing was sent.";
+
 export function readMessage(outcome, reason) {
+  if (typeof reason === "string" && reason.startsWith("agent_token_file_")) return AGENT_TOKEN_FILE_MESSAGE;
   return READ_MESSAGES[reason] ?? authMessage(outcome, reason);
 }
 
 const NOTICES = {
+  workspace_not_pinned:
+    "No workspace was pinned, so the key's own workspace was verified and used. Pass --workspace, or bind the " +
+    "project, so that a key for another workspace fails instead.",
+  agent_key_not_used:
+    "METERGRAPH_AGENT_TOKEN is set, but this project's saved sign in was used. Pass --agent-token-file to use a key instead.",
   application_traffic_not_verified:
     "Application traffic is not verified. A signed in project, existing data or a configured SDK alone does not prove it.",
   evidence_incomplete: "The service marked this evidence as incomplete.",
@@ -95,8 +132,11 @@ function coverageLines(lines, report) {
   if (coverage) {
     const requested = coverage.requested_window;
     const effective = coverage.effective_window;
-    if (requested && effective && requested.since !== effective.since) {
-      lines.push(`Window read: ${effective.since} to ${effective.until} (requested from ${requested.since})`);
+    if (requested && effective && (requested.since !== effective.since || requested.until !== effective.until)) {
+      lines.push(
+        `Window read: ${effective.since} to ${effective.until} ` +
+          `(requested ${requested.since} to ${requested.until})`,
+      );
     }
     const matched = coverage.rows.matched === null ? "" : ` of ${coverage.rows.matched}`;
     // Pricing reasons are shown on the Pricing line instead.
@@ -225,13 +265,25 @@ export function readText(result, message, style = PLAIN) {
       lines.push(...fields(style, [["Retry after", `${data.retry_after_seconds} seconds`]]));
     }
   }
-  if (data.next_action?.message) lines.push("", ...steps(style, [["", data.next_action.message]]));
+  if (data.next_action?.message) {
+    const next = data.next_action;
+    const handoff = next.kind === "use_agent_key";
+    const keysUrl = handoff
+      ? next.person_steps.find((step) => step.action === "create_metadata_key")?.url ?? null
+      : next.url ?? null;
+    lines.push("", ...steps(style, [
+      ["", next.message],
+      ["Keys page", keysUrl],
+      ["Connection guide", handoff ? next.url : null],
+    ]));
+  }
   return render(lines);
 }
 
 function statusRows(data, rows) {
   rows.push(
-    ["Configured", data.configured ? "yes (.metergraph/project.json)" : "no"],
+    ["Configured", data.configured ? "yes" : "no"],
+    ["Credential", { oauth_grant: "saved sign in", agent_key: "Metadata key" }[data.credential] ?? "none"],
     ["Reachable", yesNo(data.reachable)],
     ["Authenticated", data.authenticated ? "yes, verified by the service" : "no"],
     ["Workspace", `bound ${show(data.workspace.intended)}, verified ${show(data.workspace.actual)}`],

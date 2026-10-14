@@ -11,6 +11,18 @@
   missing or unknown ones, and mixed-provider traces whose cost is never split by
   provider. A read the service reports as incomplete stays `complete: false` even on
   a last page without a cursor. Existing JSON fields are unchanged.
+- Read commands (`status`, `context`, `capabilities`, `usage`, `routes`, `traces`)
+  accept a coding-agent key with Metadata access from `METERGRAPH_AGENT_TOKEN`, or
+  from a private file named by `--agent-token-file`, when browser sign in cannot
+  finish where the agent runs. The key is verified (origin, workspace, exactly the
+  Metadata scope, no content access) before any read, is never accepted as an
+  argument, and is never written or printed. New options `--url` and `--workspace`
+  pin where it is sent and which workspace it must be for; output adds `credential`
+  and `environment`.
+- `login`, `setup` and the read commands tell a local container from an SSH session,
+  a cloud workspace and CI. Where sign in cannot finish they return a structured
+  `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
+  person's steps, the Keys page and the commands to run afterwards.
 - `usage` and `traces` take `--metadata KEY=VALUE` (repeatable, up to 5 keys, all must
   match) and `--metadata-json JSON` to keep only calls whose SDK tags have exactly
   those string values. `usage --group-by-metadata KEY` groups the window by one key,
