@@ -1,8 +1,9 @@
+import { agentKeySource, keySession, keyTarget } from "./agent-key.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
-import { Stop, openStore, resolveConfigDir } from "./auth-store.js";
-import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
+import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.js";
+import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
   readQuery,
@@ -17,11 +18,15 @@ import {
 } from "./read-contract.js";
 import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
+import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
-// Each one uses the project's existing verified session (never a browser,
-// never a new grant), shares one total deadline across every request,
-// including a token refresh, and sends GET requests only, to fixed paths on
+// Each one uses either the project's existing verified session or a
+// coding-agent key with Metadata access (agent-key.js); never a browser,
+// never a new grant. A saved project grant is used when one exists, unless
+// --agent-token-file names a key explicitly; otherwise a key in
+// METERGRAPH_AGENT_TOKEN is used. Each one shares one total deadline across
+// every request, including a token refresh, and sends GET requests only, to fixed paths on
 // the bound origin. Nothing is written except what the session helper writes
 // when it refreshes the grant. Each returns { outcome, reason, data } where
 // data holds only validated fields and fixed tokens, and never a credential
@@ -40,10 +45,14 @@ const GROUPED_USAGE = Object.freeze({
 });
 
 export async function runRead(options) {
+  const env = options.env ?? process.env;
   const ctx = {
     command: options.command,
+    environment: options.environment ?? classifyEnvironment(env),
+    credential: null,
     origin: null,
     workspaceId: null,
+    intendedWorkspace: null,
     profile: null,
     configured: false,
     reachable: null,
@@ -59,20 +68,22 @@ export async function runRead(options) {
   // Token values this run holds. Filled after the session is verified.
   let known = [];
   const grouped = options.command === "usage" && options.grouped !== undefined && options.grouped !== null;
-  const build = (outcome, report, reason = null) =>
+  const build = (outcome, report) =>
     options.command === "status"
-      ? statusData(ctx, notices, outcome)
-      : readData(ctx, report, notices, outcome, nextAction(outcome, reason, { grouped, options, report, capabilities: ctx.capabilities }));
+      ? statusData(ctx, notices, outcome, options)
+      : readData(ctx, report, notices, outcome, options, { grouped, report });
   const end = (outcome, reason, report = null) => {
-    const data = build(outcome, report, reason);
+    ctx.reason = reason;
+    const data = build(outcome, report);
     // Validated metadata can still be any string the service chose. If any
     // printed string holds a credential this run knows, nothing is printed.
     if (holdsKnown(data, known)) {
       notices.clear();
+      ctx.reason = "credential_in_metadata_response";
       return {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
-        data: build("verification_failed", null, "credential_in_metadata_response"),
+        data: build("verification_failed", null),
       };
     }
     return { outcome, reason, data };
@@ -92,18 +103,50 @@ export async function runRead(options) {
     const root = resolveProject(options.project);
     const configDir = resolveConfigDir(options.configDir);
     const found = readBinding(root);
-    if (found === null) return end("login_required", "not_signed_in");
-    const binding = found.binding;
+    const binding = found?.binding ?? null;
+    const source = agentKeySource(options, env);
+    // The private store matters only for a bound project. With a key at
+    // hand, a store that cannot be read means no grant here; without one,
+    // its error is the answer, as before.
+    let store = null;
+    let grantSaved = false;
+    let originConfirmed = false;
+    if (binding !== null) {
+      try {
+        store = openStore(configDir, { create: false });
+        const record = store === null ? null : readCredential(store, binding.credential_slot);
+        grantSaved = record !== null;
+        originConfirmed = record !== null && record.origin === binding.origin;
+      } catch (error) {
+        if (!(error instanceof Stop) || source === null) throw error;
+        store = null;
+      }
+    }
+    // An explicit key file wins. Otherwise a saved grant wins over the
+    // environment variable, so a project signed in on this machine behaves as
+    // it always has; a binding without a grant here (for example one
+    // committed to the repository and cloned into a remote workspace) uses
+    // the key, pinned to the binding.
+    const useKey = source !== null && (source.kind === "file" || !grantSaved);
+    if (!useKey && binding === null) return end("login_required", "not_signed_in");
+    if (!useKey && source !== null) notices.add("agent_key_not_used");
+
+    ctx.credential = useKey ? "agent_key" : "oauth_grant";
+    // --url, METERGRAPH_URL (for a key only) and --workspace may repeat the
+    // binding but never contradict it.
+    const target = keyTarget({ binding, options, env: useKey ? env : {}, originConfirmed: originConfirmed || !useKey });
+    if (!target.ok) return end(target.outcome, target.reason);
     Object.assign(ctx, {
-      origin: binding.origin,
-      workspaceId: binding.workspace_id,
-      profile: binding.deployment_profile,
+      origin: target.origin,
+      workspaceId: target.workspaceId,
+      intendedWorkspace: target.workspaceId,
+      profile: target.profile,
       configured: true,
     });
-    const store = openStore(configDir, { create: false });
 
+    let verifiedProfile = null;
     if (options.command === "status") {
-      const health = await checkHealth(binding.origin, limit.signal);
+      const health = await checkHealth(ctx.origin, limit.signal);
       ctx.reachable = health.reachable;
       ctx.healthy = health.healthy;
       if (!health.ok) {
@@ -113,21 +156,30 @@ export async function runRead(options) {
       // The service's own unauthenticated profile report must be the bound
       // profile before the grant is even tried.
       const deployment = checkDeployment(
-        await send(binding.origin, "/v1/deployment", { signal: limit.signal, maxBytes: MAX_BODY_BYTES }),
+        await send(ctx.origin, "/v1/deployment", { signal: limit.signal, maxBytes: MAX_BODY_BYTES }),
       );
       if (deployment.outcome !== null) {
         if (deployment.outcome === "unhealthy") ctx.healthy = false;
         const settled = settle(deployment);
         return end(settled.outcome, settled.reason);
       }
-      ctx.profileVerified = deployment.profile === binding.deployment_profile;
+      verifiedProfile = deployment.profile;
+      ctx.profileVerified = ctx.profile === null || deployment.profile === ctx.profile;
       if (!ctx.profileVerified) return end("verification_failed", "profile_mismatch");
+      ctx.profile = deployment.profile;
     }
 
-    const session = await sessionFor(binding, store, limit.signal);
+    const session = useKey
+      ? await keySession({ target, source, env, signal: limit.signal, verifiedProfile })
+      : await sessionFor(binding, store, limit.signal);
     if (!session.ok) {
       const settled = settle(session);
       return end(settled.outcome, settled.reason);
+    }
+    ctx.profile = session.session.profile;
+    if (ctx.workspaceId === null) {
+      ctx.workspaceId = session.session.workspaceId;
+      notices.add("workspace_not_pinned");
     }
     known = session.knownCredentials;
     ctx.authenticated = true;
@@ -176,6 +228,8 @@ export async function runRead(options) {
     const fetchOne = async (query, request, into) => {
       const response = await fetchRead(session.session, read.path, query, limit.signal);
       if (!response.ok) {
+        // A key refused moments after it was verified was revoked meanwhile.
+        if (ctx.credential === "agent_key" && response.reason === "access_revoked") response.reason = "agent_key_rejected";
         const settled = settle(response);
         return {
           ok: false,
@@ -321,28 +375,32 @@ async function fetchRead(session, path, query, signal) {
 }
 
 // The shape shared by context, capabilities, usage, routes and traces.
-function readData(ctx, report, notices, outcome, action) {
+function readData(ctx, report, notices, outcome, options, extra = {}) {
   return {
     origin: ctx.origin,
     workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
     deployment_profile: ctx.profile,
+    environment: ctx.environment.kind,
+    credential: ctx.credential,
     authenticated: ctx.authenticated,
     scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
     result: outcome === "ok" ? report : null,
     retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
       ? report?.retry_after_seconds ?? null : null,
     notices: [...notices].sort(),
-    next_action: action,
+    next_action: nextAction(outcome, ctx, options, extra),
   };
 }
 
 // status keeps configured, reachable, authenticated, the bound and verified
 // workspace and the capability flags apart. Application traffic is never
 // claimed: existing data or a configured SDK does not prove it.
-function statusData(ctx, notices, outcome) {
+function statusData(ctx, notices, outcome, options) {
   const agent = ctx.capabilities?.agent ?? null;
   return {
     origin: ctx.origin,
+    environment: ctx.environment.kind,
+    credential: ctx.credential,
     configured: ctx.configured,
     reachable: ctx.reachable,
     healthy: ctx.healthy,
@@ -351,10 +409,15 @@ function statusData(ctx, notices, outcome) {
     // true when GET /v1/deployment reported exactly the bound profile, false
     // when it reported another one, null when it was not checked.
     deployment_profile_verified: ctx.profileVerified,
+    // intended is null for an agent key with no binding and no --workspace;
+    // match is then null too, and the notices say workspace_not_pinned.
     workspace: {
-      intended: ctx.workspaceId,
+      intended: ctx.intendedWorkspace,
       actual: ctx.verifiedWorkspace,
-      match: ctx.verifiedWorkspace === null ? null : ctx.verifiedWorkspace === ctx.workspaceId,
+      match:
+        ctx.verifiedWorkspace === null || ctx.intendedWorkspace === null
+          ? null
+          : ctx.verifiedWorkspace === ctx.intendedWorkspace,
     },
     scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
     capabilities:
@@ -362,7 +425,7 @@ function statusData(ctx, notices, outcome) {
     content_access: false,
     application_traffic_verified: false,
     notices: [...notices].sort(),
-    next_action: nextAction(outcome),
+    next_action: nextAction(outcome, ctx, options),
   };
 }
 
@@ -370,12 +433,16 @@ const NARROW =
   "Narrow the read: a shorter --days or --since/--until window, exact --route, --provider or --model filters, " +
   "fewer --group-by dimensions or a lower --limit.";
 
-// A structured next step for outcomes a person or agent can act on. Fixed
-// text only, except a window and limit the CLI computed from validated values.
-function nextAction(outcome, reason = null, { grouped = false, options = null, report = null, capabilities = null } = {}) {
-  if (outcome === "login_required") {
-    return { kind: "login", message: 'Run "metergraph login --runtime local" in this project to sign in again.' };
-  }
+// The next action for a read, by credential and environment. Where browser
+// sign in cannot finish (SSH, a cloud workspace, CI), the answer is always
+// the agent key handoff, never "run login". Grouped usage adds its own steps
+// (a supported read, retry, narrow, raise the limit, compare like for like);
+// their text is fixed except a window and limit computed from validated values.
+function nextAction(outcome, ctx, options, { grouped = false, report = null } = {}) {
+  const origin = ctx.origin ?? options.origin ?? DEFAULT_ORIGIN;
+  const keyed = ctx.credential === "agent_key";
+  const reason = ctx.reason;
+  const capabilities = ctx.capabilities;
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
   if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
     // Offer the route-by-day read only when this grant actually has it.
@@ -411,6 +478,67 @@ function nextAction(outcome, reason = null, { grouped = false, options = null, r
         "The current window ends part way through today (UTC) and the prior period is whole days. " +
         "For equal lengths, run the same command with --compare previous-same-time " +
         `(prior window ${window.since} to ${window.until}).`,
+    };
+  }
+  if (keyed && (reason === "agent_key_rejected" || reason === "agent_key_insufficient_scope")) {
+    return {
+      kind: "replace_agent_key",
+      url: handoffPages(origin).keys_url,
+      message:
+        "The service refused this key: it is unknown, expired or revoked, or it lacks Metadata access. Ask the " +
+        "person to create a new coding-agent key with Metadata access on the Keys page and replace the secret. " +
+        "Do not ask for the key in chat.",
+    };
+  }
+  if (keyed && (reason === "scope_mismatch" || reason === "content_access_granted")) {
+    return {
+      kind: "use_metadata_only_key",
+      url: handoffPages(origin).keys_url,
+      message:
+        "This key grants more than Metadata access, so the CLI does not use it. Ask the person for a " +
+        "coding-agent key limited to Metadata access.",
+    };
+  }
+  if (keyed && reason === "workspace_context_mismatch") {
+    return {
+      kind: "use_workspace_key",
+      url: handoffPages(origin).keys_url,
+      workspace: ctx.intendedWorkspace === null ? null : { id: ctx.intendedWorkspace },
+      message:
+        "This key belongs to a different workspace than this project or --workspace names. Ask the person to " +
+        "create the key in the intended workspace, or pass the intended workspace with --workspace.",
+    };
+  }
+  if (keyed && reason === "agent_key_origin_unconfirmed") {
+    return {
+      kind: "confirm_origin",
+      message:
+        "This project's binding names a deployment other than the hosted service. A Metadata key is sent there " +
+        "only when you confirm the same address: set METERGRAPH_URL or pass --url with it.",
+    };
+  }
+  if (keyed && (reason === "bound_to_other_origin" || reason === "bound_to_other_workspace")) {
+    return {
+      kind: "match_project_binding",
+      message:
+        "This project's .metergraph/project.json names a different origin or workspace. Remove --url, " +
+        "--workspace or METERGRAPH_URL, or use a key for the bound workspace.",
+    };
+  }
+  if (keyed && reason?.startsWith("agent_token")) {
+    return {
+      kind: "fix_agent_key",
+      message:
+        "The key could not be used as given. METERGRAPH_AGENT_TOKEN must hold exactly one key with no label " +
+        "or spaces; --agent-token-file must name a private (0600) file owned by this user.",
+    };
+  }
+  if (outcome === "login_required") {
+    if (ctx.environment.remote) return agentKeyAction(ctx.environment, origin);
+    return {
+      kind: "login",
+      message: 'Run "metergraph login --runtime local" in this project to sign in again.',
+      alternative: agentKeyAction(ctx.environment, origin),
     };
   }
   return null;

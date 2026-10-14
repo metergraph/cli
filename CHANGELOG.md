@@ -36,6 +36,19 @@
 - Human `usage` and `traces` output no longer repeats a notice that restates a printed
   Coverage or Pricing line, and prints service warning codes once. `--json` is
   unchanged.
+- Read commands (`status`, `context`, `capabilities`, `usage`, `routes`, `traces`)
+  accept a coding-agent key with Metadata access from `METERGRAPH_AGENT_TOKEN`, or
+  from a private file named by `--agent-token-file`, when browser sign in cannot
+  finish where the agent runs. The key is verified (origin, workspace, exactly the
+  Metadata scope, no content access) before any read, is never accepted as an
+  argument, and is never written or printed. New options `--url` and `--workspace`
+  pin where it is sent and which workspace it must be for; output adds `credential`
+  and `environment`.
+- `login`, `setup` and the read commands tell a local container from an SSH session,
+  a cloud workspace and CI. Where sign in cannot finish they return a structured
+  `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
+  person's steps, the Keys page and the commands to run afterwards.
+
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line

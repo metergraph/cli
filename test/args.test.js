@@ -237,10 +237,17 @@ test("parses read commands with bounded defaults and explicit values", () => {
     route: null,
     status: null,
     cursor: null,
+    origin: null,
+    workspace: null,
+    agentTokenFile: null,
     metadata: null,
     groupByMetadata: null,
     json: false,
   });
+  const keyed = parseArgs(["usage", "--url", "https://metergraph.example.com/", "--workspace", "0B5C7C1E-1A2B-4C3D-8E4F-5A6B7C8D9E01", "--agent-token-file", "/run/secrets/key"]);
+  assert.equal(keyed.origin, "https://metergraph.example.com");
+  assert.equal(keyed.workspace, "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01");
+  assert.equal(keyed.agentTokenFile, "/run/secrets/key");
   const usage = parseArgs(["--json", "usage", "--days=90", "--limit", "200", "--project", "app", "--timeout-ms", "60000"]);
   assert.equal(usage.ok, true);
   assert.equal(usage.days, 90);
