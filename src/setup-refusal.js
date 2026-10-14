@@ -16,6 +16,11 @@ import path from "node:path";
 // it came from. It holds no credential. It is a separate file, not a field of
 // setup.json, so an older CLI that validates setup.json strictly keeps
 // reading the project. Any read problem is treated as no record.
+//
+// The file lives in the project, so its content is untrusted: a record can
+// only delay setup for as long as this CLI would ever write it for. A
+// redeeming record expiring, or a refusal retrying, further out than that is
+// ignored and removed, so a crafted or committed record cannot block setup.
 const FILE = "setup-refusal.json";
 const MAX_BYTES = 1024;
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
@@ -122,7 +127,9 @@ export function waiterRecord(root, familyId, now = Date.now) {
 export function pendingRefusal(root, { familyId, delivered }, now = Date.now()) {
   const record = read(root);
   if (record === null) return null;
-  if (Date.parse(record.expires_at) <= now) {
+  const expires = Date.parse(record.expires_at);
+  const retry = record.retry_at === null ? null : Date.parse(record.retry_at);
+  if (expires <= now || expires > now + MAX_RECORD_MS || (retry !== null && retry > now + MAX_RATE_WAIT_MS)) {
     clearSetupRefusal(root);
     return null;
   }

@@ -962,3 +962,21 @@ test("a redeeming record from a live process blocks a new approval; a dead or ex
     assert.equal(fs.existsSync(refusalFile(box)), false);
   } finally { await server.close(); }
 });
+
+test("a crafted record cannot block setup beyond the limits the CLI writes", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    server.behavior.setupKeyLimit = false;
+    const far = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+    // A live process with an expiry a year out, as a committed file could carry.
+    writeRecord(box, { pid: 1, expires_at: far });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+    // A refusal whose retry time is a year out is ignored too.
+    writeRecord(box, { state: "refused", reason: "setup_rate_limited", retry_at: far });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});

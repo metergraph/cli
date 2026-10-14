@@ -482,7 +482,10 @@ the refusal, and the next run reports it: a rate refusal until its retry
 time, a key-limit refusal once. Any successful run, including one that reuses
 a verified key, removes the record, and a record for another family, an
 already delivered family, a dead process or past its expiry is ignored and
-removed. Older CLIs ignore the file.
+removed. Because the file is in the project, a record can delay setup by at
+most the time this CLI writes it for (ten minutes while redeeming, five for a
+rate refusal); one that claims longer is ignored and removed. Older CLIs
+ignore the file.
 
 `METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
 appends `/v1/ingest` itself. A setup rerun with a verified
