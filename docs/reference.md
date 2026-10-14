@@ -643,11 +643,11 @@ and `usage` can group by one key.
   are refused with exit 2, and the service refuses them too.
 - The CLI sends the filters as one JSON object in the `metadata` query parameter.
   Trace and usage rows do not carry metadata, so the service must echo exactly the
-  requested pairs in `metadata_filters`. A service that does not echo them exits 6
-  with `metadata_filter_unsupported`; a different echo exits 11 with
-  `metadata_filter_mismatch`. Filter values are never printed back; only the keys and
-  how many were applied (`metadata_filters` in `usage`, `filters.metadata` in
-  `traces`).
+  requested pairs in its coverage evidence (`coverage.filters.metadata`). A service
+  that does not echo them exits 6 with `metadata_filter_unsupported`; a different
+  echo exits 11 with `metadata_filter_mismatch`. Filter values are never printed
+  back; only the keys and how many were applied (`filters.metadata`), and
+  `coverage.filters_applied.metadata` says whether any applied.
 - On `traces`, a metadata filter selects spans, like `--route`, so a trace's totals
   cover its matching spans.
 
@@ -659,10 +659,15 @@ prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and 
 listed values. Nothing is dropped: `metadata_groups.unlisted` totals calls in values
 past the limit (`other_values`, with a group count), without the key (`missing_key`),
 with a non-string value (`non_string_value`) and with a value over 1,000 characters
-(`oversize_value`), and `metadata_groups.window_calls` is the sum of all of them. When
-values were cut, `truncated` is `true`, `complete` is `false` and the notice
+(`oversize_value`). Truncation is read from the same coverage evidence as any other
+read: `coverage.rows` gives `returned`, `limit`, `truncated` and `matched` (the
+number of distinct values), and `population_totals` covers every matching call; the
+CLI refuses a response where the listed and unlisted calls do not add up to it, or
+where `coverage.rows` disagrees with the groups. When values were cut, `truncated` is
+`true`, `complete` is `false`, `coverage.completeness` is `partial` and the notice
 `metadata_groups_truncated` is set. A response not grouped by the requested key exits
-11 with `group_by_mismatch`.
+11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same
+reason.
 
 ```sh
 metergraph usage --days 7 --group-by-metadata prompt_id --json

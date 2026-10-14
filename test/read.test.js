@@ -895,6 +895,7 @@ test("metadata filters go out as one JSON object and must be echoed exactly", as
     const page = exact.result.data.result;
     assert.deepEqual(page.traces.map((trace) => trace.trace_id), ["trace-0001"]);
     assert.deepEqual(page.filters.metadata, { count: 2, keys: ["a=b", "prompt_id"] });
+    assert.equal(page.coverage.filters_applied.metadata, true);
 
     const empty = await read(box, server, ["traces", "--metadata", "prompt_id="]);
     assert.deepEqual(empty.result.data.result.traces.map((trace) => trace.trace_id), ["trace-0003"]);
@@ -909,10 +910,13 @@ test("a service that does not confirm the metadata filter is refused, not truste
   const server = await startOAuthServer({
     workspace: PLAIN_WORKSPACE,
     traces: (doc) => {
-      delete doc.metadata_filters;
+      delete doc.coverage;
       return doc;
     },
-    usage: (doc) => ({ ...doc, metadata_filters: [{ key: "prompt_id", value: "other" }] }),
+    usage: (doc) => ({
+      ...doc,
+      coverage: { ...doc.coverage, filters: { ...doc.coverage.filters, metadata: [{ key: "prompt_id", value: "other" }] } },
+    }),
   });
   try {
     const box = await signedIn(server);
@@ -945,8 +949,15 @@ test("usage grouped by a metadata key lists values with their routes and totals 
     assert.deepEqual(report.items.map((item) => item.routes), [["checkout-summary"], ["checkout-summary"]]);
     assert.equal(report.truncated, true);
     assert.equal(report.complete, false);
-    assert.deepEqual(report.metadata_groups.unlisted.other_values, { groups: 1, calls: 5, cost_usd: 0.005 });
-    assert.equal(report.metadata_groups.window_calls, 40 + 12 + 5 + 7);
+    assert.equal(report.metadata_groups.unlisted.other_values.groups, 1);
+    assert.equal(report.metadata_groups.unlisted.other_values.calls, 5);
+    assert.deepEqual(
+      [report.coverage.rows.returned, report.coverage.rows.matched, report.coverage.rows.truncated],
+      [2, 3, true],
+    );
+    assert.equal(report.coverage.completeness, "partial");
+    assert.equal(report.coverage.filters_applied.metadata, false);
+    assert.equal(report.population_totals.calls, 40 + 12 + 5 + 7);
     assert.ok(result.data.notices.includes("metadata_groups_truncated"));
 
     const text = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"], { json: false });
@@ -966,6 +977,37 @@ test("a usage response not grouped by the requested key is refused", async () =>
     const box = await signedIn(server);
     const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
     assertFailure(result, "verification_failed", "group_by_mismatch");
+  } finally {
+    await server.close();
+  }
+});
+
+test("grouped usage whose coverage rows disagree with the groups is refused", async () => {
+  const server = await startOAuthServer({
+    workspace: PLAIN_WORKSPACE,
+    usage: (doc) => ({ ...doc, coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, matched: 99 } } }),
+  });
+  try {
+    const box = await signedIn(server);
+    const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
+    assertFailure(result, "verification_failed", "usage_response_invalid");
+  } finally {
+    await server.close();
+  }
+});
+
+test("a grouped usage response without coverage is refused", async () => {
+  const server = await startOAuthServer({
+    workspace: PLAIN_WORKSPACE,
+    usage: (doc) => {
+      delete doc.coverage;
+      return doc;
+    },
+  });
+  try {
+    const box = await signedIn(server);
+    const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
+    assertFailure(result, "unsupported", "group_by_mismatch");
   } finally {
     await server.close();
   }

@@ -247,7 +247,7 @@ function resultLines(command, report, lines) {
   }
   if (command === "usage") {
     lines.push(`Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`);
-    if (report.metadata_filters.count > 0) lines.push(metadataFilterLine(report.metadata_filters));
+    if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
     lines.push("");
     if (report.empty) {
       lines.push("No usage rows in this window.");
@@ -341,7 +341,7 @@ function groupedUsageLines(report, lines) {
     `Window: last ${report.window.days} days (${report.window.since} to ${report.window.until})`,
     `Grouped by metadata: ${key}`,
   );
-  if (report.metadata_filters.count > 0) lines.push(metadataFilterLine(report.metadata_filters));
+  if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
   lines.push("");
   if (report.empty) {
     lines.push(`No calls in this window carry ${key} as a string value.`);
@@ -358,17 +358,18 @@ function groupedUsageLines(report, lines) {
     ]);
     lines.push(...table(["VALUE", "CALLS", "ERRORS", "COST", "IN_TOKENS", "OUT_TOKENS", "P95_MS", "ROUTES"], rows));
   }
-  const groups = report.metadata_groups;
+  const rows = report.coverage.rows;
   const { other_values: other, missing_key: missing, non_string_value: nonString, oversize_value: oversize } =
-    groups.unlisted;
+    report.metadata_groups.unlisted;
   lines.push(
     "",
-    `Groups: ${groups.groups_returned} shown of ${groups.groups_total} values.`,
+    `Groups: ${rows.returned} shown of ${rows.matched} values.`,
     `Not listed: ${other.groups} more values (${other.calls} calls, ${usd(other.cost_usd)}); ` +
       `without ${key}: ${missing.calls} calls (${usd(missing.cost_usd)}); ` +
       `non-string value: ${nonString.calls} calls (${usd(nonString.cost_usd)}); ` +
       `value over 1000 characters: ${oversize.calls} calls (${usd(oversize.cost_usd)}).`,
-    `Calls in the window: ${groups.window_calls}.`,
+    `Calls in the window: ${report.population_totals === null ? "not reported" : report.population_totals.calls}.`,
     `Evidence: ${report.complete ? "complete" : "incomplete"}`,
   );
+  coverageLines(lines, report);
 }

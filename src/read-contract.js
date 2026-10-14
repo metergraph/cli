@@ -135,13 +135,15 @@ export function metadataQueryValue(filters) {
 }
 
 // Rows do not carry metadata, so the only proof a metadata filter applied is
-// the service's echo. It must list exactly the requested pairs, in key
-// order. A service that does not echo them (an older one) is refused rather
-// than trusted, and an echo the CLI did not ask for is refused too.
+// the service's echo in coverage.filters.metadata. It must list exactly the
+// requested pairs, in key order. A service that does not echo them (an older
+// one) is refused rather than trusted, and an echo of pairs the CLI did not
+// send is refused too.
 function checkMetadataEcho(body, request) {
   const requested = request.metadata ?? [];
-  const echoed = body.metadata_filters;
-  if (echoed === undefined) {
+  const filters = isObject(body.coverage) && isObject(body.coverage.filters) ? body.coverage.filters : null;
+  const echoed = filters === null ? undefined : filters.metadata;
+  if (echoed === undefined || echoed === null) {
     if (requested.length > 0) throw new Invalid("unsupported", "metadata_filter_unsupported");
     return;
   }
@@ -342,6 +344,10 @@ function coverageOf(value, notices, reason) {
   const filters = {};
   for (const key of FILTER_KEYS) {
     if (Object.hasOwn(value.filters, key)) filters[key] = value.filters[key] !== null;
+  }
+  // Metadata is echoed as a list of pairs; an empty list means none applied.
+  if (Object.hasOwn(value.filters, "metadata")) {
+    filters.metadata = Array.isArray(value.filters.metadata) && value.filters.metadata.length > 0;
   }
   const reasons = [...new Set(value.reasons)].sort();
   const completeness = completenessOf(value.completeness, reasons);
@@ -671,7 +677,7 @@ export function usageReport(body, ctx, request, notices) {
       warnings: codes,
       content_included: false,
       group_by: null,
-      metadata_filters: metadataFilters,
+      filters: { metadata: metadataFilters },
       truncated: body.truncated,
       complete,
       empty: items.length === 0,
@@ -712,21 +718,20 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
     ) {
       throw new Invalid("verification_failed", reason);
     }
-    return withGroups
-      ? { groups: value.groups, calls: value.calls, cost_usd: value.cost_usd }
-      : { calls: value.calls, cost_usd: value.cost_usd };
+    const amounts = {
+      calls: value.calls,
+      cost_usd: value.cost_usd,
+      pricing: pricingOf(value.pricing, notices, reason, { note: false }),
+    };
+    return withGroups ? { groups: value.groups, ...amounts } : amounts;
   };
   const meta = body.metadata_groups;
-  if (
-    !isObject(meta) ||
-    meta.key !== key ||
-    !isCount(meta.groups_total) ||
-    !isCount(meta.groups_returned) ||
-    meta.limit !== request.limit ||
-    !isObject(meta.unlisted)
-  ) {
+  if (!isObject(meta) || meta.key !== key || !isObject(meta.unlisted)) {
     throw new Invalid("verification_failed", reason);
   }
+  // Grouped truncation is only trusted through the shared coverage evidence.
+  const coverage = coverageOf(body.coverage, notices, reason);
+  if (coverage === null) throw new Invalid("unsupported", "group_by_mismatch");
   const unlisted = {
     other_values: bucket(meta.unlisted.other_values, true),
     missing_key: bucket(meta.unlisted.missing_key),
@@ -768,17 +773,31 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
       p95_latency_ms: row.p95_latency_ms,
       routes: nameList(row.routes, notices, reason),
       route_count: row.route_count,
+      pricing: pricingOf(row.pricing, notices, reason, { note: false }),
     };
   });
   const truncated = unlisted.other_values.groups > 0;
+  const rows = coverage.rows;
   if (
-    meta.groups_returned !== items.length ||
-    meta.groups_total !== items.length + unlisted.other_values.groups ||
+    rows.shape !== "top_n" ||
+    rows.returned !== items.length ||
+    rows.limit !== request.limit ||
+    rows.truncated !== truncated ||
+    rows.matched !== items.length + unlisted.other_values.groups ||
+    coverage.totals_scope !== "population" ||
     body.truncated !== truncated
   ) {
     throw new Invalid("verification_failed", reason);
   }
-  const complete = proof.complete && !truncated;
+  const population = populationTotalsOf(body.totals, reason);
+  const unlistedCalls =
+    unlisted.other_values.calls + unlisted.missing_key.calls +
+    unlisted.non_string_value.calls + unlisted.oversize_value.calls;
+  const listedCalls = items.reduce((total, item) => total + item.calls, 0);
+  if (population !== null && population.calls !== listedCalls + unlistedCalls) {
+    throw new Invalid("verification_failed", reason);
+  }
+  const complete = proof.complete && !truncated && coverage.completeness === "complete";
   if (!proof.complete) notices.add("evidence_incomplete");
   if (truncated) notices.add("metadata_groups_truncated");
   const listed = totalsOf(items, complete);
@@ -789,25 +808,20 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
     warnings: codes,
     content_included: false,
     group_by: { dimension: "metadata", metadata_key: key },
-    metadata_filters: metadataFilters,
+    filters: { metadata: metadataFilters },
     truncated,
     complete,
     empty: items.length === 0,
     rows: items.length,
     items,
     totals: listed,
-    metadata_groups: {
-      groups_total: meta.groups_total,
-      groups_returned: meta.groups_returned,
-      unlisted,
-      // Every call in the window: the listed groups plus every unlisted bucket.
-      window_calls:
-        listed.calls +
-        unlisted.other_values.calls +
-        unlisted.missing_key.calls +
-        unlisted.non_string_value.calls +
-        unlisted.oversize_value.calls,
-    },
+    // Where the calls that are not listed went. Truncation and the number of
+    // matched values are in coverage.rows; population_totals covers them all.
+    metadata_groups: { unlisted },
+    coverage,
+    population_totals: population,
+    pricing: pricingOf(body.pricing, notices, reason),
+    attribution: attributionOf(body.attribution, reason),
   };
 }
 

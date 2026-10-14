@@ -563,6 +563,26 @@ function metadataEcho(query) {
     .map(([key, value]) => ({ key, value }));
 }
 
+const PRICED = (calls) => ({
+  priced_calls: calls, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact",
+});
+
+// The shared coverage envelope, added only to metadata reads so the existing
+// read tests keep exercising a service that does not report coverage.
+function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope }) {
+  return {
+    as_of: new Date().toISOString(),
+    requested_window: null,
+    effective_window: null,
+    filters: { environments: null, metadata: metadataEcho(query) },
+    rows: { shape, ordering: null, returned, limit, truncated, matched },
+    next_cursor: null,
+    totals_scope: totalsScope,
+    completeness: truncated ? "partial" : "complete",
+    reasons: truncated ? ["row_limit"] : [],
+  };
+}
+
 export function usageDocument(provenance, query) {
   const days = Number(query.get("days"));
   const limit = Number(query.get("limit"));
@@ -587,8 +607,11 @@ export function usageDocument(provenance, query) {
       error_calls: 0,
       routes: group.routes,
       route_count: group.routes.length,
+      pricing: PRICED(group.calls),
     }));
     const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
+    const bucket = (calls, cost) => ({ calls, cost_usd: cost, pricing: PRICED(calls) });
+    const allCalls = sum(PROMPT_GROUPS, "calls") + 7;
     return {
       schema_version: CONTRACT_VERSION,
       provenance,
@@ -597,19 +620,32 @@ export function usageDocument(provenance, query) {
       warnings: rest.length === 0 ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }],
       days,
       content_included: false,
-      metadata_filters: metadataEcho(query),
+      coverage: metadataCoverage(query, {
+        shape: "top_n",
+        returned: items.length,
+        limit,
+        truncated: rest.length > 0,
+        matched: PROMPT_GROUPS.length,
+        totalsScope: "population",
+      }),
+      totals: {
+        scope: "population",
+        calls: allCalls,
+        error_calls: 0,
+        cost_usd: sum(PROMPT_GROUPS, "cost_usd") + 0.007,
+        input_tokens: allCalls * 100,
+        output_tokens: allCalls * 20,
+      },
+      pricing: PRICED(allCalls),
       group_by: { dimension: "metadata", metadata_key: key },
       items,
       metadata_groups: {
         key,
-        groups_total: PROMPT_GROUPS.length,
-        groups_returned: items.length,
-        limit,
         unlisted: {
-          other_values: { groups: rest.length, calls: sum(rest, "calls"), cost_usd: sum(rest, "cost_usd") },
-          missing_key: { calls: 7, cost_usd: 0.007 },
-          non_string_value: { calls: 0, cost_usd: 0 },
-          oversize_value: { calls: 0, cost_usd: 0 },
+          other_values: { groups: rest.length, ...bucket(sum(rest, "calls"), sum(rest, "cost_usd")) },
+          missing_key: bucket(7, 0.007),
+          non_string_value: bucket(0, 0),
+          oversize_value: bucket(0, 0),
         },
       },
       truncated: rest.length > 0,
@@ -628,7 +664,18 @@ export function usageDocument(provenance, query) {
     warnings: [],
     days,
     content_included: false,
-    metadata_filters: metadataEcho(query),
+    ...(query.has("metadata")
+      ? {
+          coverage: metadataCoverage(query, {
+            shape: "top_n",
+            returned: items.length,
+            limit,
+            truncated: USAGE_ROWS.length > limit,
+            matched: USAGE_ROWS.length,
+            totalsScope: "population",
+          }),
+        }
+      : {}),
     group_by: null,
     truncated: USAGE_ROWS.length > limit,
     items,
@@ -735,7 +782,18 @@ export function tracesDocument(provenance, query) {
     warnings: [],
     page: { limit, truncated, next_cursor: next },
     content_included: false,
-    metadata_filters: metadataEcho(query),
+    ...(query.has("metadata")
+      ? {
+          coverage: metadataCoverage(query, {
+            shape: "page",
+            returned: traces.length,
+            limit,
+            truncated,
+            matched: null,
+            totalsScope: "page",
+          }),
+        }
+      : {}),
     truncated,
     next_cursor: next,
     traces,
