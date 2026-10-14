@@ -326,6 +326,57 @@ test("with no sign in and no key, the next action follows the environment", asyn
   assert.equal(result.data.next_action.alternative.kind, "use_agent_key");
 });
 
+test("grouped usage reads with a Metadata key from the environment or a key file", { skip: isWindows }, async () => {
+  await withServer({}, async (server) => {
+    const box = sandbox();
+    // From METERGRAPH_AGENT_TOKEN in a remote session: ranking, comparison and
+    // metadata grouping all go through the grouped read with the key.
+    const before = server.requests.length;
+    let { run, result } = await read(box, ["usage", "--group-by", "route", "--today", "--compare", "previous"], keyed(server));
+    assert.equal(run.code, 0, run.stdout);
+    assert.equal(result.data.credential, "agent_key");
+    assert.equal(result.data.result.source, "usage_aggregates");
+    assert.equal(result.data.result.comparison.mode, "previous");
+    assert.deepEqual(sent(server, before), [
+      "GET /v1/deployment",
+      "GET /v1/agent/workspace",
+      "GET /v1/agent/capabilities",
+      "GET /v1/agent/usage/aggregates",
+      "GET /v1/agent/usage/aggregates",
+    ]);
+    for (const request of server.requests.slice(before + 1)) assert.equal(bearerOf(request), `Bearer ${KEY}`);
+    assert.deepEqual(filesUnder(box.project), []);
+
+    // From --agent-token-file, grouped by a metadata key.
+    const keyDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mg-key-")));
+    fs.chmodSync(keyDir, 0o700);
+    const keyFile = path.join(keyDir, "agent-key");
+    fs.writeFileSync(keyFile, `${KEY}\n`, { mode: 0o600 });
+    try {
+      ({ run, result } = await read(
+        box,
+        ["usage", "--group-by", "metadata.prompt_id", "--agent-token-file", keyFile],
+        { ...SSH, METERGRAPH_URL: server.origin },
+      ));
+      assert.equal(run.code, 0, run.stdout);
+      assert.equal(result.data.credential, "agent_key");
+      assert.deepEqual(result.data.result.group_by, ["metadata.prompt_id"]);
+      assert.ok(result.data.result.metadata_groups);
+
+      // A refused key on the grouped read gets the key next action, not "run login".
+      ({ run, result } = await read(
+        box,
+        ["usage", "--group-by", "route", "--today"],
+        keyed(server, { METERGRAPH_AGENT_TOKEN: OTHER_KEY }),
+      ));
+      assert.notEqual(run.code, 0);
+      assert.equal(result.data.next_action.kind, "replace_agent_key");
+    } finally {
+      fs.rmSync(keyDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("in a local container, login and setup offer the key path when the browser cannot open", async () => {
   await withServer({}, async (server) => {
     const container = { REMOTE_CONTAINERS: "true", METERGRAPH_TEST_BROWSER: "unavailable" };

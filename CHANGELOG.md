@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+- `usage` answers cost questions with grouped usage from the service: `--group-by`
+  any of provider, model, route and UTC day, plus one `metadata.KEY`, exact `--route`,
+  `--provider`, `--model`, `--environment` and `--metadata` filters, and a UTC window
+  (`--days N`, `--today`, or `--since` with `--until`). Groups are attributed per call, totals cover every matching call,
+  and coverage, pricing and attribution are shown in text and JSON. `--sort` ranks by
+  cost, cost per call, calls, errors, mean latency or estimated p95 latency (labelled
+  as an estimate) and says when a ranking covers only the listed groups. `--compare
+  previous` adds the prior period and warns when a partial current UTC day is
+  compared with a whole one; `--compare previous-same-time` compares equal lengths.
+  A deployment without grouped usage exits 14 with a `next_action` naming the read
+  it does support. Plain `usage` without these options is unchanged. `usage --help`
+  lists tested examples, also in `--help --json`.
 - A first `setup` that has to sign in now needs one browser approval instead of two
   when the service supports it: the sign-in consent also approves the project's
   ingest key and names both. The sign-in grant and the ingest key stay separate

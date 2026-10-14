@@ -69,6 +69,7 @@ const EXPECTED_FILES = [
   "src/trace-contract.js",
   "src/trace-open.js",
   "src/transport.js",
+  "src/usage-aggregates.js",
   "src/verify-output.js",
   "src/verify.js",
 ];
@@ -338,11 +339,22 @@ test("the installed CLI reports read commands honestly offline without a sign in
   assert.equal(parsed.data.authenticated, false);
   assert.equal(parsed.data.application_traffic_verified, false);
 
-  const environment = await run(process.execPath, [...offline, "usage", "--environment", "production", "--json"], {
+  const environment = await run(process.execPath, [...offline, "traces", "--environment", "production", "--json"], {
     cwd: workDir,
   });
   assert.equal(environment.code, 6);
   assert.equal(parseJsonLine(environment.stdout).error.reason, "environment_selector_unsupported");
+
+  // Grouped usage ships in the package: it parses and needs a sign in.
+  const grouped = await run(process.execPath, [
+    ...offline, "usage", "--group-by", "route", "--today", "--compare", "previous", "--project", target,
+    "--config-dir", config, "--json",
+  ], { cwd: workDir });
+  assert.equal(grouped.code, 12);
+  assert.equal(parseJsonLine(grouped.stdout).error.reason, "not_signed_in");
+  const help = parseJsonLine((await run(process.execPath, [...offline, "help", "usage", "--json"], { cwd: workDir })).stdout);
+  const usageHelp = help.data.commands.find((entry) => entry.name === "usage");
+  assert.equal(usageHelp.examples.length, 6);
   assert.equal(existsSync(config), false);
   assert.equal(existsSync(path.join(target, ".metergraph")), false);
 });

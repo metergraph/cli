@@ -1,0 +1,173 @@
+{
+  "attribution": {
+    "cost_basis": "call",
+    "level": "call",
+    "mixed_model_rows": 0,
+    "mixed_provider_rows": 0,
+    "per_provider_exact": true
+  },
+  "completeness": {
+    "complete": true,
+    "from": "2026-10-08T00:00:00+00:00",
+    "limit": 50,
+    "mode": "top_n",
+    "returned": 2,
+    "to": "2026-10-14T17:54:38.256542+00:00"
+  },
+  "content_included": false,
+  "coverage": {
+    "as_of": "2026-10-14T17:54:38.258328+00:00",
+    "completeness": "unknown",
+    "effective_window": {
+      "days": 6.746276,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T17:54:38.256542+00:00"
+    },
+    "filters": {
+      "environments": [
+        "prod"
+      ],
+      "metadata": [],
+      "model": null,
+      "provider": null,
+      "route": null
+    },
+    "next_cursor": null,
+    "reasons": [
+      "ingestion_unverified",
+      "pricing_unknown"
+    ],
+    "requested_window": {
+      "days": 6.746276,
+      "since": "2026-10-08T00:00:00+00:00",
+      "until": "2026-10-14T17:54:38.256542+00:00"
+    },
+    "rows": {
+      "limit": 50,
+      "matched": 2,
+      "ordering": "cost_usd desc, calls desc, group key asc",
+      "returned": 2,
+      "shape": "top_n",
+      "truncated": false
+    },
+    "totals_scope": "population"
+  },
+  "evidence": {
+    "complete": false,
+    "rows": 2,
+    "sources": [
+      "calls"
+    ]
+  },
+  "group_by": [
+    "provider"
+  ],
+  "items": [
+    {
+      "cache_read_tokens": 60,
+      "cache_write_tokens": 72,
+      "calls": 6,
+      "cost_per_call_usd": 0.43333333,
+      "cost_usd": 2.6,
+      "error_calls": 1,
+      "input_tokens": 600,
+      "latency": {
+        "avg_ms": 1367,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 2700,
+        "samples": 6
+      },
+      "output_tokens": 300,
+      "pricing": {
+        "cost": "exact",
+        "partial_calls": 0,
+        "priced_calls": 6,
+        "unknown_calls": 0,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "provider": "provider-a",
+      "reasoning_tokens": 12
+    },
+    {
+      "cache_read_tokens": 60,
+      "cache_write_tokens": 72,
+      "calls": 6,
+      "cost_per_call_usd": 0.095,
+      "cost_usd": 0.57,
+      "error_calls": 1,
+      "input_tokens": 600,
+      "latency": {
+        "avg_ms": 875,
+        "p95_method": "histogram_estimate",
+        "p95_ms": 2700,
+        "samples": 6
+      },
+      "output_tokens": 300,
+      "pricing": {
+        "cost": "lower_bound",
+        "partial_calls": 0,
+        "priced_calls": 5,
+        "unknown_calls": 1,
+        "unpriced_calls": 0,
+        "zero_cost_calls": 0
+      },
+      "provider": "provider-b",
+      "reasoning_tokens": 12
+    }
+  ],
+  "pricing": {
+    "cost": "lower_bound",
+    "partial_calls": 0,
+    "priced_calls": 11,
+    "unknown_calls": 1,
+    "unpriced_calls": 0,
+    "zero_cost_calls": 0
+  },
+  "provenance": {
+    "deployment_profile": "local",
+    "environments": [
+      "prod"
+    ],
+    "generated_at": "2026-10-14T17:54:38.258328+00:00",
+    "source": "live-database",
+    "workspace_id": "00000000-0000-4000-8000-00000000c0de"
+  },
+  "schema_version": "metergraph.agent-access/v1",
+  "totals": {
+    "cache_read_tokens": 120,
+    "cache_write_tokens": 144,
+    "calls": 12,
+    "cost_per_call_usd": 0.26416667,
+    "cost_usd": 3.17,
+    "error_calls": 2,
+    "input_tokens": 1200,
+    "latency": {
+      "avg_ms": 1121,
+      "p95_method": "histogram_estimate",
+      "p95_ms": 2700,
+      "samples": 12
+    },
+    "output_tokens": 600,
+    "reasoning_tokens": 24,
+    "scope": "population"
+  },
+  "warnings": [
+    {
+      "code": "coverage_incomplete",
+      "message": "The read does not cover the whole requested question: ingestion_unverified."
+    },
+    {
+      "code": "pricing_incomplete",
+      "message": "Some calls have missing, partial or unknown pricing; cost_usd is a lower bound."
+    }
+  ],
+  "window": {
+    "days": 7,
+    "preset": "utc_days",
+    "since": "2026-10-08T00:00:00+00:00",
+    "timezone": "UTC",
+    "until": "2026-10-14T17:54:38.256542+00:00",
+    "until_is_request_time": true
+  }
+}

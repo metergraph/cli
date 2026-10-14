@@ -797,11 +797,11 @@ test("Ctrl+C during a read cancels cleanly with one JSON result", { skip: isWind
 test("environment, time range, query and content requests are refused before any request", async () => {
   const box = sandbox();
   const cases = [
-    [["usage", "--environment", "production"], "environment_selector_unsupported"],
+    [["routes", "--environment", "production"], "environment_selector_unsupported"],
     [["traces", "--environment=hunter2"], "environment_selector_unsupported"],
     [["traces", "--workload", "hunter2"], "workload_filter_unsupported"],
     [["status", "--environment", "staging"], "environment_selector_unsupported"],
-    [["usage", "--since", "2026-01-01"], "time_range_unsupported"],
+    [["routes", "--since", "2026-01-01"], "time_range_unsupported"],
     [["traces", "--until=2026-02-01T00:00:00Z"], "time_range_unsupported"],
     [["usage", "--sql", "select * from hunter2"], "query_unsupported"],
     [["routes", "--query", "hunter2"], "query_unsupported"],
@@ -947,15 +947,19 @@ test("usage grouped by a metadata key reads the aggregates and reports coverage"
     ]);
     assert.equal(run.code, 0, run.stdout);
     assert.equal(server.requestsTo("/v1/agent/usage").length, 0);
+    // The key is sent whole as its own group_by, so its comma survives.
     assert.deepEqual(server.requestsTo("/v1/agent/usage/aggregates")[0].query, {
+      group_by: "metadata.prompt,id",
       days: "7",
       limit: "2",
-      group_by: "metadata.prompt,id",
       metadata: '{"route_kind":"chat"}',
     });
     const report = result.data.result;
-    assert.deepEqual(report.group_by, { dimension: "metadata", metadata_key: "prompt,id" });
-    assert.deepEqual(report.items.map((item) => item.metadata_value), ["reply-v3", "reply-v2"]);
+    assert.deepEqual(report.group_by, ["metadata.prompt,id"]);
+    assert.deepEqual(report.items.map((item) => [item.metadata_key, item.metadata_value]), [
+      ["prompt,id", "reply-v3"],
+      ["prompt,id", "reply-v2"],
+    ]);
     assert.deepEqual(
       [report.coverage.rows.returned, report.coverage.rows.matched, report.coverage.rows.truncated],
       [2, 4, true],
@@ -963,28 +967,30 @@ test("usage grouped by a metadata key reads the aggregates and reports coverage"
     assert.equal(report.coverage.completeness, "partial");
     assert.equal(report.coverage.filters_applied.metadata, true);
     assert.equal(report.truncated, true);
-    assert.equal(report.population_totals.calls, 40 + 12 + 5 + 7);
-    assert.ok(result.data.notices.includes("metadata_groups_truncated"));
+    assert.equal(report.totals.calls, 40 + 12 + 5 + 7);
+    assert.ok(result.data.notices.includes("groups_truncated"));
     assert.ok(result.data.notices.includes("metadata_values_missing"));
+    // Calls not listed are accounted for: values past the limit and calls
+    // without the key.
+    assert.deepEqual(report.metadata_groups.unlisted.other_values, { groups: 1, calls: 5, cost_usd: 0.005 });
+    assert.deepEqual(report.metadata_groups.unattributed, { calls: 7, cost_usd: 0.007 });
 
     // Untruncated: the null group (calls without the key) is listed and the
     // metadata reason does not lower completeness.
     const all = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
     const full = all.result.data.result;
-    const noValue = full.items.find((item) => !item.has_value);
-    assert.equal(noValue.metadata_value, null);
-    assert.equal(noValue.calls, 7);
-    // Highest cost first, the no-value group in its cost position.
-    assert.deepEqual(full.items.map((item) => item.metadata_value), ["reply-v3", "reply-v2", null, "triage=a:b/c"]);
-    assert.equal(full.totals.calls, full.population_totals.calls);
+    assert.equal(full.items.at(-1).metadata_value, null);
+    assert.equal(full.items.at(-1).has_value, false);
+    assert.equal(full.items.reduce((sum, item) => sum + item.calls, 0), full.totals.calls);
     assert.equal(full.coverage.completeness, "complete");
     assert.equal(full.complete, true);
 
     const text = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"], { json: false });
-    assert.match(text.run.stdout, /Grouped by metadata +prompt_id/);
-    assert.match(text.run.stdout, /triage=a:b\/c/);
-    assert.match(text.run.stdout, /\(no prompt_id value\) +7/);
-    assert.match(text.run.stdout, /Groups: 4 shown of 4 values/);
+    assert.match(text.run.stdout, /Grouped by +metadata\.prompt_id/);
+    // A recorded service document answers this query (test/fixtures/usage-aggregates).
+    assert.match(text.run.stdout, /\(no value\) +\$0\.0700 +5/);
+    assert.match(text.run.stdout, /Groups: 4 listed of 4 matched/);
+    assert.match(text.run.stdout, /Not attributed to any prompt_id value: 5 calls \(\$0\.0700\)/);
     assert.ok(!text.run.stdout.includes("route_kind=chat"));
   });
 });
@@ -1028,7 +1034,7 @@ test("a grouped usage response without coverage is refused", async () => {
   try {
     const box = await signedIn(server);
     const { result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
-    assertFailure(result, "unsupported", "group_by_mismatch");
+    assertFailure(result, "unsupported", "coverage_not_reported");
   } finally {
     await server.close();
   }
@@ -1041,7 +1047,8 @@ test("a grouping no call has a value for says so once, without repeated notices"
     assert.equal(json.run.code, 0, json.run.stdout);
     const report = json.result.data.result;
     assert.deepEqual(report.items.map((item) => item.has_value), [false]);
-    assert.equal(report.items[0].calls, report.population_totals.calls);
+    assert.equal(report.items[0].calls, report.totals.calls);
+    assert.equal(report.metadata_groups.unattributed.calls, report.totals.calls);
     // JSON keeps every notice token.
     assert.ok(json.result.data.notices.includes("metadata_key_mostly_missing"));
     assert.ok(json.result.data.notices.includes("metadata_values_missing"));
@@ -1049,7 +1056,11 @@ test("a grouping no call has a value for says so once, without repeated notices"
     const text = await read(box, server, ["usage", "--group-by-metadata", "activity_name"], { json: false });
     const out = text.run.stdout;
     assert.match(out, /No call in this window has a value for activity_name\./);
-    assert.match(out, /Service warnings: metadata_key_mostly_missing, pricing_incomplete/);
+    // A recorded service document answers this query; codes print once, in service order.
+    const warningLines = out.split("\n").filter((line) => line.includes("Service warnings"));
+    assert.equal(warningLines.length, 1);
+    assert.match(warningLines[0], /metadata_key_mostly_missing/);
+    assert.match(warningLines[0], /pricing_incomplete/);
     // The explicit line replaces the generic notices; nothing is said twice.
     assert.ok(!out.includes("Most of this window"));
     assert.ok(!out.includes("Some calls have no usable value"));
