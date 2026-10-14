@@ -18,8 +18,25 @@ only with the tools the capabilities advertise.
 ## 1. Read it
 
 1. `metergraph_get_analysis_run` with the run ID. Continue only when the status
-   is final. If `report.available` is false on a completed run, the report is
-   missing: say so and give the run's page (below).
+   is final. If it is not, show where the run is, as described next, and stop. If
+   `report.available` is false on a completed run, the report is missing: say
+   so and give the run's page (below).
+
+   For a run that is not final, draw `run.stages.items` in the order returned,
+   using each item's `state` exactly as given: `✓` completed, `●` current, `✗`
+   failed, `–` skipped, `○` not started. For example:
+
+   ```
+   ✓ queued → ✓ exporting → ● analyzing → ○ classified → ○ importing → ○ completed
+   ```
+
+   Under it, say in plain text which stages are done, which one is current and
+   since when (its `entered_at`, checked at `provenance.generated_at`), and
+   which are still to come. Never give a percentage, an ETA or a time remaining.
+   When `run.stages.available` is false, or `stages` is missing, draw nothing:
+   say the stage breakdown is unavailable (`unavailable_reason`, when present)
+   and report the `status` and timestamps instead. `metergraph-analyze`, when
+   installed, describes the same progress report in more detail.
 2. `metergraph_get_report` with `report.analysis_id`. Read the `outcome`, each
    workload's `state`, `sample_count` and `reason`, each `model_swap`
    opportunity (`recommendation_status`, `quality_vs_reference`,
