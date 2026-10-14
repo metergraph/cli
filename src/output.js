@@ -272,8 +272,8 @@ export const READ_HELP = Object.freeze([
         name: "--group-by-metadata",
         value: "KEY",
         summary:
-          "Group by one metadata key, highest cost first, with the routes each value ran on. Calls in further " +
-          "values, without the key, or with a non-string value are totalled, never dropped.",
+          "Group by one metadata key, highest cost first, using the service's usage aggregates. Calls without " +
+          "the key or with a non-string value form one group with no value; window totals cover every call.",
       },
       JSON_OPTION,
     ],

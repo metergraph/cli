@@ -108,6 +108,7 @@ test("status keeps configured, reachable, authenticated and the verified workspa
         capability_discovery: true,
         routes: true,
         usage: true,
+        usage_aggregates: true,
         ingestion_health: null,
         incidents: null,
         trace_metadata: true,
@@ -932,39 +933,50 @@ test("a service that does not confirm the metadata filter is refused, not truste
   }
 });
 
-test("usage grouped by a metadata key lists values with their routes and totals the rest", async () => {
+test("usage grouped by a metadata key reads the aggregates and reports coverage", async () => {
   await withServer(async (server) => {
     const box = await signedIn(server);
-    const { run, result } = await read(box, server, ["usage", "--group-by-metadata", "prompt_id", "--limit", "2"]);
+    const { run, result } = await read(box, server, [
+      "usage", "--group-by-metadata", "prompt,id", "--metadata", "route_kind=chat", "--limit", "2",
+    ]);
     assert.equal(run.code, 0, run.stdout);
-    assert.deepEqual(server.requestsTo("/v1/agent/usage")[0].query, {
+    assert.equal(server.requestsTo("/v1/agent/usage").length, 0);
+    assert.deepEqual(server.requestsTo("/v1/agent/usage/aggregates")[0].query, {
       days: "7",
       limit: "2",
-      group_by_metadata: "prompt_id",
+      group_by: "metadata.prompt,id",
+      metadata: '{"route_kind":"chat"}',
     });
     const report = result.data.result;
-    assert.deepEqual(report.group_by, { dimension: "metadata", metadata_key: "prompt_id" });
+    assert.deepEqual(report.group_by, { dimension: "metadata", metadata_key: "prompt,id" });
     assert.deepEqual(report.items.map((item) => item.metadata_value), ["reply-v3", "reply-v2"]);
-    // One route, several prompt IDs.
-    assert.deepEqual(report.items.map((item) => item.routes), [["checkout-summary"], ["checkout-summary"]]);
-    assert.equal(report.truncated, true);
-    assert.equal(report.complete, false);
-    assert.equal(report.metadata_groups.unlisted.other_values.groups, 1);
-    assert.equal(report.metadata_groups.unlisted.other_values.calls, 5);
     assert.deepEqual(
       [report.coverage.rows.returned, report.coverage.rows.matched, report.coverage.rows.truncated],
-      [2, 3, true],
+      [2, 4, true],
     );
     assert.equal(report.coverage.completeness, "partial");
-    assert.equal(report.coverage.filters_applied.metadata, false);
+    assert.equal(report.coverage.filters_applied.metadata, true);
+    assert.equal(report.truncated, true);
     assert.equal(report.population_totals.calls, 40 + 12 + 5 + 7);
     assert.ok(result.data.notices.includes("metadata_groups_truncated"));
+    assert.ok(result.data.notices.includes("metadata_values_missing"));
+
+    // Untruncated: the null group (calls without the key) is listed and the
+    // metadata reason does not lower completeness.
+    const all = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"]);
+    const full = all.result.data.result;
+    assert.equal(full.items.at(-1).metadata_value, null);
+    assert.equal(full.items.at(-1).has_value, false);
+    assert.equal(full.totals.calls, full.population_totals.calls);
+    assert.equal(full.coverage.completeness, "complete");
+    assert.equal(full.complete, true);
 
     const text = await read(box, server, ["usage", "--group-by-metadata", "prompt_id"], { json: false });
     assert.match(text.run.stdout, /Grouped by metadata +prompt_id/);
     assert.match(text.run.stdout, /triage=a:b\/c/);
-    assert.match(text.run.stdout, /Groups: 3 shown of 3 values/);
-    assert.match(text.run.stdout, /without prompt_id: 7 calls/);
+    assert.match(text.run.stdout, /\(no prompt_id value\) +7/);
+    assert.match(text.run.stdout, /Groups: 4 shown of 4 values/);
+    assert.ok(!text.run.stdout.includes("route_kind=chat"));
   });
 });
 

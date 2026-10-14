@@ -559,7 +559,7 @@ times for the grant.
 | `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
 | `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
 | `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
-| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=&group_by_metadata=]` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. With `--group-by-metadata KEY`, one row per value of that key instead (see [Metadata filters and grouping](#metadata-filters-and-grouping)). |
+| `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=]`, or with `--group-by-metadata KEY` `GET /v1/agent/usage/aggregates?days=N&limit=N&group_by=metadata.KEY[&metadata=]` (needs the `usage_aggregates` capability) | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. With `--group-by-metadata KEY`, one row per value of that key instead (see [Metadata filters and grouping](#metadata-filters-and-grouping)). |
 | `routes` | `GET /v1/agent/routes` | Route name, calls, replay eligible calls, evaluation contract version and hash, and whether a description or contract exists. |
 | `traces` | `GET /v1/agent/traces?days=N&limit=N[&route=&status=&metadata=&cursor=]` | One page of trace metadata: IDs, name, status, times, span count, tokens, cost (may be `null`), routes, providers and models, plus `next_cursor`. |
 
@@ -651,23 +651,24 @@ and `usage` can group by one key.
 - On `traces`, a metadata filter selects spans, like `--route`, so a trace's totals
   cover its matching spans.
 
-`--group-by-metadata KEY` groups the whole window by one key, highest cost first. A
-route is not a prompt: one route usually carries several prompt IDs, so
+`--group-by-metadata KEY` groups the whole window by one key, highest cost first, using
+the service's usage aggregates (`group_by=metadata.KEY`). A route is not a prompt: one
+route usually carries several prompt IDs, so
 `metergraph usage --group-by-metadata prompt_id` is how to split a route's cost by
-prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and up to
-10 `routes` the value ran on (`route_count` is the full count). `--limit` caps the
-listed values. Nothing is dropped: `metadata_groups.unlisted` totals calls in values
-past the limit (`other_values`, with a group count), without the key (`missing_key`),
-with a non-string value (`non_string_value`) and with a value over 1,000 characters
-(`oversize_value`). Truncation is read from the same coverage evidence as any other
-read: `coverage.rows` gives `returned`, `limit`, `truncated` and `matched` (the
-number of distinct values), and `population_totals` covers every matching call; the
-CLI refuses a response where the listed and unlisted calls do not add up to it, or
-where `coverage.rows` disagrees with the groups. When values were cut, `truncated` is
-`true`, `complete` is `false`, `coverage.completeness` is `partial` and the notice
+prompt. Each row has `metadata_value`, calls, errors, cost, tokens, latency and
+pricing. Calls without the key, or with a non-string value or one over 1,000
+characters, form one row with `metadata_value: null` and `has_value: false`. Human
+output shows that row as `(no KEY value)`, and the notice `metadata_values_missing` is
+set. `--limit` caps the listed values. Truncation is read from the same coverage
+evidence as any other read. `coverage.rows` gives `returned`, `limit`, `truncated` and
+`matched` (the number of distinct values, including the no-value group), and
+`population_totals` covers every matching call. The CLI refuses a response where
+`coverage.rows` disagrees with the groups, or where the listed calls exceed the totals
+(or, untruncated, do not equal them). When values were cut, `truncated` is `true`,
+`complete` is `false`, `coverage.completeness` is `partial` and the notice
 `metadata_groups_truncated` is set. A response not grouped by the requested key exits
 11 with `group_by_mismatch`, and one without coverage evidence exits 6 with the same
-reason.
+reason. A service without the `usage_aggregates` capability exits 14.
 
 ```sh
 metergraph usage --days 7 --group-by-metadata prompt_id --json

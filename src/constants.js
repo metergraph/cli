@@ -97,9 +97,12 @@ export const READ_PATHS = Object.freeze({
   usage: "/v1/agent/usage",
   routes: "/v1/agent/routes",
   traces: "/v1/agent/traces",
+  // usage --group-by-metadata reads the grouped aggregates.
+  usageAggregates: "/v1/agent/usage/aggregates",
 });
 export const READ_QUERY_KEYS = Object.freeze({
-  "/v1/agent/usage": Object.freeze(["days", "limit", "metadata", "group_by_metadata"]),
+  "/v1/agent/usage": Object.freeze(["days", "limit", "metadata"]),
+  "/v1/agent/usage/aggregates": Object.freeze(["days", "limit", "group_by", "metadata"]),
   "/v1/agent/traces": Object.freeze(["days", "limit", "route", "status", "cursor", "metadata"]),
   "/v1/cli/setup/credential": Object.freeze(["family_id"]),
 });

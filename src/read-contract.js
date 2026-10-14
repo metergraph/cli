@@ -23,6 +23,7 @@ export const CAPABILITY_NAMES = Object.freeze([
   "capability_discovery",
   "routes",
   "usage",
+  "usage_aggregates",
   "ingestion_health",
   "incidents",
   "trace_metadata",
@@ -288,6 +289,10 @@ const PARTIAL_REASONS = new Set([
 ]);
 const UNKNOWN_REASONS = new Set(["ingestion_unverified", "evidence_missing"]);
 const PRICING_REASONS = new Set(["pricing_missing", "pricing_partial", "pricing_unknown"]);
+// Name why a metadata grouping has a null group (calls without the key, or
+// with an ineligible value). Those calls are still counted, so these never
+// change completeness.
+const METADATA_REASONS = new Set(["metadata_key_missing", "metadata_value_ineligible"]);
 const COMPLETENESS = ["complete", "partial", "unknown"];
 const RANK = Object.freeze({ complete: 0, unknown: 1, partial: 2 });
 const ROW_SHAPES = ["top_n", "page", "all"];
@@ -299,7 +304,9 @@ export function completenessOf(stated, reasons) {
   let derived = "complete";
   for (const reason of reasons) {
     if (PARTIAL_REASONS.has(reason)) derived = "partial";
-    else if (!PRICING_REASONS.has(reason) && derived === "complete") derived = "unknown";
+    else if (!PRICING_REASONS.has(reason) && !METADATA_REASONS.has(reason) && derived === "complete") {
+      derived = "unknown";
+    }
   }
   return RANK[stated] >= RANK[derived] ? stated : derived;
 }
@@ -621,9 +628,6 @@ export function usageReport(body, ctx, request, notices) {
     const origin = provenance(body, ctx, reason);
     contentExcluded(body);
     const span = window(body.window, request.days, reason);
-    if (body.days !== request.days || typeof body.truncated !== "boolean") {
-      throw new Invalid("verification_failed", reason);
-    }
     const proof = evidence(body.evidence, reason);
     const codes = warnings(body.warnings, notices, reason);
     if (!Array.isArray(body.items) || body.items.length > request.limit) {
@@ -632,7 +636,11 @@ export function usageReport(body, ctx, request, notices) {
     checkMetadataEcho(body, request);
     const metadataFilters = metadataSupplied(request);
     if (request.groupByMetadata) {
+      // GET /v1/agent/usage/aggregates with group_by=metadata.KEY.
       return groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters });
+    }
+    if (body.days !== request.days || typeof body.truncated !== "boolean") {
+      throw new Invalid("verification_failed", reason);
     }
     if (body.group_by !== undefined && body.group_by !== null) {
       throw new Invalid("verification_failed", reason);
@@ -699,108 +707,79 @@ function metadataSupplied(request) {
   return { count: filters.length, keys: filters.map((filter) => filter.key) };
 }
 
-// Usage grouped by one metadata key. Every call in the window is accounted
-// for: listed groups, further groups past the limit, calls without the key,
-// with a non-string value, or with a value too long to filter on.
+// Usage grouped by one metadata key, from the usage aggregates read. Calls
+// without an eligible value for the key are the group whose value is null,
+// so the groups add up to the population totals. Truncation is trusted only
+// through the shared coverage evidence.
 function groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters }) {
   const reason = "usage_response_invalid";
   const key = request.groupByMetadata;
-  const group = body.group_by;
-  if (!isObject(group) || group.dimension !== "metadata" || group.metadata_key !== key) {
+  const dimension = `metadata.${key}`;
+  if (!Array.isArray(body.group_by) || body.group_by.length !== 1 || body.group_by[0] !== dimension) {
     throw new Invalid("verification_failed", "group_by_mismatch");
   }
-  const bucket = (value, withGroups = false) => {
-    if (
-      !isObject(value) ||
-      !isCount(value.calls) ||
-      !isAmount(value.cost_usd) ||
-      (withGroups && !isCount(value.groups))
-    ) {
-      throw new Invalid("verification_failed", reason);
-    }
-    const amounts = {
-      calls: value.calls,
-      cost_usd: value.cost_usd,
-      pricing: pricingOf(value.pricing, notices, reason, { note: false }),
-    };
-    return withGroups ? { groups: value.groups, ...amounts } : amounts;
-  };
-  const meta = body.metadata_groups;
-  if (!isObject(meta) || meta.key !== key || !isObject(meta.unlisted)) {
-    throw new Invalid("verification_failed", reason);
-  }
-  // Grouped truncation is only trusted through the shared coverage evidence.
   const coverage = coverageOf(body.coverage, notices, reason);
   if (coverage === null) throw new Invalid("unsupported", "group_by_mismatch");
-  const unlisted = {
-    other_values: bucket(meta.unlisted.other_values, true),
-    missing_key: bucket(meta.unlisted.missing_key),
-    non_string_value: bucket(meta.unlisted.non_string_value),
-    oversize_value: bucket(meta.unlisted.oversize_value),
-  };
+  const population = populationTotalsOf(body.totals, reason);
+  if (population === null) throw new Invalid("verification_failed", reason);
   const seen = new Set();
   const items = body.items.map((raw) => {
     const row = rowObject(raw, reason);
-    const nullableCount = (value) => value === null || isCount(value);
+    const value = row[dimension];
+    const latency = row.latency;
+    const nullableCount = (entry) => entry === null || isCount(entry);
+    const valueKey = value === null ? "\u0000null" : value;
     if (
-      row.metadata_key !== key ||
-      typeof row.metadata_value !== "string" ||
-      seen.has(row.metadata_value) ||
+      !(value === null || typeof value === "string") ||
+      seen.has(valueKey) ||
       !isCount(row.calls) ||
       !isAmount(row.cost_usd) ||
       !isCount(row.input_tokens) ||
       !isCount(row.output_tokens) ||
-      !nullableCount(row.avg_latency_ms) ||
-      !nullableCount(row.p95_latency_ms) ||
       !isCount(row.error_calls) ||
       row.error_calls > row.calls ||
-      !isCount(row.route_count) ||
-      !Array.isArray(row.routes) ||
-      row.routes.length > row.route_count
+      !isObject(latency) ||
+      !nullableCount(latency.avg_ms) ||
+      !nullableCount(latency.p95_ms)
     ) {
       throw new Invalid("verification_failed", reason);
     }
-    seen.add(row.metadata_value);
+    seen.add(valueKey);
     return {
       metadata_key: key,
-      metadata_value: metadataText(row.metadata_value, notices, reason),
+      // null: calls without the key or with a non-string or oversize value.
+      metadata_value: value === null ? null : metadataText(value, notices, reason),
+      has_value: value !== null,
       calls: row.calls,
       error_calls: row.error_calls,
       cost_usd: row.cost_usd,
       input_tokens: row.input_tokens,
       output_tokens: row.output_tokens,
-      avg_latency_ms: row.avg_latency_ms,
-      p95_latency_ms: row.p95_latency_ms,
-      routes: nameList(row.routes, notices, reason),
-      route_count: row.route_count,
+      avg_latency_ms: latency.avg_ms,
+      p95_latency_ms: latency.p95_ms,
       pricing: pricingOf(row.pricing, notices, reason, { note: false }),
     };
   });
-  const truncated = unlisted.other_values.groups > 0;
   const rows = coverage.rows;
+  const truncated = rows.truncated === true;
+  const listedCalls = items.reduce((total, item) => total + item.calls, 0);
   if (
     rows.shape !== "top_n" ||
     rows.returned !== items.length ||
     rows.limit !== request.limit ||
-    rows.truncated !== truncated ||
-    rows.matched !== items.length + unlisted.other_values.groups ||
+    rows.matched === null ||
+    rows.matched < items.length ||
+    truncated !== rows.matched > items.length ||
     coverage.totals_scope !== "population" ||
-    body.truncated !== truncated
+    listedCalls > population.calls ||
+    (!truncated && listedCalls !== population.calls)
   ) {
-    throw new Invalid("verification_failed", reason);
-  }
-  const population = populationTotalsOf(body.totals, reason);
-  const unlistedCalls =
-    unlisted.other_values.calls + unlisted.missing_key.calls +
-    unlisted.non_string_value.calls + unlisted.oversize_value.calls;
-  const listedCalls = items.reduce((total, item) => total + item.calls, 0);
-  if (population !== null && population.calls !== listedCalls + unlistedCalls) {
     throw new Invalid("verification_failed", reason);
   }
   const complete = proof.complete && !truncated && coverage.completeness === "complete";
   if (!proof.complete) notices.add("evidence_incomplete");
   if (truncated) notices.add("metadata_groups_truncated");
-  const listed = totalsOf(items, complete);
+  if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
   return {
     provenance: origin,
     window: span,
@@ -814,10 +793,7 @@ function groupedUsage(body, request, notices, { origin, span, proof, codes, meta
     empty: items.length === 0,
     rows: items.length,
     items,
-    totals: listed,
-    // Where the calls that are not listed went. Truncation and the number of
-    // matched values are in coverage.rows; population_totals covers them all.
-    metadata_groups: { unlisted },
+    totals: totalsOf(items, complete),
     coverage,
     population_totals: population,
     pricing: pricingOf(body.pricing, notices, reason),

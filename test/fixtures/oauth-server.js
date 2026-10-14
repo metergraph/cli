@@ -490,6 +490,7 @@ export function capabilitiesDocument(provenance) {
       capability_discovery: metadata("agent-access/capabilities"),
       routes: metadata("agent-access/routes"),
       usage: metadata("agent-access/usage"),
+      usage_aggregates: metadata("agent-access/usage-aggregates"),
       trace_metadata: metadata("agent-access/trace-metadata"),
       report_evidence: capability(false, false, "content", "agent:read", "agent-access/report-evidence", false),
       trace_content: capability(false, true, "content", "agent:read", "trace-debug/trace", false),
@@ -591,66 +592,6 @@ export function usageDocument(provenance, query) {
     since: new Date(Date.now() - days * DAY_MS).toISOString(),
     until: new Date().toISOString(),
   };
-  if (query.has("group_by_metadata")) {
-    const key = query.get("group_by_metadata");
-    const listed = PROMPT_GROUPS.slice(0, limit);
-    const rest = PROMPT_GROUPS.slice(limit);
-    const items = listed.map((group) => ({
-      metadata_key: key,
-      metadata_value: group.value,
-      calls: group.calls,
-      cost_usd: group.cost_usd,
-      input_tokens: group.calls * 100,
-      output_tokens: group.calls * 20,
-      avg_latency_ms: 500,
-      p95_latency_ms: 900,
-      error_calls: 0,
-      routes: group.routes,
-      route_count: group.routes.length,
-      pricing: PRICED(group.calls),
-    }));
-    const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
-    const bucket = (calls, cost) => ({ calls, cost_usd: cost, pricing: PRICED(calls) });
-    const allCalls = sum(PROMPT_GROUPS, "calls") + 7;
-    return {
-      schema_version: CONTRACT_VERSION,
-      provenance,
-      window,
-      evidence: { sources: ["calls"], rows: items.length, complete: rest.length === 0 },
-      warnings: rest.length === 0 ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }],
-      days,
-      content_included: false,
-      coverage: metadataCoverage(query, {
-        shape: "top_n",
-        returned: items.length,
-        limit,
-        truncated: rest.length > 0,
-        matched: PROMPT_GROUPS.length,
-        totalsScope: "population",
-      }),
-      totals: {
-        scope: "population",
-        calls: allCalls,
-        error_calls: 0,
-        cost_usd: sum(PROMPT_GROUPS, "cost_usd") + 0.007,
-        input_tokens: allCalls * 100,
-        output_tokens: allCalls * 20,
-      },
-      pricing: PRICED(allCalls),
-      group_by: { dimension: "metadata", metadata_key: key },
-      items,
-      metadata_groups: {
-        key,
-        unlisted: {
-          other_values: { groups: rest.length, ...bucket(sum(rest, "calls"), sum(rest, "cost_usd")) },
-          missing_key: bucket(7, 0.007),
-          non_string_value: bucket(0, 0),
-          oversize_value: bucket(0, 0),
-        },
-      },
-      truncated: rest.length > 0,
-    };
-  }
   const items = USAGE_ROWS.slice(0, limit).map((row) => ({ ...row }));
   return {
     schema_version: CONTRACT_VERSION,
@@ -800,8 +741,75 @@ export function tracesDocument(provenance, query) {
   };
 }
 
+// GET /v1/agent/usage/aggregates for one metadata.<key> dimension. The null
+// group holds the calls without an eligible value, so groups add up to totals.
+export function usageAggregatesDocument(provenance, query) {
+  const days = Number(query.get("days"));
+  const limit = Number(query.get("limit"));
+  const dimension = query.get("group_by");
+  const groups = [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }];
+  const listed = groups.slice(0, limit);
+  const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
+  const metrics = (calls, cost) => ({
+    calls,
+    error_calls: 0,
+    cost_usd: cost,
+    cost_per_call_usd: calls ? cost / calls : null,
+    input_tokens: calls * 100,
+    output_tokens: calls * 20,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    latency: { avg_ms: 500, p95_ms: 900, p95_method: "histogram_estimate", samples: calls },
+  });
+  const allCalls = sum(groups, "calls");
+  return {
+    schema_version: CONTRACT_VERSION,
+    provenance,
+    window: {
+      days,
+      since: new Date(Date.now() - days * DAY_MS).toISOString(),
+      until: new Date().toISOString(),
+      preset: "utc_days",
+      until_is_request_time: true,
+      timezone: "UTC",
+    },
+    evidence: { sources: ["calls"], rows: listed.length, complete: listed.length === groups.length },
+    warnings: listed.length === groups.length ? [] : [{ code: "truncated", message: "SYNTHETIC_BODY_MARKER" }],
+    coverage: {
+      ...metadataCoverage(query, {
+        shape: "top_n",
+        returned: listed.length,
+        limit,
+        truncated: listed.length < groups.length,
+        matched: groups.length,
+        totalsScope: "population",
+      }),
+      reasons: [
+        ...(listed.length < groups.length ? ["row_limit"] : []),
+        "metadata_key_missing",
+      ],
+    },
+    completeness: { mode: "top_n", complete: listed.length === groups.length, limit, returned: listed.length },
+    totals: { scope: "population", ...metrics(allCalls, sum(groups, "cost_usd")) },
+    pricing: PRICED(allCalls),
+    attribution: {
+      level: "call", cost_basis: "call", per_provider_exact: true, mixed_provider_rows: 0, mixed_model_rows: 0,
+    },
+    content_included: false,
+    group_by: [dimension],
+    items: listed.map((group) => ({
+      [dimension]: group.value,
+      ...metrics(group.calls, group.cost_usd),
+      pricing: PRICED(group.calls),
+    })),
+  };
+}
+
 const READ_DOCUMENTS = {
   "/v1/agent/usage": { name: "usage", build: usageDocument },
+  // Grouped usage shares the usage hook, so tests rewrite either the same way.
+  "/v1/agent/usage/aggregates": { name: "usage", build: usageAggregatesDocument },
   "/v1/agent/routes": { name: "routes", build: routesDocument },
   "/v1/agent/traces": { name: "traces", build: tracesDocument },
 };

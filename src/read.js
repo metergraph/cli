@@ -30,6 +30,13 @@ const READS = Object.freeze({
   routes: { capability: "routes", path: READ_PATHS.routes, validate: routesReport },
   traces: { capability: "trace_metadata", path: READ_PATHS.traces, validate: tracesReport },
 });
+// usage --group-by-metadata groups server-side on the aggregates read; the
+// same usage validator checks it and the same output code prints it.
+const GROUPED_USAGE = Object.freeze({
+  capability: "usage_aggregates",
+  path: READ_PATHS.usageAggregates,
+  validate: usageReport,
+});
 
 export async function runRead(options) {
   const ctx = {
@@ -141,7 +148,7 @@ export async function runRead(options) {
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
 
-    const read = READS[options.command];
+    const read = options.command === "usage" && options.groupByMetadata ? GROUPED_USAGE : READS[options.command];
     const entry = capabilities.value.agent[read.capability];
     if (entry === null || entry.available !== true) return end("capability_unavailable", "capability_unavailable");
     // The service's own bounds; a request beyond them is refused, never
@@ -189,10 +196,10 @@ function queryFor(options) {
   const query = new URLSearchParams();
   query.set("days", String(options.days));
   query.set("limit", String(options.limit));
-  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
   if (options.command === "usage" && options.groupByMetadata) {
-    query.set("group_by_metadata", options.groupByMetadata);
+    query.set("group_by", `metadata.${options.groupByMetadata}`);
   }
+  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
   if (options.command === "traces") {
     if (options.route !== null) query.set("route", options.route);
     if (options.status !== null) query.set("status", options.status);

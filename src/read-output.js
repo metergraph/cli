@@ -58,7 +58,9 @@ const NOTICES = {
   rows_truncated: "The service returned fewer rows than exist. Totals cover the returned rows only.",
   more_pages: "More traces exist. Pass --cursor with next_cursor to read the next page.",
   metadata_groups_truncated:
-    "More metadata values exist than --limit. Their calls and cost are totalled under Not listed, not dropped.",
+    "More metadata values exist than --limit. Calls in the window still counts every call.",
+  metadata_values_missing:
+    "Some calls have no usable value for the grouped key (missing, not a string or too long). They are the group shown as having no value.",
   routes_truncated_locally:
     "The service returned more routes than --limit. Only the first rows are shown; the routes endpoint has no server limit or window.",
   route_details_omitted: "Route descriptions, constraints and evaluation contract bodies are not printed.",
@@ -344,31 +346,25 @@ function groupedUsageLines(report, lines) {
   if (report.filters.metadata.count > 0) lines.push(metadataFilterLine(report.filters.metadata));
   lines.push("");
   if (report.empty) {
-    lines.push(`No calls in this window carry ${key} as a string value.`);
+    lines.push("No calls in this window.");
   } else {
     const rows = report.items.map((item) => [
-      show(item.metadata_value),
+      item.has_value ? show(item.metadata_value) : `(no ${key} value)`,
       String(item.calls),
       String(item.error_calls),
       usd(item.cost_usd),
       String(item.input_tokens),
       String(item.output_tokens),
       show(item.p95_latency_ms),
-      (item.routes.join(",") || "-") + (item.route_count > item.routes.length ? ` +${item.route_count - item.routes.length}` : ""),
     ]);
-    lines.push(...table(["VALUE", "CALLS", "ERRORS", "COST", "IN_TOKENS", "OUT_TOKENS", "P95_MS", "ROUTES"], rows));
+    lines.push(...table(["VALUE", "CALLS", "ERRORS", "COST", "IN_TOKENS", "OUT_TOKENS", "P95_MS"], rows));
   }
   const rows = report.coverage.rows;
-  const { other_values: other, missing_key: missing, non_string_value: nonString, oversize_value: oversize } =
-    report.metadata_groups.unlisted;
+  const total = report.population_totals;
   lines.push(
     "",
     `Groups: ${rows.returned} shown of ${rows.matched} values.`,
-    `Not listed: ${other.groups} more values (${other.calls} calls, ${usd(other.cost_usd)}); ` +
-      `without ${key}: ${missing.calls} calls (${usd(missing.cost_usd)}); ` +
-      `non-string value: ${nonString.calls} calls (${usd(nonString.cost_usd)}); ` +
-      `value over 1000 characters: ${oversize.calls} calls (${usd(oversize.cost_usd)}).`,
-    `Calls in the window: ${report.population_totals === null ? "not reported" : report.population_totals.calls}.`,
+    `Calls in the window: ${total.calls} (${usd(total.cost_usd)}); the shown groups hold ${report.totals.calls}.`,
     `Evidence: ${report.complete ? "complete" : "incomplete"}`,
   );
   coverageLines(lines, report);
