@@ -1,5 +1,10 @@
 import { normalizeUuid } from "./auth-oauth.js";
-import { AGENT_CONTRACT_VERSION, MAX_CURSOR_LENGTH, METADATA_SCOPE } from "./constants.js";
+import {
+  AGENT_CONTRACT_VERSION,
+  MAX_CURSOR_LENGTH,
+  MAX_METADATA_VALUE_LENGTH,
+  METADATA_SCOPE,
+} from "./constants.js";
 import { traceLink } from "./trace-contract.js";
 
 // Validators for the service's Metadata read documents. Each one checks the
@@ -18,6 +23,7 @@ export const CAPABILITY_NAMES = Object.freeze([
   "capability_discovery",
   "routes",
   "usage",
+  "usage_aggregates",
   "ingestion_health",
   "incidents",
   "trace_metadata",
@@ -107,7 +113,7 @@ const isTimestamp = (value) =>
 const isDate = (value) =>
   typeof value === "string" && DATE.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
 
-function hasUnsafeText(value) {
+export function hasUnsafeText(value) {
   for (const char of value) {
     const code = char.codePointAt(0);
     if (UNSAFE_RANGES.some(([low, high]) => code >= low && code <= high)) return true;
@@ -121,6 +127,73 @@ export function isCursor(value) {
 
 export function isSafeFilter(value) {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_TEXT && !hasUnsafeText(value);
+}
+
+// The one JSON object sent as the metadata query parameter. filters are
+// already sorted by key, so the text is stable.
+export function metadataQueryValue(filters) {
+  return JSON.stringify(Object.fromEntries(filters.map(({ key, value }) => [key, value])));
+}
+
+// The query string a read command sends, built only from validated options.
+// Argument validation measures this same object, so its length check and the
+// transport's agree exactly. The routes endpoint takes none.
+export function readQuery(options) {
+  if (options.command === "routes") return null;
+  const query = new URLSearchParams();
+  query.set("days", String(options.days));
+  query.set("limit", String(options.limit));
+  if (options.command === "usage" && options.groupByMetadata) {
+    query.set("group_by", `metadata.${options.groupByMetadata}`);
+  }
+  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
+  if (options.command === "traces") {
+    if (options.route !== null) query.set("route", options.route);
+    if (options.status !== null) query.set("status", options.status);
+    if (options.cursor !== null) query.set("cursor", options.cursor);
+  }
+  return query;
+}
+
+// Rows do not carry metadata, so the only proof a metadata filter applied is
+// the service's echo in coverage.filters.metadata. It must list exactly the
+// requested pairs, in key order. A service that does not echo them (an older
+// one) is refused rather than trusted, and an echo of pairs the CLI did not
+// send is refused too.
+function checkMetadataEcho(body, request) {
+  const requested = request.metadata ?? [];
+  const filters = isObject(body.coverage) && isObject(body.coverage.filters) ? body.coverage.filters : null;
+  const echoed = filters === null ? undefined : filters.metadata;
+  if (echoed === undefined || echoed === null) {
+    if (requested.length > 0) throw new Invalid("unsupported", "metadata_filter_unsupported");
+    return;
+  }
+  if (!Array.isArray(echoed) || echoed.length !== requested.length) {
+    throw new Invalid("verification_failed", "metadata_filter_mismatch");
+  }
+  echoed.forEach((entry, index) => {
+    if (
+      !isObject(entry) ||
+      entry.key !== requested[index].key ||
+      entry.value !== requested[index].value
+    ) {
+      throw new Invalid("verification_failed", "metadata_filter_mismatch");
+    }
+  });
+}
+
+// A metadata value is a customer's opaque string. Like a route name it is
+// untrusted text: one that could change how a terminal shows output is
+// replaced with null and noted.
+function metadataText(value, notices, reason) {
+  if (typeof value !== "string" || value.length > MAX_METADATA_VALUE_LENGTH) {
+    throw new Invalid("verification_failed", reason);
+  }
+  if (hasUnsafeText(value)) {
+    notices.add("unsafe_text_omitted");
+    return null;
+  }
+  return value;
 }
 
 // Text a person reads, such as a route or model name. It is untrusted
@@ -236,6 +309,10 @@ const PARTIAL_REASONS = new Set([
 ]);
 const UNKNOWN_REASONS = new Set(["ingestion_unverified", "evidence_missing"]);
 const PRICING_REASONS = new Set(["pricing_missing", "pricing_partial", "pricing_unknown"]);
+// Name why a metadata grouping has a null group (calls without the key, or
+// with an ineligible value). Those calls are still counted, so these never
+// change completeness.
+const METADATA_REASONS = new Set(["metadata_key_missing", "metadata_value_ineligible"]);
 const COMPLETENESS = ["complete", "partial", "unknown"];
 const RANK = Object.freeze({ complete: 0, unknown: 1, partial: 2 });
 const ROW_SHAPES = ["top_n", "page", "all"];
@@ -247,7 +324,9 @@ export function completenessOf(stated, reasons) {
   let derived = "complete";
   for (const reason of reasons) {
     if (PARTIAL_REASONS.has(reason)) derived = "partial";
-    else if (!PRICING_REASONS.has(reason) && derived === "complete") derived = "unknown";
+    else if (!PRICING_REASONS.has(reason) && !METADATA_REASONS.has(reason) && derived === "complete") {
+      derived = "unknown";
+    }
   }
   return RANK[stated] >= RANK[derived] ? stated : derived;
 }
@@ -292,6 +371,10 @@ function coverageOf(value, notices, reason) {
   const filters = {};
   for (const key of FILTER_KEYS) {
     if (Object.hasOwn(value.filters, key)) filters[key] = value.filters[key] !== null;
+  }
+  // Metadata is echoed as a list of pairs; an empty list means none applied.
+  if (Object.hasOwn(value.filters, "metadata")) {
+    filters.metadata = Array.isArray(value.filters.metadata) && value.filters.metadata.length > 0;
   }
   const reasons = [...new Set(value.reasons)].sort();
   const completeness = completenessOf(value.completeness, reasons);
@@ -602,12 +685,21 @@ export function usageReport(body, ctx, request, notices) {
     const origin = provenance(body, ctx, reason);
     contentExcluded(body);
     const span = window(body.window, request.days, reason);
-    if (body.days !== request.days || typeof body.truncated !== "boolean") {
-      throw new Invalid("verification_failed", reason);
-    }
     const proof = evidence(body.evidence, reason);
     const codes = warnings(body.warnings, notices, reason);
     if (!Array.isArray(body.items) || body.items.length > request.limit) {
+      throw new Invalid("verification_failed", reason);
+    }
+    checkMetadataEcho(body, request);
+    const metadataFilters = metadataSupplied(request);
+    if (request.groupByMetadata) {
+      // GET /v1/agent/usage/aggregates with group_by=metadata.KEY.
+      return groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters });
+    }
+    if (body.days !== request.days || typeof body.truncated !== "boolean") {
+      throw new Invalid("verification_failed", reason);
+    }
+    if (body.group_by !== undefined && body.group_by !== null) {
       throw new Invalid("verification_failed", reason);
     }
     const items = body.items.map((raw) => {
@@ -654,6 +746,8 @@ export function usageReport(body, ctx, request, notices) {
       evidence: proof,
       warnings: codes,
       content_included: false,
+      group_by: null,
+      filters: { metadata: metadataFilters },
       truncated: body.truncated,
       complete,
       empty: items.length === 0,
@@ -666,6 +760,125 @@ export function usageReport(body, ctx, request, notices) {
       attribution: attributionOf(body.attribution, reason, "call"),
     };
   });
+}
+
+// Filter values are not printed back, like any other free-text argument;
+// only the keys and how many were applied.
+function metadataSupplied(request) {
+  const filters = request.metadata ?? [];
+  return { count: filters.length, keys: filters.map((filter) => filter.key) };
+}
+
+// The listed groups cannot exceed the population totals on any metric, and
+// when nothing was cut they must equal them. Cost is compared with a small
+// tolerance for per-group rounding.
+const COST_TOLERANCE_USD = 1e-6;
+function groupsMatchTotals(items, population, truncated) {
+  for (const field of ["calls", "error_calls", "input_tokens", "output_tokens", "cost_usd"]) {
+    const listed = items.reduce((total, item) => total + item[field], 0);
+    const slack = field === "cost_usd" ? COST_TOLERANCE_USD * Math.max(1, items.length) : 0;
+    if (listed > population[field] + slack) return false;
+    if (!truncated && Math.abs(listed - population[field]) > slack) return false;
+  }
+  return true;
+}
+
+// Usage grouped by one metadata key, from the usage aggregates read. Calls
+// without an eligible value for the key are the group whose value is null,
+// so the groups add up to the population totals. Truncation is trusted only
+// through the shared coverage evidence.
+function groupedUsage(body, request, notices, { origin, span, proof, codes, metadataFilters }) {
+  const reason = "usage_response_invalid";
+  const key = request.groupByMetadata;
+  const dimension = `metadata.${key}`;
+  if (!Array.isArray(body.group_by) || body.group_by.length !== 1 || body.group_by[0] !== dimension) {
+    throw new Invalid("verification_failed", "group_by_mismatch");
+  }
+  const coverage = coverageOf(body.coverage, notices, reason);
+  if (coverage === null) throw new Invalid("unsupported", "group_by_mismatch");
+  const population = populationTotalsOf(body.totals, reason);
+  if (population === null) throw new Invalid("verification_failed", reason);
+  const seen = new Set();
+  const items = body.items.map((raw) => {
+    const row = rowObject(raw, reason);
+    const value = row[dimension];
+    const latency = row.latency;
+    const nullableCount = (entry) => entry === null || isCount(entry);
+    const valueKey = value === null ? "\u0000null" : value;
+    if (
+      !(value === null || typeof value === "string") ||
+      seen.has(valueKey) ||
+      !isCount(row.calls) ||
+      !isAmount(row.cost_usd) ||
+      !isCount(row.input_tokens) ||
+      !isCount(row.output_tokens) ||
+      !isCount(row.error_calls) ||
+      row.error_calls > row.calls ||
+      !isObject(latency) ||
+      !nullableCount(latency.avg_ms) ||
+      !nullableCount(latency.p95_ms)
+    ) {
+      throw new Invalid("verification_failed", reason);
+    }
+    seen.add(valueKey);
+    return {
+      metadata_key: key,
+      // null: calls without the key or with a non-string or oversize value.
+      metadata_value: value === null ? null : metadataText(value, notices, reason),
+      has_value: value !== null,
+      calls: row.calls,
+      error_calls: row.error_calls,
+      cost_usd: row.cost_usd,
+      input_tokens: row.input_tokens,
+      output_tokens: row.output_tokens,
+      avg_latency_ms: latency.avg_ms,
+      p95_latency_ms: latency.p95_ms,
+      pricing: pricingOf(row.pricing, notices, reason, { note: false }),
+    };
+  });
+  const rows = coverage.rows;
+  const truncated = rows.truncated === true;
+  if (
+    rows.shape !== "top_n" ||
+    // Rows must be the promised order: highest cost first.
+    typeof rows.ordering !== "string" ||
+    !rows.ordering.startsWith("cost_usd desc") ||
+    items.some((item, index) => index > 0 && item.cost_usd > items[index - 1].cost_usd) ||
+    rows.returned !== items.length ||
+    rows.limit !== request.limit ||
+    rows.matched === null ||
+    // A top-N read has no cursor, so it must fill the limit when more matched.
+    items.length !== Math.min(rows.limit, rows.matched) ||
+    truncated !== rows.matched > items.length ||
+    coverage.totals_scope !== "population" ||
+    !groupsMatchTotals(items, population, truncated)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  const complete = proof.complete && !truncated && coverage.completeness === "complete";
+  if (!proof.complete) notices.add("evidence_incomplete");
+  if (truncated) notices.add("metadata_groups_truncated");
+  if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
+  if (codes.some((entry) => entry.code === "metadata_key_mostly_missing")) notices.add("metadata_key_mostly_missing");
+  return {
+    provenance: origin,
+    window: span,
+    evidence: proof,
+    warnings: codes,
+    content_included: false,
+    group_by: { dimension: "metadata", metadata_key: key },
+    filters: { metadata: metadataFilters },
+    truncated,
+    complete,
+    empty: items.length === 0,
+    rows: items.length,
+    items,
+    totals: totalsOf(items, complete),
+    coverage,
+    population_totals: population,
+    pricing: pricingOf(body.pricing, notices, reason),
+    attribution: attributionOf(body.attribution, reason),
+  };
 }
 
 // Sums over the returned rows only. complete says whether those rows are the
@@ -773,6 +986,7 @@ export function tracesReport(body, ctx, request, notices) {
     }
     const rawRows = body.traces.map((raw) => rowObject(raw, reason));
     checkFilters(body, rawRows, request);
+    checkMetadataEcho(body, request);
     const traces = rawRows.map((row) => {
       const nullableAmount = (value) => value === null || isAmount(value);
       if (
@@ -849,6 +1063,7 @@ export function tracesReport(body, ctx, request, notices) {
         route_supplied: request.route !== null,
         status: request.status,
         cursor_supplied: request.cursor !== null,
+        metadata: metadataSupplied(request),
       },
       page: { limit: page.limit, rows: traces.length, truncated: page.truncated, next_cursor: page.next_cursor },
       truncated: page.truncated,

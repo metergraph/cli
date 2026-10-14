@@ -240,6 +240,8 @@ test("parses read commands with bounded defaults and explicit values", () => {
     origin: null,
     workspace: null,
     agentTokenFile: null,
+    metadata: null,
+    groupByMetadata: null,
     json: false,
   });
   const keyed = parseArgs(["usage", "--url", "https://metergraph.example.com/", "--workspace", "0B5C7C1E-1A2B-4C3D-8E4F-5A6B7C8D9E01", "--agent-token-file", "/run/secrets/key"]);
@@ -311,4 +313,60 @@ test("rejects bad input with fixed messages that never contain the input", () =>
       assert.ok(!parsed.message.includes(arg), "error message echoes an argument value");
     }
   }
+});
+
+test("metadata filters are exact opaque pairs, sorted, bounded and never echoed in errors", () => {
+  const usage = parseArgs([
+    "usage", "--metadata", "workflow_id=wf=1", "--metadata", "prompt_id= Queue:X ", "--group-by-metadata", "prompt_id",
+  ]);
+  assert.deepEqual(usage.metadata, [
+    { key: "prompt_id", value: " Queue:X " },
+    { key: "workflow_id", value: "wf=1" },
+  ]);
+  assert.equal(usage.groupByMetadata, "prompt_id");
+  assert.deepEqual(parseArgs(["traces", "--metadata", "prompt_id="]).metadata, [{ key: "prompt_id", value: "" }]);
+  assert.deepEqual(parseArgs(["traces", "--metadata-json", '{"a=b":"c","é":"東京"}']).metadata, [
+    { key: "a=b", value: "c" },
+    { key: "é", value: "東京" },
+  ]);
+  const cases = [
+    [["traces", "--metadata", "novalue"], "invalid_metadata"],
+    [["traces", "--metadata", "=v"], "invalid_metadata"],
+    [["traces", "--metadata", "k=1", "--metadata", "k=2"], "duplicate_metadata_key"],
+    [["traces", "--metadata-json", '{"k":"1","k":"2"}'], "duplicate_metadata_key"],
+    [["traces", "--metadata-json", '{"k":1}'], "invalid_metadata"],
+    [["traces", "--metadata-json", '["k"]'], "invalid_metadata"],
+    [["traces", "--metadata-json", "{bad"], "invalid_metadata"],
+    [["traces", "--metadata", "a=1", "--metadata-json", '{"b":"2"}'], "metadata_conflict"],
+    [["traces", ...[1, 2, 3, 4, 5, 6].flatMap((n) => ["--metadata", `k${n}=v`])], "too_many_metadata_filters"],
+    [["traces", "--metadata", `${"k".repeat(201)}=v`], "invalid_metadata_key"],
+    [["traces", "--metadata", `k=${"v".repeat(1001)}`], "invalid_metadata"],
+    [["traces", "--metadata", "sk-live-SECRET_api_key=v"], "metadata_key_ineligible"],
+    [["usage", "--group-by-metadata", "aws_secret_access_key"], "metadata_key_ineligible"],
+    [["traces", "--group-by-metadata", "prompt_id"], "unknown_argument"],
+    [["routes", "--metadata", "a=b"], "unknown_argument"],
+  ];
+  for (const [argv, code] of cases) {
+    const parsed = parseArgs(argv);
+    assert.equal(parsed.ok, false, argv.join(" "));
+    assert.equal(parsed.code, code, argv.join(" "));
+    assert.ok(!parsed.message.includes("sk-live"), "an argument value was echoed");
+  }
+  const long = Array.from({ length: 5 }, (_, n) => ["--metadata", `k${n}=${"\"".repeat(400)}`]).flat();
+  assert.equal(parseArgs(["traces", ...long]).code, "query_too_long");
+  // Measured with URLSearchParams, the encoding actually sent: 1,000
+  // apostrophes are 1,000 characters to encodeURIComponent but 3,000 here.
+  assert.equal(parseArgs(["traces", "--metadata", `k=${"'".repeat(1000)}`]).code, "query_too_long");
+  // A grouping key counts toward the same bound.
+  assert.equal(
+    parseArgs(["usage", "--group-by-metadata", "g".repeat(200), "--metadata", `k=${"'".repeat(600)}`]).code,
+    "query_too_long",
+  );
+  // Keys are printed, so terminal controls and bidi formatting are refused.
+  for (const key of ["a\nb", "a\u001b[31mb", "a\u202eb", "a\u0000b"]) {
+    assert.equal(parseArgs(["traces", "--metadata", `${key}=v`]).code, "invalid_metadata_key");
+    assert.equal(parseArgs(["usage", "--group-by-metadata", key]).code, "invalid_metadata_key");
+  }
+  // Values are never printed, so any text but NUL is a valid exact value.
+  assert.equal(parseArgs(["traces", "--metadata", "k=a\nb"]).ok, true);
 });

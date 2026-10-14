@@ -237,6 +237,22 @@ const DAYS_OPTION = {
   value: "N",
   summary: `Window of the last N days, 1 to ${READ_MAX_DAYS}. Default ${READ_DEFAULT_DAYS}.`,
 };
+const METADATA_OPTIONS = [
+  {
+    name: "--metadata",
+    value: "KEY=VALUE",
+    summary:
+      "Only calls whose metadata (SDK tags) has exactly this string value: case-sensitive, no prefix or " +
+      "trimming. Repeat for up to 5 keys, all must match. A call without the key never matches; KEY= " +
+      "matches only an empty value. Splits at the first =, so a value may contain =.",
+  },
+  {
+    name: "--metadata-json",
+    value: "JSON",
+    summary:
+      'The same filters as one JSON object, for keys that contain = (for example {"a=b":"v"}). Not with --metadata.',
+  },
+];
 const limitOption = (fallback, extra = "") => ({
   name: "--limit",
   value: "N",
@@ -275,9 +291,27 @@ export const READ_HELP = Object.freeze([
   },
   {
     name: "usage",
-    usage: `metergraph usage [--days N] [--limit N] ${READ_BASE_USAGE}`,
-    summary: "Show daily calls, errors, cost, tokens and latency per route for a recent window. Metadata only.",
-    options: [...READ_BASE_OPTIONS, DAYS_OPTION, limitOption(READ_DEFAULT_LIMIT), JSON_OPTION],
+    usage:
+      `metergraph usage [--days N] [--limit N] [--metadata KEY=VALUE]... [--metadata-json JSON] ` +
+      `[--group-by-metadata KEY] ${READ_BASE_USAGE}`,
+    summary:
+      "Show daily calls, errors, cost, tokens and latency per route for a recent window, or group the window " +
+      "by one metadata key. Metadata only. A route is not a prompt: one route can carry several prompt IDs, " +
+      'so "metergraph usage --group-by-metadata prompt_id" splits cost by prompt.',
+    options: [
+      ...READ_BASE_OPTIONS,
+      DAYS_OPTION,
+      limitOption(READ_DEFAULT_LIMIT, " With --group-by-metadata it caps the listed values."),
+      ...METADATA_OPTIONS,
+      {
+        name: "--group-by-metadata",
+        value: "KEY",
+        summary:
+          "Group by one metadata key, highest cost first, using the service's usage aggregates. Calls without " +
+          "the key or with a non-string value form one group with no value; window totals cover every call.",
+      },
+      JSON_OPTION,
+    ],
   },
   {
     name: "routes",
@@ -298,7 +332,7 @@ export const READ_HELP = Object.freeze([
     name: "traces",
     usage:
       `metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] ` +
-      `[--cursor CURSOR] ${READ_BASE_USAGE}`,
+      `[--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] ${READ_BASE_USAGE}`,
     summary:
       "List one page of trace metadata: status, span count, tokens, cost, routes, providers and models. " +
       "No prompts, responses or tool calls.",
@@ -308,6 +342,7 @@ export const READ_HELP = Object.freeze([
       limitOption(TRACES_DEFAULT_LIMIT),
       { name: "--route", value: "NAME", summary: "Only traces that include this route." },
       { name: "--status", value: "STATUS", summary: "Only success or error traces." },
+      ...METADATA_OPTIONS,
       {
         name: "--cursor",
         value: "CURSOR",
@@ -317,6 +352,15 @@ export const READ_HELP = Object.freeze([
     ],
   },
 ]);
+
+// One "  FLAG  summary" line per option. The flag column keeps its usual
+// width but grows to fit the longest flag, so a flag never runs into its
+// summary.
+function optionLines(options, minimum) {
+  const flags = options.map((option) => (option.value ? `${option.name} ${option.value}` : option.name));
+  const width = Math.max(minimum, ...flags.map((flag) => flag.length + 2));
+  return options.map((option, index) => `  ${flags[index].padEnd(width)}${option.summary}`);
+}
 
 export function helpData(topic) {
   return {
@@ -440,10 +484,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of DOCTOR_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(DOCTOR_OPTIONS, 18));
     lines.push(
       "",
       "ORIGIN must be a bare https origin such as https://metergraph.example.com.",
@@ -460,10 +501,7 @@ export function helpText(topic, style = PLAIN) {
       "operator prerequisite attestation; OSS remains an operator handoff. No application",
       "traffic is claimed until an exact instrumented invocation is separately verified.",
       "", "Options:");
-    for (const option of helpData(null).commands.find((entry) => entry.name === "setup").options) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
-    }
+    lines.push(...optionLines(helpData(null).commands.find((entry) => entry.name === "setup").options, 25));
     lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "login" || topic === "logout") {
     const login = topic === "login";
@@ -493,20 +531,14 @@ export function helpText(topic, style = PLAIN) {
       );
     }
     lines.push("Options:");
-    for (const option of login ? LOGIN_OPTIONS : LOGOUT_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(login ? LOGIN_OPTIONS : LOGOUT_OPTIONS, 18));
     if (login) lines.push("", ...AGENT_APPROVAL_HELP);
   } else if (topic === "verify") {
     lines.push(`Usage: ${VERIFY_USAGE}`, "", "Uses the saved Metadata grant to poll for one exact, processed trace.",
       "The source label is supplied by the caller. A Metadata match alone does not prove application traffic.",
       "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
-    for (const option of VERIFY_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(22)}${option.summary}`);
-    }
+    lines.push(...optionLines(VERIFY_OPTIONS, 22));
   } else if (READ_HELP.some((entry) => entry.name === topic)) {
     const entry = READ_HELP.find((candidate) => candidate.name === topic);
     lines.push(
@@ -527,10 +559,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of entry.options) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(25)}${option.summary}`);
-    }
+    lines.push(...optionLines(entry.options, 25));
   } else if (topic === "skill") {
     lines.push(
       "Usage:",
@@ -543,10 +572,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of SKILL_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(SKILL_OPTIONS, 18));
     lines.push(
       "",
       "install never replaces an existing skill. update replaces only a skill this CLI",
@@ -575,10 +601,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    for (const option of SKILL_OPTIONS) {
-      const flag = option.value ? `${option.name} ${option.value}` : option.name;
-      lines.push(`  ${flag.padEnd(18)}${option.summary}`);
-    }
+    lines.push(...optionLines(SKILL_OPTIONS, 18));
     lines.push(
       "",
       "install never replaces an existing skill. update replaces only skills this CLI",

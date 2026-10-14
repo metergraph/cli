@@ -23,6 +23,19 @@
   a cloud workspace and CI. Where sign in cannot finish they return a structured
   `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
   person's steps, the Keys page and the commands to run afterwards.
+- `usage` and `traces` take `--metadata KEY=VALUE` (repeatable, up to 5 keys, all must
+  match) and `--metadata-json JSON` to keep only calls whose SDK tags have exactly
+  those string values. `usage --group-by-metadata KEY` groups the window by one key,
+  highest cost first, through the service's usage aggregates; calls without the key
+  or with a non-string value form one group with no value, and the window totals
+  cover every call. The service must echo the applied filters in its coverage
+  evidence; an older service that does not is refused with
+  `metadata_filter_unsupported`. A grouping where no call has the key says so in one
+  line.
+- Help keeps a gap between every option and its description, however long the option.
+- Human `usage` and `traces` output no longer repeats a notice that restates a printed
+  Coverage or Pricing line, and prints service warning codes once. `--json` is
+  unchanged.
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line

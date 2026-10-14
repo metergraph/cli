@@ -21,9 +21,13 @@ import {
   SKILL_CLIENTS,
   SKILL_RUNTIMES,
   TRACES_DEFAULT_LIMIT,
+  MAX_METADATA_FILTERS,
+  MAX_METADATA_KEY_LENGTH,
+  MAX_QUERY_LENGTH,
+  MAX_METADATA_VALUE_LENGTH,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
-import { isCursor, isSafeFilter } from "./read-contract.js";
+import { hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
 const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
@@ -45,9 +49,9 @@ const OPTIONS = {
   status: new Set([...READ_BASE, ...READ_KEY]),
   context: new Set([...READ_BASE, ...READ_KEY]),
   capabilities: new Set([...READ_BASE, ...READ_KEY]),
-  usage: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit"]),
+  usage: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit", "--metadata", "--metadata-json", "--group-by-metadata"]),
   routes: new Set([...READ_BASE, ...READ_KEY, "--limit"]),
-  traces: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit", "--route", "--status", "--cursor"]),
+  traces: new Set([...READ_BASE, ...READ_KEY, "--days", "--limit", "--route", "--status", "--cursor", "--metadata", "--metadata-json"]),
   verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
 };
 // Requests the read commands recognize and refuse, so a script gets an
@@ -79,6 +83,8 @@ const REFUSED_MESSAGES = {
   content_access_unsupported:
     "Read commands return Metadata only. They never read retained content, debug data or replays. No request was made.",
 };
+// Options that may be given more than once; their values are kept in order.
+const REPEATABLE = new Set(["--metadata"]);
 // Options that take no value.
 const FLAGS = {
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
@@ -185,6 +191,10 @@ export function parseArgs(argv) {
         }
         if (value === undefined) {
           return fail("missing_value", `${name} requires a value.`);
+        }
+        if (REPEATABLE.has(name)) {
+          values[name] = [...(values[name] ?? []), value];
+          continue;
         }
         if (values[name] !== undefined) {
           return fail("duplicate_option", `${name} may be given only once.`);
@@ -511,7 +521,14 @@ function parseRead(command, values, json, fail) {
   if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
     return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
   }
-  return {
+  const metadata = parseMetadata(values, fail);
+  if (!metadata.ok) return metadata;
+  const groupByMetadata = values["--group-by-metadata"] ?? null;
+  if (groupByMetadata !== null) {
+    const problem = metadataKeyProblem(groupByMetadata);
+    if (problem !== null) return fail(problem.code, `--group-by-metadata ${problem.message}`);
+  }
+  const parsed = {
     ok: true,
     command,
     origin,
@@ -525,8 +542,144 @@ function parseRead(command, values, json, fail) {
     route,
     status,
     cursor,
+    metadata: metadata.filters,
+    groupByMetadata,
     json,
   };
+  // Measure the exact query the command will send (URLSearchParams encoding,
+  // every parameter), so an over-long one fails here and not after sign in.
+  const query = readQuery(parsed);
+  if (query !== null && query.toString().length > MAX_QUERY_LENGTH) {
+    return fail(
+      "query_too_long",
+      "The filters are too long to send in one request. Use fewer or shorter metadata values, or a shorter route or cursor.",
+    );
+  }
+  return parsed;
+}
+
+// Exact customer-metadata filters. --metadata KEY=VALUE splits at the first
+// "=", so a value may contain "=" and a key may not; --metadata-json takes one
+// JSON object for keys with "=" or values that are awkward to quote. Values
+// are opaque strings: nothing is trimmed, case folded or split on a prefix.
+// Returns filters sorted by key, or null when none were given.
+function parseMetadata(values, fail) {
+  const pairs = values["--metadata"] ?? [];
+  const raw = values["--metadata-json"];
+  if (pairs.length > 0 && raw !== undefined) {
+    return fail("metadata_conflict", "Use --metadata or --metadata-json, not both.");
+  }
+  const entries = [];
+  if (raw !== undefined) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return fail("invalid_metadata", '--metadata-json must be a JSON object such as {"prompt_id":"p-1"}.');
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return fail("invalid_metadata", '--metadata-json must be a JSON object such as {"prompt_id":"p-1"}.');
+    }
+    if (duplicateJsonKey(raw)) {
+      return fail("duplicate_metadata_key", "A metadata key may be given only once.");
+    }
+    entries.push(...Object.entries(parsed));
+  } else {
+    for (const pair of pairs) {
+      const equals = pair.indexOf("=");
+      if (equals <= 0) {
+        return fail(
+          "invalid_metadata",
+          "--metadata must be KEY=VALUE with a non-empty key. Use --metadata-json for a key that contains \"=\".",
+        );
+      }
+      entries.push([pair.slice(0, equals), pair.slice(equals + 1)]);
+    }
+  }
+  if (entries.length === 0) return { ok: true, filters: null };
+  if (entries.length > MAX_METADATA_FILTERS) {
+    return fail("too_many_metadata_filters", `At most ${MAX_METADATA_FILTERS} metadata keys may be given.`);
+  }
+  const seen = new Set();
+  for (const [key, value] of entries) {
+    const problem = metadataKeyProblem(key);
+    if (problem !== null) return fail(problem.code, `A metadata key ${problem.message}`);
+    if (seen.has(key)) return fail("duplicate_metadata_key", "A metadata key may be given only once.");
+    seen.add(key);
+    if (typeof value !== "string") {
+      return fail("invalid_metadata", "Metadata values must be strings; they are matched as exact opaque text.");
+    }
+    if (value.length > MAX_METADATA_VALUE_LENGTH || value.includes("\0")) {
+      return fail(
+        "invalid_metadata",
+        `A metadata value must be at most ${MAX_METADATA_VALUE_LENGTH} characters without NUL.`,
+      );
+    }
+  }
+  const filters = entries
+    .map(([key, value]) => ({ key, value }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { ok: true, filters };
+}
+
+// JSON.parse keeps the last of two equal keys; the service refuses them, so
+// the CLI refuses them first instead of silently sending one. Scans the
+// already valid JSON text for the top-level object's keys.
+function duplicateJsonKey(raw) {
+  const keys = new Set();
+  let depth = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (char === "{" || char === "[") depth += 1;
+    else if (char === "}" || char === "]") depth -= 1;
+    else if (char === '"') {
+      let end = index + 1;
+      while (raw[end] !== '"') end += raw[end] === "\\" ? 2 : 1;
+      const token = raw.slice(index, end + 1);
+      let next = end + 1;
+      while (/\s/.test(raw[next] ?? "")) next += 1;
+      if (depth === 1 && raw[next] === ":") {
+        const key = JSON.parse(token);
+        if (keys.has(key)) return true;
+        keys.add(key);
+      }
+      index = end;
+    }
+  }
+  return false;
+}
+
+// Matches the service's rule: lowercased, everything but letters and digits
+// removed, the key must not end in one of these.
+const SENSITIVE_KEY_SUFFIXES = Object.freeze([
+  "accesskey", "apikey", "auth", "authorization", "bearer", "clientsecret", "cookie",
+  "credential", "credentials", "encryptionkey", "jwt", "passwd", "password", "privatekey",
+  "secret", "secretkey", "sessionkey", "signingkey", "token",
+]);
+
+function metadataKeyProblem(key) {
+  // Keys are printed back (filter and grouping lines), so control and
+  // formatting characters that could rewrite terminal or log output are
+  // refused, as they are for every other printed name.
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > MAX_METADATA_KEY_LENGTH ||
+    hasUnsafeText(key)
+  ) {
+    return {
+      code: "invalid_metadata_key",
+      message: `must be 1 to ${MAX_METADATA_KEY_LENGTH} characters without control or formatting characters.`,
+    };
+  }
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) {
+    return {
+      code: "metadata_key_ineligible",
+      message: "looks like a credential name and cannot be used for filtering or grouping.",
+    };
+  }
+  return null;
 }
 
 function parseBounded(raw, min, max) {
