@@ -13,6 +13,8 @@ import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-e
 import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
 import { runSkill } from "./skill.js";
 import { handoffPages } from "./environment.js";
+import { REFUSAL_REASONS, clearSetupRefusal, pendingRefusal, waiterRecord } from "./setup-refusal.js";
+import { isApprovalWaiter } from "./approval-handoff.js";
 import { ensureRepositoryIdentity, envRepository } from "./repository-identity.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
@@ -73,6 +75,11 @@ export async function runSetup(options, progress = () => {}) {
   const stop = (outcome, reason, status = "not_ready", next = null) =>
     fail(outcome, reason, status, currentReceipt(), next);
   let announced = false;
+  // Only the --json --no-browser background waiter records what it does with
+  // an approval; a foreground run reports directly.
+  const waiter = Boolean(options.announce) && isApprovalWaiter();
+  let record = null;
+  let refusalRecorded = false;
   const announce = options.announce ? (status, next) => {
     announced = true;
     options.announce(fail("action_required", "browser_approval_required", status, currentReceipt(), next).data);
@@ -89,6 +96,18 @@ export async function runSetup(options, progress = () => {}) {
     if (saved && (saved.value.origin !== intendedOrigin || saved.value.workspace_id !== intendedWorkspace ||
         (bound !== null && (bound.origin !== saved.value.origin || bound.workspace_id !== saved.value.workspace_id)))) {
       return stop("conflict", "setup_binding_changed");
+    }
+    // What an earlier --json --no-browser waiter is doing with an approval it
+    // received: still redeeming it, or refused by the service's budget. The
+    // rerun reports that instead of asking the person for another approval.
+    // It runs after the binding guard, so a rerun aimed at another deployment
+    // or workspace is refused as such and leaves the record for a correct
+    // rerun; the next action names the saved family's own deployment.
+    const pending = pendingRefusal(root, { familyId: saved?.value.family_id ?? null,
+      delivered: saved?.value.phase === "delivered" });
+    if (pending !== null) {
+      return stop(pending.reason === "setup_rate_limited" ? "rate_limited" : "conflict", pending.reason,
+        "delivery_pending", redeemNext(pending, saved?.value.origin ?? intendedOrigin));
     }
     // An env key this setup does not own stops before any sign in, so the
     // refusal costs no approval and leaves the binding untouched. The check
@@ -107,6 +126,9 @@ export async function runSetup(options, progress = () => {}) {
     if (!signedIn.ok && signedIn.outcome === "login_required") {
       const familyId = randomUUID();
       const ingestSetup = saved || options.repair ? null : { familyId,
+        // In the waiter, record the approval before anything else happens,
+        // so an immediate rerun waits instead of asking for another one.
+        onApproved: () => { if (waiter) record = waiterRecord(root, familyId); record?.redeeming(); },
         supported: async (origin, profile, cancel) => {
           const discovered = await discoverSetup(origin, profile, cancel);
           return discovered.ok && discovered.loginSetup;
@@ -221,6 +243,10 @@ export async function runSetup(options, progress = () => {}) {
       approval = await approveInBrowser({ origin, setup, workspaceId, state, intent, options, announce, progress,
         cancel: trap.signal });
       if (!approval.ok) return stop(approval.outcome, approval.reason);
+      if (waiter) {
+        record = waiterRecord(root, state.family_id);
+        record.redeeming();
+      }
     }
 
     // Persist the ambiguity boundary before a single-use receipt is sent.
@@ -231,11 +257,22 @@ export async function runSetup(options, progress = () => {}) {
       return stop("conflict", "setup_state_changed");
     }
     writeSetupState(root, withSetupState(previous.value, { phase: "redeem_attempted" }), previous);
+    // This waiter won the state for its redemption: the record is now its own,
+    // even if another waiter's approval arrived first and wrote it.
+    if (waiter) {
+      record ??= waiterRecord(root, state.family_id);
+      record.redeeming({ force: true });
+    }
     previous = readSetupState(root);
     const redeemed = await redeem(origin, { code: approval.code, client_id: approval.clientId,
       redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
       family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal, progress);
-    if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
+    if (!redeemed.ok) {
+      if (record !== null && REFUSAL_REASONS.includes(redeemed.reason)) {
+        refusalRecorded = record.refused(redeemed.reason, redeemed.retryAfter ?? null);
+      }
+      return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
+    }
     const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: origin, signal: trap.signal });
     const checked = await checkCredential(origin, redeemed.token, state, profile, trap.signal);
     if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
@@ -247,7 +284,10 @@ export async function runSetup(options, progress = () => {}) {
   } catch (error) {
     if (error instanceof Stop) return stop(error.outcome, error.reason);
     throw error;
-  } finally { trap.release(); }
+  } finally {
+    if (record !== null && !refusalRecorded) record.settle();
+    trap.release();
+  }
 }
 
 // The ingest-only approval at the setup authorization endpoint: the only
@@ -294,6 +334,9 @@ async function approveInBrowser({ origin, setup, workspaceId, state, intent, opt
 }
 
 function finishSkill(root, options, envStatus) {
+  // Reached only with a verified, delivered credential, whether just issued
+  // or reused: no earlier refusal or redemption still applies.
+  clearSetupRefusal(root);
   let previous = readSetupState(root);
   if (previous === null || previous.value.phase !== "delivered") return fail("conflict", "setup_state_changed");
   if (previous.value.selected_client !== options.client) {
@@ -403,11 +446,16 @@ async function redeem(origin, form, profile, cancel, progress = () => {}) {
 }
 
 // Seconds from Retry-After (or the body's retry_after_seconds), 1 to 60, or
-// null when the service gave no usable delay.
+// null when the service gave no usable delay. The header must be whole
+// digits: "60junk" or "1.5" is unusable, as on the read path.
+const RETRY_AFTER = /^[0-9]{1,6}$/;
+
 function retryAfterSeconds(response) {
-  const header = Number.parseInt(String(response.headers?.["retry-after"] ?? ""), 10);
+  const raw = response.headers?.["retry-after"];
+  const header = typeof raw === "string" && RETRY_AFTER.test(raw.trim()) ? Number(raw.trim()) : null;
+  if (raw !== undefined && header === null) return null;
   const body = parseJsonObject(response)?.retry_after_seconds;
-  const value = Number.isInteger(header) ? header : Number.isInteger(body) ? body : null;
+  const value = header !== null ? header : Number.isInteger(body) ? body : null;
   return value !== null && value >= 1 && value <= MAX_RETRY_AFTER_SECONDS ? value : null;
 }
 
@@ -428,6 +476,11 @@ function pause(ms, cancel) {
 // The next action for a budget refusal. Nothing was issued, and a rerun asks
 // for a new approval.
 function redeemNext(result, origin) {
+  if (result.reason === "setup_in_progress") {
+    return { kind: "retry_later", retry_after_seconds: result.retryAfter ?? null,
+      message: "An earlier setup run for this project is still finishing an approval it received. Wait a " +
+        "few seconds, then run setup again; do not ask for another approval." };
+  }
   if (result.reason === "setup_rate_limited") {
     return { kind: "retry_later", retry_after_seconds: result.retryAfter ?? null,
       message: "The service limits how many ingest keys setup can issue each minute for one person and one " +

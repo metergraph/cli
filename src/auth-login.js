@@ -271,6 +271,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
     await listener.close();
   }
 
+  if (callback.kind === "code" && setupPkce !== null && callback.setupCode) options.ingestSetup.onApproved?.();
   if (callback.kind === "denied") return fail("authorization_failed", "access_denied");
   if (callback.kind === "timeout") return fail("authorization_failed", "timeout");
   if (callback.kind === "cancelled") return fail("authorization_failed", "cancelled");

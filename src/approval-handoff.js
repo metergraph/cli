@@ -19,6 +19,11 @@ import { envelope, toJsonLine } from "./output.js";
 const BIN = fileURLToPath(new URL("../bin/metergraph.js", import.meta.url));
 const WAITER = "METERGRAPH_APPROVAL_WAITER";
 
+// True in the detached waiter that handOff starts.
+export function isApprovalWaiter(env = process.env) {
+  return env[WAITER] === "1";
+}
+
 export function handsOff(argv, env = process.env) {
   if (env[WAITER] === "1") return false;
   const parsed = parseArgs(argv);

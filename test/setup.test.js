@@ -819,7 +819,7 @@ test("setup stops as rate_limited with a retry next action when the budget stays
 });
 
 test("setup does not wait out a long or missing Retry-After", async () => {
-  for (const retryAfter of ["600", "soon"]) {
+  for (const retryAfter of ["600", "soon", "60junk", "1.5", "-1", ""]) {
     const server = await startOAuthServer({ setup: true, setupSlowDown: 5, setupRetryAfter: retryAfter });
     try {
       const box = boxFor();
@@ -846,4 +846,200 @@ test("the active-key cap stops setup with the Keys page and issues nothing", asy
     assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 1);
     assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
   } finally { await server.close(); }
+});
+
+test("a --json --no-browser waiter's budget refusal is reported on the rerun instead of a new approval", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    const first = await agentSetup(box, server);
+    const signIn = assertAnnounced(first, server);
+    assert.equal(await completeInBrowser(signIn.href), 200);
+    await until(() => fs.existsSync(path.join(box.project, ".metergraph", "project.json")), "the waiter to sign in");
+    const second = await agentSetup(box, server);
+    const approval = assertAnnounced(second, server);
+    assert.equal(await completeInBrowser(approval.href), 200);
+    // The waiter's redemption is refused at the cap after the command exited.
+    const refusal = path.join(box.project, ".metergraph", "setup-refusal.json");
+    await until(() => fs.existsSync(refusal), "the waiter to record the refusal");
+    assert.ok(!fs.readFileSync(refusal, "utf8").includes("mg"), "the record holds no credential");
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+
+    // The agent's rerun reports the refusal and opens no new approval.
+    const third = await agentSetup(box, server);
+    assert.equal(third.result.outcome, "conflict");
+    assert.equal(third.result.error.reason, "setup_key_limit");
+    assert.equal(third.result.data.next_action.kind, "revoke_keys");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+
+    // After the person revokes keys, the next rerun asks for a new approval.
+    server.behavior.setupKeyLimit = false;
+    const fourth = await agentSetup(box, server);
+    assert.equal(assertAnnounced(fourth, server).pathname, "/v1/cli/setup/authorize");
+    assert.equal(fs.existsSync(refusal), false);
+  } finally { await server.close(); }
+});
+
+const refusalFile = (box) => path.join(box.project, ".metergraph", "setup-refusal.json");
+const savedFamily = (box) => JSON.parse(fs.readFileSync(path.join(box.project, ".metergraph", "setup.json"))).family_id;
+
+function writeRecord(box, fields) {
+  fs.writeFileSync(refusalFile(box), JSON.stringify({ schema_version: 2, family_id: savedFamily(box),
+    approval_id: "00000000-0000-4000-8000-0000000000aa", pid: process.pid, reason: null, retry_at: null,
+    state: "redeeming", expires_at: new Date(Date.now() + 60000).toISOString(), ...fields }));
+}
+
+test("a foreground refusal is reported directly and not recorded, so the rerun after revoking proceeds", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    const refused = await setup(box, server, ["--url", server.origin]);
+    assert.equal(refused.outcome, "conflict");
+    assert.equal(refused.data.next_action.kind, "revoke_keys");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+    // The person revokes keys as told; the rerun asks for a new approval and completes.
+    server.behavior.setupKeyLimit = false;
+    const done = await setup(box, server);
+    assert.equal(done.outcome, "ok");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 2);
+  } finally { await server.close(); }
+});
+
+test("a rerun right after approval waits for the waiter still redeeming it", async () => {
+  // The waiter's redemption is paced for three seconds, so the agent's rerun
+  // arrives while it still holds the approval.
+  const server = await startOAuthServer({ setup: true, setupSlowDown: 1, setupRetryAfter: "3" });
+  try {
+    const box = boxFor();
+    const signIn = assertAnnounced(await agentSetup(box, server), server);
+    assert.equal(await completeInBrowser(signIn.href), 200);
+    await until(() => fs.existsSync(path.join(box.project, ".metergraph", "project.json")), "the waiter to sign in");
+    const approval = assertAnnounced(await agentSetup(box, server), server);
+    assert.equal(await completeInBrowser(approval.href), 200);
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    const rerun = await agentSetup(box, server);
+    assert.equal(rerun.result.outcome, "conflict");
+    assert.equal(rerun.result.error.reason, "setup_in_progress");
+    assert.equal(rerun.result.data.next_action.kind, "retry_later");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+    // The waiter finishes on its own; the next rerun is ready and the record is gone.
+    await until(() => setupPhase(box) === "delivered" &&
+      fs.existsSync(path.join(box.project, ".agents", "skills", "metergraph", "SKILL.md")), "the waiter to deliver");
+    const done = await setup(box, server, ["--no-browser"]);
+    assert.equal(done.outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a successful run that reuses its verified key clears a leftover record", async () => {
+  const server = await startOAuthServer({ setup: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "ok");
+    writeRecord(box, { state: "refused", reason: "setup_rate_limited", pid: 1,
+      retry_at: new Date(Date.now() + 60000).toISOString() });
+    const again = await setup(box, server);
+    assert.equal(again.outcome, "ok");
+    assert.equal(again.data.env, "unchanged");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a redeeming record from a live process blocks a new approval; a dead or expired one does not", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    server.behavior.setupKeyLimit = false;
+    const approvals = server.requestsTo("/v1/cli/setup/authorize").length;
+    // This test's own process stands in for a waiter that is still running.
+    writeRecord(box, {});
+    const busy = await setup(box, server);
+    assert.equal(busy.error.reason, "setup_in_progress");
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, approvals);
+    writeRecord(box, { expires_at: new Date(Date.now() - 1000).toISOString() });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a crafted record cannot block setup beyond the limits the CLI writes", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    server.behavior.setupKeyLimit = false;
+    const far = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+    // A live process with an expiry a year out, as a committed file could carry.
+    writeRecord(box, { pid: 1, expires_at: far });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+    // A refusal whose retry time is a year out is ignored too.
+    writeRecord(box, { state: "refused", reason: "setup_rate_limited", retry_at: far });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a rerun aimed at another deployment is refused as a binding change and keeps the record", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    writeRecord(box, { state: "refused", reason: "setup_key_limit", pid: 1 });
+    const other = await startOAuthServer({ setup: true });
+    try {
+      const elsewhere = await setup(box, other, ["--url", other.origin]);
+      assert.equal(elsewhere.outcome, "conflict");
+      assert.equal(elsewhere.error.reason, "setup_binding_changed");
+    } finally { await other.close(); }
+    assert.equal(fs.existsSync(refusalFile(box)), true, "the record is kept for a correct rerun");
+    // The correct rerun reports the refusal with the saved deployment's Keys page.
+    const here = await setup(box, server);
+    assert.equal(here.error.reason, "setup_key_limit");
+    assert.equal(here.data.next_action.url, `${server.origin}/#api-keys`);
+  } finally { await server.close(); }
+});
+
+test("a live waiter's record for another family does not block this setup", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    // Not yet delivered: saved family B, a live record for family A.
+    assert.equal((await setup(box, server, ["--url", server.origin])).outcome, "conflict");
+    server.behavior.setupKeyLimit = false;
+    writeRecord(box, { family_id: "00000000-0000-4000-8000-00000000000a" });
+    assert.equal((await setup(box, server)).outcome, "ok");
+    // Delivered: any record is cleared, even one for this family from a live process.
+    writeRecord(box, {});
+    const again = await setup(box, server);
+    assert.equal(again.outcome, "ok");
+    assert.equal(fs.existsSync(refusalFile(box)), false);
+  } finally { await server.close(); }
+});
+
+test("a second waiter never takes over a live waiter's record unless it wins the setup state", async () => {
+  const { waiterRecord } = await import("../src/setup-refusal.js");
+  const root = fs.mkdtempSync(path.join(dir, "waiters "));
+  fs.mkdirSync(path.join(root, ".metergraph"));
+  const file = path.join(root, ".metergraph", "setup-refusal.json");
+  const family = "00000000-0000-4000-8000-0000000000bb";
+  // Another live process stands in for the first waiter.
+  const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+  try {
+    await new Promise((resolve) => other.once("spawn", resolve));
+    const first = { schema_version: 2, family_id: family, approval_id: "00000000-0000-4000-8000-0000000000a1",
+      pid: other.pid, state: "redeeming", reason: null, retry_at: null,
+      expires_at: new Date(Date.now() + 60000).toISOString() };
+    fs.writeFileSync(file, JSON.stringify(first));
+    const second = waiterRecord(root, family);
+    assert.equal(second.redeeming(), false);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).approval_id, first.approval_id);
+    // Losing the setup state, the second waiter leaves the first one's record.
+    second.settle();
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).approval_id, first.approval_id);
+    // Winning it, the second waiter takes the record over.
+    assert.equal(second.redeeming({ force: true }), true);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).pid, process.pid);
+  } finally { other.kill(); }
 });

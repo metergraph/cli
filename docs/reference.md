@@ -467,8 +467,28 @@ person does not approve twice. If the budget stays exhausted, setup exits
 `rate_limited` (16) with reason `setup_rate_limited` and a `retry_later` next
 action carrying `retry_after_seconds`. At the cap, setup exits `conflict` (8)
 with reason `setup_key_limit` and a `revoke_keys` next action whose `url` is
-the Keys page. Neither refusal issues a key or writes `.env`. A rerun asks for a
-new approval.
+the Keys page. Neither refusal issues a key or writes `.env`.
+
+A foreground run reports a refusal directly and records nothing, so the run
+after the person waits or revokes keys proceeds. With `--json --no-browser`
+the background waiter meets the redemption after the command has exited, so
+the waiter alone records what it is doing in `.metergraph/setup-refusal.json`
+(the family, the waiter's process, the approval it came from and a reason;
+never a credential). As soon as it receives an approval it records that it is
+redeeming; a rerun while that process is alive exits `conflict`
+(`setup_in_progress`) with a `retry_later` next action instead of asking for
+another approval. That applies only to the saved family, or before any
+setup state is saved; a second waiter never replaces a live one's record
+unless it wins the setup state for its own redemption. If the service
+refuses the redemption, the waiter records
+the refusal, and the next run reports it: a rate refusal until its retry
+time, a key-limit refusal once. Any successful run, including one that reuses
+a verified key, removes the record, and a record for another family, an
+already delivered family, a dead process or past its expiry is ignored and
+removed. Because the file is in the project, a record can delay setup by at
+most the time this CLI writes it for (ten minutes while redeeming, five for a
+rate refusal); one that claims longer is ignored and removed. Older CLIs
+ignore the file.
 
 `METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
 appends `/v1/ingest` itself. A setup rerun with a verified
