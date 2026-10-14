@@ -24,6 +24,9 @@ const READ_MESSAGES = {
   bound_to_other_origin:
     "This project is bound to a different origin than --url or METERGRAPH_URL names. Nothing was sent.",
   bound_to_other_workspace: "This project is bound to a different workspace than --workspace names. Nothing was sent.",
+  agent_key_origin_unconfirmed:
+    "This project's binding names a non-hosted origin, and a key is never sent to an origin taken only from a " +
+    "project file. Set METERGRAPH_URL or pass --url with the same origin to confirm it. Nothing was sent.",
   scope_mismatch:
     "The credential is not limited to exactly the Metadata scope, so it was not used. The CLI never uses broader access.",
   content_access_granted:

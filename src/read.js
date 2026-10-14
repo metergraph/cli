@@ -97,10 +97,13 @@ export async function runRead(options) {
     // its error is the answer, as before.
     let store = null;
     let grantSaved = false;
+    let originConfirmed = false;
     if (binding !== null) {
       try {
         store = openStore(configDir, { create: false });
-        grantSaved = store !== null && readCredential(store, binding.credential_slot) !== null;
+        const record = store === null ? null : readCredential(store, binding.credential_slot);
+        grantSaved = record !== null;
+        originConfirmed = record !== null && record.origin === binding.origin;
       } catch (error) {
         if (!(error instanceof Stop) || source === null) throw error;
         store = null;
@@ -118,7 +121,7 @@ export async function runRead(options) {
     ctx.credential = useKey ? "agent_key" : "oauth_grant";
     // --url, METERGRAPH_URL (for a key only) and --workspace may repeat the
     // binding but never contradict it.
-    const target = keyTarget({ binding, options, env: useKey ? env : {} });
+    const target = keyTarget({ binding, options, env: useKey ? env : {}, originConfirmed: originConfirmed || !useKey });
     if (!target.ok) return end(target.outcome, target.reason);
     Object.assign(ctx, {
       origin: target.origin,
@@ -410,6 +413,14 @@ function nextAction(outcome, ctx, options) {
       message:
         "This key belongs to a different workspace than this project or --workspace names. Ask the person to " +
         "create the key in the intended workspace, or pass the intended workspace with --workspace.",
+    };
+  }
+  if (keyed && reason === "agent_key_origin_unconfirmed") {
+    return {
+      kind: "confirm_origin",
+      message:
+        "This project's binding names a deployment other than the hosted service. A Metadata key is sent there " +
+        "only when you confirm the same address: set METERGRAPH_URL or pass --url with it.",
     };
   }
   if (keyed && (reason === "bound_to_other_origin" || reason === "bound_to_other_workspace")) {

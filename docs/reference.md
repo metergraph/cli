@@ -727,7 +727,7 @@ sign in is used and the notice `agent_key_not_used` says so.
 
 | Option or variable | Meaning |
 | --- | --- |
-| `--url ORIGIN` / `METERGRAPH_URL` | Where the key is sent for an unbound project. Default `https://app.metergraph.dev`. A bound project's origin must match, or the command exits 8 `bound_to_other_origin` with no request. |
+| `--url ORIGIN` / `METERGRAPH_URL` | Where the key is sent for an unbound project. Default `https://app.metergraph.dev`. A bound project's origin must match, or the command exits 8 `bound_to_other_origin` with no request. Because `.metergraph/project.json` is repository content, a key is sent to a non-hosted origin it names only when this machine holds a sign in for that origin or `--url` / `METERGRAPH_URL` confirms it; otherwise exit 8 `agent_key_origin_unconfirmed` (`confirm_origin`) with no request. |
 | `--workspace UUID` | The workspace the key must be for. A bound project pins its own. Without either, the key's own workspace is verified and used, with the notice `workspace_not_pinned`. |
 
 Before any read, in order and under one `--timeout-ms` deadline:

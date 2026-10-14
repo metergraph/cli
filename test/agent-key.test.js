@@ -219,6 +219,26 @@ test("a malformed key or origin variable stops before any request and never echo
   });
 });
 
+test("a key is never sent to a non-hosted origin taken only from a committed binding", async () => {
+  await withServer({}, async (server) => {
+    // The repository names a server; this machine never signed in to it and
+    // the person did not confirm it with --url or METERGRAPH_URL.
+    const box = sandbox();
+    bindProject(box, server.origin, WORKSPACE_A);
+    const before = server.requests.length;
+    const { run, result } = await read(box, ["usage"], keyed(server, { METERGRAPH_URL: "" }));
+    assert.equal(run.code, 8);
+    assert.equal(result.error.reason, "agent_key_origin_unconfirmed");
+    assert.equal(result.data.next_action.kind, "confirm_origin");
+    assert.deepEqual(sent(server, before), []);
+
+    // Confirming the same origin with --url lets the key through.
+    const confirmed = await read(box, ["usage", "--url", server.origin], keyed(server, { METERGRAPH_URL: "" }));
+    assert.equal(confirmed.run.code, 0, confirmed.run.stdout);
+    assert.equal(confirmed.result.data.credential, "agent_key");
+  });
+});
+
 test("a project bound to another origin is never sent the key", async () => {
   await withServer({}, async (server) => {
     const box = sandbox();

@@ -39,7 +39,9 @@ export function agentKeySource(options, env) {
 // METERGRAPH_URL) and --workspace may repeat them but never contradict them.
 // Without a binding, --workspace pins the workspace; without that, the
 // key's own workspace is used and reported as unpinned.
-export function keyTarget({ binding, options, env }) {
+// originConfirmed is true when this machine holds a saved sign in for the
+// binding's origin, which proves the person chose that origin here.
+export function keyTarget({ binding, options, env, originConfirmed = false }) {
   let requested = options.origin ?? null;
   let source = requested === null ? null : "flag";
   const rawEnv = env[AGENT_URL_ENV];
@@ -51,6 +53,14 @@ export function keyTarget({ binding, options, env }) {
   const pinned = options.workspace ?? null;
   if (binding !== null) {
     if (requested !== null && requested !== binding.origin) return stop("conflict", "bound_to_other_origin");
+    // The binding is repository content, so it may come from anyone who can
+    // commit. A key is sent to the origin it names only when that is the
+    // hosted service, this machine signed in to it, or the person confirmed
+    // the same origin with --url or METERGRAPH_URL; otherwise a committed
+    // file could direct the key to another server.
+    if (requested === null && binding.origin !== DEFAULT_ORIGIN && !originConfirmed) {
+      return stop("conflict", "agent_key_origin_unconfirmed");
+    }
     if (pinned !== null && pinned !== binding.workspace_id) return stop("conflict", "bound_to_other_workspace");
     return {
       ok: true,
