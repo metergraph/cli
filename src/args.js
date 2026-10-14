@@ -645,6 +645,13 @@ function parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit 
   }
   const metadata = parseMetadata(values, fail);
   if (!metadata.ok) return metadata;
+  if (groupedQueryLength(groupBy, filters, metadata.filters, until !== null) > MAX_QUERY_LENGTH) {
+    return fail(
+      "query_too_long",
+      "The filters are too long to send in one request. Use fewer or shorter --route, --provider, --model, " +
+        "--environment or --metadata values.",
+    );
+  }
   return {
     ok: true,
     command: "usage",
@@ -668,6 +675,25 @@ const METADATA_PREFIX = "metadata.";
 const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ZONED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
+// The transport refuses a query longer than this, so a request that would
+// exceed it is refused here as input, before any request.
+const MAX_QUERY_LENGTH = 2048;
+
+// The encoded length of the grouped usage query at its longest (a window of
+// two 24-character timestamps, or days, and the largest limit).
+function groupedQueryLength(groupBy, filters, metadataFilters, hasUntil) {
+  const query = new URLSearchParams();
+  for (const dimension of groupBy) query.append("group_by", dimension);
+  query.set("since", "0000-00-00T00:00:00.000Z");
+  if (hasUntil) query.set("until", "0000-00-00T00:00:00.000Z");
+  query.set("limit", "200");
+  for (const key of ["route", "provider", "model", "environment"]) {
+    for (const value of filters[key] ?? []) query.append(key, value);
+  }
+  if (metadataFilters) query.set("metadata", metadataQueryValue(metadataFilters));
+  return query.toString().length;
+}
+
 // A window bound as a UTC ISO 8601 string, or null. A date alone is 00:00
 // UTC; a timestamp must carry Z or an offset, so a local time is never read
 // as UTC by accident.
@@ -677,10 +703,18 @@ function utcInstant(raw) {
   if (text === null) return null;
   const parsed = Date.parse(text);
   if (!Number.isFinite(parsed)) return null;
-  const iso = new Date(parsed).toISOString();
-  // Reject dates the parser rolled over, such as 2026-02-30.
-  if (UTC_DATE.test(raw) && iso.slice(0, 10) !== raw) return null;
-  return iso;
+  // Reject calendar values the parser would roll over, such as 2026-02-30 or
+  // 2026-09-31T12:00:00Z, rather than read a different instant.
+  const [year, month, day] = text.slice(0, 10).split("-").map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) {
+    return null;
+  }
+  const time = /T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(text);
+  if (time && (Number(time[1]) > 23 || Number(time[2]) > 59 || Number(time[3] ?? 0) > 59)) return null;
+  const offset = /([+-])(\d{2}):(\d{2})$/.exec(text);
+  if (offset && (Number(offset[2]) > 23 || Number(offset[3]) > 59)) return null;
+  return new Date(parsed).toISOString();
 }
 
 // Exact customer-metadata filters. --metadata KEY=VALUE splits at the first

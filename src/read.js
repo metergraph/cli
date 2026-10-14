@@ -61,7 +61,7 @@ export async function runRead(options) {
   const build = (outcome, report, reason = null) =>
     options.command === "status"
       ? statusData(ctx, notices, outcome)
-      : readData(ctx, report, notices, outcome, nextAction(outcome, reason, { grouped, options, report }));
+      : readData(ctx, report, notices, outcome, nextAction(outcome, reason, { grouped, options, report, capabilities: ctx.capabilities }));
   const end = (outcome, reason, report = null) => {
     const data = build(outcome, report, reason);
     // Validated metadata can still be any string the service chose. If any
@@ -159,7 +159,16 @@ export async function runRead(options) {
     // The service's own bounds; a request beyond them is refused, never
     // clamped into a different question.
     const { bounds } = capabilities.value;
-    if ((options.days !== null && options.days > bounds.max_days) || options.limit > bounds.max_rows) {
+    // An explicit grouped window is held to the same day bound as --days.
+    const explicitDays = grouped && options.grouped.since !== null
+      ? ((options.grouped.until === null ? Date.now() : Date.parse(options.grouped.until)) -
+          Date.parse(options.grouped.since)) / (24 * 60 * 60 * 1000)
+      : null;
+    if (
+      (options.days !== null && options.days > bounds.max_days) ||
+      (explicitDays !== null && explicitDays > bounds.max_days) ||
+      options.limit > bounds.max_rows
+    ) {
       return end("unsupported", "exceeds_service_bounds");
     }
 
@@ -410,18 +419,20 @@ const NARROW =
 
 // A structured next step for outcomes a person or agent can act on. Fixed
 // text only, except a window and limit the CLI computed from validated values.
-function nextAction(outcome, reason = null, { grouped = false, options = null, report = null } = {}) {
+function nextAction(outcome, reason = null, { grouped = false, options = null, report = null, capabilities = null } = {}) {
   if (outcome === "login_required") {
     return { kind: "login", message: 'Run "metergraph login --runtime local" in this project to sign in again.' };
   }
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
   if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
+    // Offer the route-by-day read only when this grant actually has it.
+    if (capabilities?.agent?.usage?.available !== true) return null;
     return {
       kind: "use_supported_read",
       message:
-        "This deployment does not offer grouped usage yet. \"metergraph usage --days N\" still lists cost per route " +
-        "and UTC day, and \"metergraph usage --group-by-metadata KEY\" groups by a metadata key where the service " +
-        "supports it. Grouping by provider, model or day needs a service update; nothing was read.",
+        "This deployment does not offer grouped usage to this grant. \"metergraph usage --days N\" still lists " +
+        "cost per route and day over the last N x 24 hours. Grouping by provider, model, UTC day or a metadata key " +
+        "needs a service that offers grouped usage; nothing was read.",
       command: "metergraph usage --days 7 --json",
     };
   }

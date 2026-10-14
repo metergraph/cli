@@ -461,6 +461,17 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const utcMidnight = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
 
+const P95_METHOD = "histogram_estimate";
+// The service rounds amounts to 8 decimals; a product or sum of n rounded
+// amounts may differ from the exact value by about n half-units, plus slack.
+const costTolerance = (count) => 1e-6 + count * 1e-8;
+// The service's order for grouped usage; truncation keeps its first groups.
+const AGGREGATE_ORDERING = "cost_usd desc, calls desc, group key asc";
+// An internal join key built from the raw group values, never printed: a
+// value replaced by null for display (unsafe text) still compares by its
+// real identity across windows.
+export const GROUP_KEY = Symbol("group_key");
+
 // One group's or the population's metrics, shared by items and totals.
 // Latency is labelled as the service defines it: avg_ms is the mean over the
 // calls that reported latency (samples) and p95_ms is an estimate from a
@@ -479,9 +490,12 @@ function usageMetrics(row, reason) {
     !isObject(latency) ||
     !nullableCount(latency.avg_ms) ||
     !nullableCount(latency.p95_ms) ||
-    !isToken(latency.p95_method) ||
+    // Output labels p95 as a fixed-histogram estimate, so only that method is read.
+    latency.p95_method !== P95_METHOD ||
     !isCount(latency.samples) ||
-    latency.samples > row.calls
+    latency.samples > row.calls ||
+    // cost_per_call_usd must be cost_usd / calls, to the service's 8-decimal rounding.
+    (row.calls > 0 && Math.abs(row.cost_per_call_usd * row.calls - row.cost_usd) > costTolerance(row.calls))
   ) {
     throw new Invalid("verification_failed", reason);
   }
@@ -543,7 +557,7 @@ function usageWindow(value, request, reason) {
   if (until !== utcMidnight(until) && (partialDays.length === 0 || lastDay !== utcMidnight(since))) {
     partialDays.push(new Date(lastDay).toISOString().slice(0, 10));
   }
-  return {
+  const result = {
     // utc_days: from 00:00 UTC, days - 1 whole UTC days before today, to now.
     // explicit: exactly [since, until).
     kind: value.preset === "utc_days" ? "utc_days" : "explicit",
@@ -556,6 +570,12 @@ function usageWindow(value, request, reason) {
     hours: Math.round(((until - since) / HOUR_MS) * 100) / 100,
     partial_days: partialDays,
   };
+  // First and last UTC days the window covers; not part of the output.
+  Object.defineProperties(result, {
+    since_day: { value: new Date(since).toISOString().slice(0, 10) },
+    last_day: { value: new Date(until - 1).toISOString().slice(0, 10) },
+  });
+  return result;
 }
 
 // Exact filters echoed in coverage.filters must be the ones requested. An
@@ -676,7 +696,10 @@ export function usageAggregatesReport(body, ctx, request, notices) {
           continue;
         }
         if (dimension === "day") {
-          if (!isDate(row.day)) throw new Invalid("verification_failed", reason);
+          // A UTC day the verified window does not cover is refused.
+          if (!isDate(row.day) || row.day < span.since_day || row.day > span.last_day) {
+            throw new Invalid("verification_failed", reason);
+          }
           group.day = row.day;
         } else {
           group[dimension] = displayText(row[dimension], notices, reason);
@@ -701,6 +724,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       const metrics = usageMetrics(row, reason);
       const item = { ...group, ...metrics, pricing: pricingOf(row.pricing, notices, reason, { note: false }) };
       if (group.day !== undefined) item.partial_day = span.partial_days.includes(group.day);
+      Object.defineProperty(item, GROUP_KEY, { value: key, enumerable: true });
       return item;
     });
     const totals = body.totals;
@@ -728,6 +752,24 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       listedCalls > population.calls ||
       (!truncated && listedCalls !== population.calls)
     ) {
+      throw new Invalid("verification_failed", reason);
+    }
+    // Every group set must reconcile with the population: an untruncated one
+    // exactly (counts) or within rounding (cost), a truncated one never above it.
+    const sumOf = (field) => items.reduce((sum, item) => sum + item[field], 0);
+    for (const field of ["error_calls", ...TOKEN_COUNTS]) {
+      if (truncated ? sumOf(field) > population[field] : sumOf(field) !== population[field]) {
+        throw new Invalid("verification_failed", reason);
+      }
+    }
+    const costGap = sumOf("cost_usd") - population.cost_usd;
+    if (costGap > costTolerance(items.length + 1) || (!truncated && -costGap > costTolerance(items.length + 1))) {
+      throw new Invalid("verification_failed", reason);
+    }
+    // The groups must come in the service's cost order; a cut list is only
+    // the highest-cost groups when that order is the one stated.
+    const costOrdered = items.every((item, index) => index === 0 || items[index - 1].cost_usd >= item.cost_usd);
+    if (!costOrdered || (truncated && coverage.rows.ordering !== AGGREGATE_ORDERING)) {
       throw new Invalid("verification_failed", reason);
     }
     if (truncated) notices.add("groups_truncated");

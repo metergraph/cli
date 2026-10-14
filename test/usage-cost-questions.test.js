@@ -634,3 +634,99 @@ test("a key no call carries is said once, with the unattributed spend and no rep
     assert.equal(new Set(bullets).size, bullets.length);
   });
 });
+
+test("grouped documents that do not reconcile, order or label as stated are refused", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite) => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, "usage_response_invalid");
+      assert.equal(result.data.result, null);
+    };
+    const item0 = (doc, change) => ({ ...doc, items: [{ ...doc.items[0], ...change(doc.items[0]) }, ...doc.items.slice(1)] });
+    // cost_per_call_usd that is not cost_usd / calls.
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ cost_per_call_usd: item.cost_per_call_usd * 3 })));
+    // A p95 the output would mislabel as a histogram estimate.
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ latency: { ...item.latency, p95_method: "exact" } })));
+    // Complete group sets whose errors, tokens or cost disagree with the totals.
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ error_calls: item.error_calls + 1 })));
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ input_tokens: item.input_tokens + 5 })));
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({
+      cost_usd: item.cost_usd + 1, cost_per_call_usd: (item.cost_usd + 1) / item.calls,
+    })));
+    // Groups not in cost order, and a cut list in another stated order.
+    await refused(["--group-by", "model"], (doc) => ({ ...doc, items: [...doc.items].reverse() }));
+    await refused(["--group-by", "provider,model", "--limit", "2"], (doc) => ({
+      ...doc, coverage: { ...doc.coverage, rows: { ...doc.coverage.rows, ordering: "calls desc" } },
+    }));
+    // A day group outside the verified window.
+    await refused(["--route", "support", "--group-by", "day"], (doc) => item0(doc, () => ({ day: "2020-01-01" })));
+  });
+});
+
+test("an explicit window over the service's max_days is refused before any read", async () => {
+  await withSignedIn(async (server, box) => {
+    server.behavior.capabilities = (doc) => ({ ...doc, bounds: { ...doc.bounds, max_days: 30 } });
+    const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { run, result } = await usage(box, server, ["--group-by", "route", "--since", since]);
+    assert.equal(run.code, 6, run.stdout);
+    assert.equal(result.error.reason, "exceeds_service_bounds");
+    assert.equal(server.requestsTo(AGGREGATES).length, 0);
+  });
+});
+
+test("without the route-by-day read either, no supported read is offered", async () => {
+  await withSignedIn(async (server, box) => {
+    server.behavior.capabilities = (doc) => {
+      const agent = { ...doc.agent };
+      delete agent.usage_aggregates;
+      delete agent.usage;
+      return { ...doc, agent };
+    };
+    const { run, result } = await usage(box, server, ["--group-by", "provider"]);
+    assert.equal(run.code, 14);
+    assert.equal(result.error.reason, "usage_aggregates_unavailable");
+    assert.equal(result.data.next_action, null);
+  });
+});
+
+test("rolled-over timestamps and queries too long to send are refused as input", async () => {
+  const box = sandbox();
+  const long = "r".repeat(200);
+  const cases = [
+    [["--since", "2026-09-31T12:00:00Z"], "invalid_window"],
+    [["--since", "2026-01-01T24:00:00Z"], "invalid_window"],
+    [["--since", "2026-01-01T10:00:00+25:00"], "invalid_window"],
+    [Array.from({ length: 20 }, (_, index) => ["--route", `${long}${index}`]).flat(), "query_too_long"],
+  ];
+  for (const [args, reason] of cases) {
+    const run = await runCli(["--json", "usage", ...args, "--project", box.project], { offline: true, env: LOCAL_ENV });
+    assert.equal(run.code, 2, run.stdout);
+    assert.equal(parseJsonLine(run.stdout).error.reason, reason);
+  }
+});
+
+test("comparison joins groups by their real values, not by display values", async () => {
+  const { GROUP_KEY } = await import("../src/read-contract.js");
+  const { compareReports } = await import("../src/usage-aggregates.js");
+  // Two routes whose names were unsafe to print both display as null.
+  const item = (raw, cost) => {
+    const value = { route: null, calls: 1, error_calls: 0, cost_usd: cost };
+    Object.defineProperty(value, GROUP_KEY, { value: JSON.stringify([raw]), enumerable: true });
+    return value;
+  };
+  const side = (items) => ({
+    group_by: ["route"], truncated: false, complete: true, items,
+    window: { hours: 24, partial_days: [] }, totals: { calls: 2, error_calls: 0, cost_usd: 3 },
+  });
+  const comparison = compareReports(
+    side([item("a\u0007", 1), item("b\u0007", 2)]),
+    side([item("b\u0007", 5)]),
+    "previous",
+    new Set(),
+  );
+  const rows = comparison.items.map((row) => [row.current?.cost_usd ?? null, row.prior?.cost_usd ?? null]);
+  assert.deepEqual(rows, [[1, 0], [2, 5]]);
+});

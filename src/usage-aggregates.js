@@ -1,3 +1,5 @@
+import { GROUP_KEY } from "./read-contract.js";
+
 // Ranking and prior-period comparison for grouped usage. Both work on reports
 // already validated by usageAggregatesReport and say when the returned groups
 // are not every group, so a ranking or a change is never presented as
@@ -11,7 +13,10 @@ const DAY_MS = 24 * HOUR_MS;
 // empty string.
 const valueOf = (item, dimension) =>
   dimension.startsWith("metadata.") ? (item.has_value ? item.metadata_value ?? "" : null) : item[dimension];
-const byKey = (groupBy) => (item) => JSON.stringify(groupBy.map((dimension) => valueOf(item, dimension) ?? null));
+// Groups are joined by the raw group values the validator kept (GROUP_KEY),
+// never by display values, which can be null for text that is unsafe to show.
+const byKey = (groupBy) => (item) =>
+  item[GROUP_KEY] ?? JSON.stringify(groupBy.map((dimension) => valueOf(item, dimension) ?? null));
 const desc = (pick) => (a, b) => {
   const left = pick(a);
   const right = pick(b);

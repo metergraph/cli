@@ -763,7 +763,7 @@ function syntheticMetadataAggregates(provenance, query) {
   const absent = dimension === "metadata.activity_name";
   const groups = absent
     ? [{ value: null, calls: 64, cost_usd: 0.064 }]
-    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }];
+    : [...PROMPT_GROUPS, { value: null, calls: 7, cost_usd: 0.007 }].sort((a, b) => b.cost_usd - a.cost_usd);
   const listed = groups.slice(0, limit);
   const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
   const metrics = (calls, cost) => ({
@@ -806,6 +806,10 @@ function syntheticMetadataAggregates(provenance, query) {
         matched: groups.length,
         totalsScope: "population",
       }),
+      rows: {
+        shape: "top_n", ordering: "cost_usd desc, calls desc, group key asc", returned: listed.length, limit,
+        truncated: listed.length < groups.length, matched: groups.length,
+      },
       reasons: [
         ...(listed.length < groups.length ? ["row_limit"] : []),
         "metadata_key_missing",
