@@ -598,6 +598,11 @@ Bounds and honesty rules:
     total is never split by provider. Usage rows are attributed per call.
   - A final `traces` page without `next_cursor` is still `complete: false` when the
     service reports any other reason, for example pending ingestion.
+  - The evidence must describe the document it arrives in, or the read exits 11
+    with `usage_response_invalid` or `traces_response_invalid`. Coverage must
+    match the returned rows, limit, truncation, cursor and requested days, and
+    pricing must account for every call in its row, trace or window. A traces
+    document must report trace-level, whole-trace attribution.
 - `GET /v1/agent/routes` takes no limit or window. The CLI validates every returned row,
   keeps the first `--limit`, and reports `server_rows`, `truncated` and
   `truncation: "local"`. Route descriptions, constraints and evaluation contract bodies

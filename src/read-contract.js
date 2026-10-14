@@ -317,15 +317,41 @@ function coverageOf(value, notices, reason) {
   };
 }
 
+// The coverage object must describe the document it arrived in: the same row
+// shape, totals scope, limit, returned count, truncation, cursor and
+// requested days. Stale or mismatched coverage fails closed rather than
+// deciding completeness.
+function checkCoverage(coverage, expected, reason) {
+  if (coverage === null) return;
+  const rows = coverage.rows;
+  if (
+    rows.shape !== expected.shape ||
+    coverage.totals_scope !== expected.totalsScope ||
+    rows.limit !== expected.limit ||
+    rows.returned !== expected.returned ||
+    rows.truncated !== expected.truncated ||
+    coverage.next_cursor !== expected.nextCursor ||
+    (rows.matched !== null && rows.matched < rows.returned) ||
+    (coverage.requested_window !== null && coverage.requested_window.days !== expected.days)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+}
+
 const PRICING_COUNTS = ["priced_calls", "zero_cost_calls", "partial_calls", "unpriced_calls", "unknown_calls"];
 
-function pricingOf(value, notices, reason, { note = true } = {}) {
+// calls is the number of calls the pricing describes, when the document
+// states it. The four disjoint classes must account for exactly those calls,
+// so an undercounted pricing object can never present cost as exact.
+function pricingOf(value, notices, reason, { note = true, calls = null } = {}) {
   if (value === undefined || value === null) return null;
   if (
     !isObject(value) ||
     !PRICING_COUNTS.every((key) => isCount(value[key])) ||
     value.zero_cost_calls > value.priced_calls ||
-    (value.cost !== "exact" && value.cost !== "lower_bound")
+    (value.cost !== "exact" && value.cost !== "lower_bound") ||
+    (calls !== null &&
+      value.priced_calls + value.partial_calls + value.unpriced_calls + value.unknown_calls !== calls)
   ) {
     throw new Invalid("verification_failed", reason);
   }
@@ -337,8 +363,14 @@ function pricingOf(value, notices, reason, { note = true } = {}) {
   return { ...Object.fromEntries(PRICING_COUNTS.map((key) => [key, value[key]])), cost };
 }
 
-function attributionOf(value, reason) {
+// level, when given, is the only attribution level the read can have:
+// trace reads return whole-trace totals whatever the document claims.
+function attributionOf(value, reason, level = null) {
   if (value === undefined || value === null) return null;
+  if (level !== null && isObject(value) && (value.level !== level ||
+      (level === "trace" && (value.cost_basis !== "trace_total" || value.per_provider_exact !== false)))) {
+    throw new Invalid("verification_failed", reason);
+  }
   const nullableCount = (entry) => entry === null || isCount(entry);
   if (
     !isObject(value) ||
@@ -599,10 +631,15 @@ export function usageReport(body, ctx, request, notices) {
         output_tokens: row.output_tokens,
         avg_latency_ms: row.avg_latency_ms,
         p95_latency_ms: row.p95_latency_ms,
-        pricing: pricingOf(row.pricing, notices, reason, { note: false }),
+        pricing: pricingOf(row.pricing, notices, reason, { note: false, calls: row.calls }),
       };
     });
     const coverage = coverageOf(body.coverage, notices, reason);
+    checkCoverage(coverage, {
+      shape: "top_n", totalsScope: "population", limit: request.limit, returned: items.length,
+      truncated: body.truncated, nextCursor: null, days: request.days,
+    }, reason);
+    const population = populationTotalsOf(body.totals, reason);
     const complete = proof.complete && !body.truncated && (coverage === null || coverage.completeness === "complete");
     if (!proof.complete) notices.add("evidence_incomplete");
     if (body.truncated) notices.add("rows_truncated");
@@ -619,9 +656,9 @@ export function usageReport(body, ctx, request, notices) {
       items,
       totals: totalsOf(items, complete),
       coverage,
-      population_totals: populationTotalsOf(body.totals, reason),
-      pricing: pricingOf(body.pricing, notices, reason),
-      attribution: attributionOf(body.attribution, reason),
+      population_totals: population,
+      pricing: pricingOf(body.pricing, notices, reason, { calls: population === null ? null : population.calls }),
+      attribution: attributionOf(body.attribution, reason, "call"),
     };
   });
 }
@@ -774,7 +811,7 @@ export function tracesReport(body, ctx, request, notices) {
         // older service that does not flag them still shows a mixed trace.
         mixed_providers: row.mixed_providers === true || (Array.isArray(row.providers) && row.providers.length > 1),
         mixed_models: row.mixed_models === true || (Array.isArray(row.models) && row.models.length > 1),
-        pricing: pricingOf(row.pricing, notices, reason, { note: false }),
+        pricing: pricingOf(row.pricing, notices, reason, { note: false, calls: row.span_count }),
         link: link.value,
         link_workspace_bound: link.workspaceBound === true,
       };
@@ -782,10 +819,13 @@ export function tracesReport(body, ctx, request, notices) {
     if (!proof.complete) notices.add("evidence_incomplete");
     if (page.truncated) notices.add("more_pages");
     const coverage = coverageOf(body.coverage, notices, reason);
-    if (coverage !== null && coverage.next_cursor !== page.next_cursor) {
-      throw new Invalid("verification_failed", reason);
-    }
-    const pagePricing = pricingOf(body.pricing, notices, reason);
+    checkCoverage(coverage, {
+      shape: "page", totalsScope: "page", limit: page.limit, returned: traces.length,
+      truncated: page.truncated, nextCursor: page.next_cursor, days: request.days,
+    }, reason);
+    const pagePricing = pricingOf(body.pricing, notices, reason, {
+      calls: traces.reduce((sum, trace) => sum + trace.span_count, 0),
+    });
     if (traces.some((trace) => trace.mixed_providers)) notices.add("mixed_provider_traces");
     if (traces.some((trace) => trace.cost_usd === null)) notices.add("unpriced_traces");
     const missingLinks = traces.length === 0 || traces.some((trace) => trace.link === null);
@@ -811,14 +851,10 @@ export function tracesReport(body, ctx, request, notices) {
       complete: proof.complete && !page.truncated && (coverage === null || coverage.completeness === "complete"),
       coverage,
       pricing: pagePricing,
-      attribution: attributionOf(body.attribution, reason) ?? {
-        // Trace rows are whole-trace totals whether or not the service says so.
-        level: "trace",
-        cost_basis: "trace_total",
-        per_provider_exact: false,
-        mixed_provider_rows: traces.filter((trace) => trace.mixed_providers).length,
-        mixed_model_rows: traces.filter((trace) => trace.mixed_models).length,
-      },
+      // null when the service does not report it, like coverage and
+      // pricing. Each trace's mixed_providers flag and cost stay whole-trace
+      // facts either way.
+      attribution: attributionOf(body.attribution, reason, "trace"),
       empty: traces.length === 0,
       link_status: missingLinks ? "server_link_unavailable" :
         unboundLinks ? "workspace_binding_unavailable" : "available",

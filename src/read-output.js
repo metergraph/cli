@@ -78,8 +78,11 @@ function coverageLines(lines, report) {
   if (coverage) {
     const requested = coverage.requested_window;
     const effective = coverage.effective_window;
-    if (requested && effective && requested.since !== effective.since) {
-      lines.push(`Window read: ${effective.since} to ${effective.until} (requested from ${requested.since})`);
+    if (requested && effective && (requested.since !== effective.since || requested.until !== effective.until)) {
+      lines.push(
+        `Window read: ${effective.since} to ${effective.until} ` +
+          `(requested ${requested.since} to ${requested.until})`,
+      );
     }
     const matched = coverage.rows.matched === null ? "" : ` of ${coverage.rows.matched}`;
     // Pricing reasons are shown on the Pricing line instead.
