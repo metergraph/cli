@@ -95,7 +95,10 @@ Keep reports and screenshots in the internal tracker, not in this repository.
 
 The report lists the gates it did not check in `not_checked`. A coding agent
 finding and following the skill (`live_client_discovery`) and provider-billed
-traffic (`application_traffic`) are always in that list. After a release, repeat
+traffic (`application_traffic`) are always in that list. So are the two
+journeys the [release matrix](release-matrix.md#pending-release-checks) lists
+as pending (`remote_metadata_key_reads` and `usage_cost_questions`), until the
+harness gains scenarios for them. After a release, repeat
 installation with the **registry artifact** and compare its bytes/version to
 the reviewed source. For each client, confirm actual skill discovery and the
 setup flow in a clean environment. Separately verify hosted authentication,
