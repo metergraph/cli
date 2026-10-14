@@ -1021,3 +1021,63 @@ test("a change is unknown when either window's coverage is incomplete", async ()
   const both = compareReports(side(10, "complete"), side(20, "complete"), "previous", new Set());
   assert.deepEqual(both.totals.cost_change, { delta: -10, percent: -50 });
 });
+
+test("unrequested filters, inverted coverage, unreconciled pricing, samples and no-value rows are refused", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite, reason = "usage_response_invalid") => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, reason);
+    };
+    const coverage = (doc, change) => ({ ...doc, coverage: { ...doc.coverage, ...change(doc.coverage) } });
+    // A status filter the CLI never sent.
+    await refused(["--group-by", "model"], (doc) => coverage(doc, (value) => ({ filters: { ...value.filters, status: "error" } })), "filter_mismatch");
+    // An effective window that starts after it ends.
+    await refused(["--group-by", "model"], (doc) => coverage(doc, (value) => ({
+      reasons: [...value.reasons, "retention_clipped"],
+      effective_window: { ...value.effective_window, since: new Date(Date.parse(value.effective_window.until) + 86400000).toISOString() },
+    })), "window_mismatch");
+    // Row pricing classes that do not add up to the population's.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc,
+      pricing: { ...doc.pricing, priced_calls: doc.pricing.priced_calls - 1, unpriced_calls: doc.pricing.unpriced_calls + 1, cost: "lower_bound" },
+    }));
+    // Row latency samples that do not add up to the population's.
+    await refused(["--group-by", "model"], (doc) => ({
+      ...doc, totals: { ...doc.totals, latency: { ...doc.totals.latency, samples: doc.totals.latency.samples - 1 } },
+    }));
+    // A no-value row that disagrees with the missing and ineligible buckets.
+    await refused(["--group-by", "metadata.prompt_id"], (doc) => ({
+      ...doc,
+      metadata_groups: {
+        ...doc.metadata_groups,
+        unlisted: {
+          ...doc.metadata_groups.unlisted,
+          missing_key: { calls: doc.metadata_groups.unlisted.missing_key.calls + 1, cost_usd: doc.metadata_groups.unlisted.missing_key.cost_usd },
+          other_values: doc.metadata_groups.unlisted.other_values,
+        },
+      },
+      totals: { ...doc.totals },
+    }));
+  });
+});
+
+test("only a window that ended within the hour before midnight may carry yesterday's date", async () => {
+  const { usageAggregatesReport } = await import("../src/read-contract.js");
+  const doc = aggregateFixture("route-today");
+  const ctx = { workspaceId: "00000000-0000-4000-8000-00000000c0de", profile: "local", origin: "http://127.0.0.1:9" };
+  const request = (requestedAt) => ({
+    days: 1, since: null, until: null, limit: 50, groupBy: ["route"], metadata: null,
+    filters: { route: null, provider: null, model: null, environment: null }, requestedAt,
+  });
+  const until = Date.parse(doc.window.until);
+  const nextMidnight = Math.floor(until / 86400000) * 86400000 + 86400000;
+  // 30 minutes after midnight: a window ending 23 hours earlier is stale.
+  const stale = usageAggregatesReport(doc, ctx, request(nextMidnight + 30 * 60000), new Set());
+  assert.deepEqual([stale.ok, stale.reason], [false, "window_mismatch"]);
+  // The same day: accepted.
+  const fresh = usageAggregatesReport(doc, ctx, request(until + 1000), new Set());
+  assert.equal(fresh.ok, true, fresh.reason);
+});

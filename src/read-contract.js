@@ -667,8 +667,10 @@ function usageWindow(value, request, reason) {
   if (value.until_is_request_time && request.requestedAt !== undefined && request.requestedAt !== null) {
     const today = utcMidnight(request.requestedAt);
     const day = utcMidnight(until);
-    const nearMidnight = request.requestedAt - today < HOUR_MS;
-    if (day !== today && !(nearMidnight && day === today - DAY_MS)) {
+    // The previous UTC day only for a window that ended within the hour before
+    // this request (clock skew around midnight), never a day-old response.
+    const justBeforeMidnight = day === today - DAY_MS && request.requestedAt - until <= HOUR_MS;
+    if (day !== today && !justBeforeMidnight) {
       throw new Invalid("verification_failed", "window_mismatch");
     }
   }
@@ -709,6 +711,12 @@ function checkUsageFilters(raw, request, notices) {
     new Set(left).size === left.length &&
     left.length === right.length &&
     left.every((entry) => right.includes(entry));
+  // Filters grouped usage never sends must not be reported as applied.
+  for (const [key, entry] of Object.entries(echoed)) {
+    if (!["route", "provider", "model", "environments", "metadata"].includes(key) && entry !== null && entry !== undefined) {
+      throw new Invalid("verification_failed", "filter_mismatch");
+    }
+  }
   for (const key of ["route", "provider", "model"]) {
     const asked = request.filters[key];
     const got = echoed[key] ?? null;
@@ -736,7 +744,7 @@ function checkUsageFilters(raw, request, notices) {
 // past the limit (other_values), calls without the key (missing_key) and
 // calls with a non-string or oversize value (ineligible_value) add up to the
 // population exactly; a document where they do not is refused.
-function metadataGroupsOf(value, items, population, dimension, reason, { truncated, matched }) {
+function metadataGroupsOf(value, items, population, dimension, reason, { truncated, matched, onlyDimension }) {
   const key = dimension.slice(METADATA_DIMENSION.length);
   const bucket = (entry, withGroups = false) => {
     if (!isObject(entry) || !isCount(entry.calls) || !isAmount(entry.cost_usd) || (withGroups && !isCount(entry.groups))) {
@@ -779,6 +787,21 @@ function metadataGroupsOf(value, items, population, dimension, reason, { truncat
     (other.calls === 0 && other.cost_usd !== 0) ||
     (!truncated && other.groups !== 0) ||
     (matched !== null && other.groups > matched - items.length)
+  ) {
+    throw new Invalid("verification_failed", reason);
+  }
+  // The listed no-value rows are those buckets' calls: all of them when
+  // nothing was cut or the key is the only dimension, never more otherwise.
+  const noValue = items.filter((item) => !item.has_value);
+  const noValueCalls = noValue.reduce((sum, item) => sum + item.calls, 0);
+  const noValueCost = noValue.reduce((sum, item) => sum + item.cost_usd, 0);
+  const bucketCalls = unlisted.missing_key.calls + unlisted.ineligible_value.calls;
+  const bucketNoValueCost = unlisted.missing_key.cost_usd + unlisted.ineligible_value.cost_usd;
+  const whole = !truncated || (onlyDimension && noValue.length > 0);
+  if (
+    whole
+      ? noValueCalls !== bucketCalls || Math.abs(noValueCost - bucketNoValueCost) > costTolerance(noValue.length + 2)
+      : noValueCalls > bucketCalls || noValueCost - bucketNoValueCost > costTolerance(noValue.length + 2)
   ) {
     throw new Invalid("verification_failed", reason);
   }
@@ -834,6 +857,7 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       Date.parse(requested.until) !== Date.parse(span.until) ||
       Date.parse(effective.until) !== Date.parse(span.until) ||
       Date.parse(effective.since) < Date.parse(span.since) ||
+      Date.parse(effective.since) > Date.parse(effective.until) ||
       (Date.parse(effective.since) !== Date.parse(span.since) && !coverage.reasons.includes("retention_clipped"))
     ) {
       throw new Invalid("verification_failed", "window_mismatch");
@@ -932,9 +956,23 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     }
     // Every group set must reconcile with the population: an untruncated one
     // exactly (counts) or within rounding (cost), a truncated one never above it.
-    const sumOf = (field) => items.reduce((sum, item) => sum + item[field], 0);
+    const sumOf = (field) =>
+      items.reduce((sum, item) => sum + (field === "latency_samples_" ? item.latency.samples : item[field]), 0);
     for (const field of ["error_calls", ...TOKEN_COUNTS]) {
       if (truncated ? sumOf(field) > population[field] : sumOf(field) !== population[field]) {
+        throw new Invalid("verification_failed", reason);
+      }
+    }
+    // Latency samples and pricing classes add up the same way.
+    const pairs = [[sumOf("latency_samples_"), population.latency.samples]];
+    const groupPricing = body.pricing;
+    for (const key of PRICING_COUNTS) {
+      if (isObject(groupPricing) && items.every((item) => item.pricing)) {
+        pairs.push([items.reduce((sum, item) => sum + item.pricing[key], 0), groupPricing[key]]);
+      }
+    }
+    for (const [listed, whole] of pairs) {
+      if (!isCount(whole) || (truncated ? listed > whole : listed !== whole)) {
         throw new Invalid("verification_failed", reason);
       }
     }
@@ -960,7 +998,9 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (span.until_is_request_time && span.partial_days.length > 0) notices.add("current_day_partial");
     if (coverage.reasons.some((code) => METADATA_REASONS.has(code))) notices.add("metadata_values_missing");
     if (codes.some((entry) => entry.code === "metadata_key_mostly_missing")) notices.add("metadata_key_mostly_missing");
-    const metadataGroups = metadataDimension === null ? null : metadataGroupsOf(body.metadata_groups, items, population, metadataDimension, reason, { truncated, matched });
+    const metadataGroups = metadataDimension === null ? null : metadataGroupsOf(body.metadata_groups, items, population, metadataDimension, reason, {
+          truncated, matched, onlyDimension: request.groupBy.length === 1,
+        });
     // Grouped usage is attributed per call; anything else is not the promised split.
     const groupedAttribution = attributionOf(body.attribution, reason, "call");
     if (
