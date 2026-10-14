@@ -55,7 +55,12 @@ function assertEnvelope(result, fixtureName) {
   assert.equal(report.source, "usage_aggregates");
   assert.equal(report.window.timezone, "UTC");
   assert.equal(report.window.since, doc.window.since);
-  assert.equal(report.window.until, doc.window.until);
+  if (doc.window.until_is_request_time) {
+    // The replay ends a "now" window at the replay's request time.
+    assert.ok(Math.abs(Date.parse(report.window.until) - Date.now()) < 5 * 60 * 1000);
+  } else {
+    assert.equal(report.window.until, doc.window.until);
+  }
   // Parity with the service's own read: same totals, groups and window.
   assert.equal(report.totals.calls, doc.totals.calls);
   assert.equal(report.totals.error_calls, doc.totals.error_calls);
@@ -335,8 +340,21 @@ test("environment filters and an environment-restricted grant are reported, not 
     const restricted = await usage(box, server, ["--group-by", "provider"]);
     assert.equal(restricted.run.code, 11, "a document for another workspace must be refused");
     server.behavior.usage = (doc) => {
+      // The restricted key's recorded document, ending at this replay's
+      // request time like the document it replaces.
       const recordedDoc = aggregateFixture("provider-prod-key");
-      return { ...recordedDoc, provenance: doc.provenance };
+      return {
+        ...recordedDoc,
+        provenance: doc.provenance,
+        window: doc.window,
+        completeness: doc.completeness,
+        coverage: {
+          ...recordedDoc.coverage,
+          as_of: doc.coverage.as_of,
+          requested_window: doc.coverage.requested_window,
+          effective_window: doc.coverage.effective_window,
+        },
+      };
     };
     const own = await usage(box, server, ["--group-by", "provider"]);
     assert.equal(own.run.code, 0, own.run.stdout);
@@ -1064,7 +1082,7 @@ test("unrequested filters, inverted coverage, unreconciled pricing, samples and 
   });
 });
 
-test("only a window that ended within the hour before midnight may carry yesterday's date", async () => {
+test("a window ending now must end within the clock-skew bound of the request", async () => {
   const { usageAggregatesReport } = await import("../src/read-contract.js");
   const doc = aggregateFixture("route-today");
   const ctx = { workspaceId: "00000000-0000-4000-8000-00000000c0de", profile: "local", origin: "http://127.0.0.1:9" };
@@ -1077,7 +1095,36 @@ test("only a window that ended within the hour before midnight may carry yesterd
   // 30 minutes after midnight: a window ending 23 hours earlier is stale.
   const stale = usageAggregatesReport(doc, ctx, request(nextMidnight + 30 * 60000), new Set());
   assert.deepEqual([stale.ok, stale.reason], [false, "window_mismatch"]);
-  // The same day: accepted.
+  // Hours later on the same UTC day: also stale.
+  const sameDay = usageAggregatesReport(doc, ctx, request(Math.min(until + 3 * 3600000, nextMidnight - 1000)), new Set());
+  assert.deepEqual([sameDay.ok, sameDay.reason], [false, "window_mismatch"]);
+  // Within the bound: accepted.
   const fresh = usageAggregatesReport(doc, ctx, request(until + 1000), new Set());
   assert.equal(fresh.ok, true, fresh.reason);
+});
+
+test("latency needs samples both ways, zero-cost pricing costs nothing, top-N has no cursor, comparisons follow --sort", async () => {
+  await withSignedIn(async (server, box) => {
+    const refused = async (args, rewrite) => {
+      server.behavior.usage = rewrite;
+      const { run, result } = await usage(box, server, args);
+      server.behavior.usage = (doc) => doc;
+      assert.equal(run.code, 11, run.stdout);
+      assert.equal(result.error.reason, "usage_response_invalid");
+    };
+    const item0 = (doc, change) => ({ ...doc, items: [{ ...doc.items[0], ...change(doc.items[0]) }, ...doc.items.slice(1)] });
+    await refused(["--group-by", "model"], (doc) => item0(doc, (item) => ({ latency: { ...item.latency, avg_ms: null } })));
+    await refused(["--group-by", "route", "--today"], (doc) => item0(doc, (item) => ({
+      pricing: { ...item.pricing, zero_cost_calls: item.pricing.priced_calls },
+    })));
+    await refused(["--group-by", "model"], (doc) => ({ ...doc, coverage: { ...doc.coverage, next_cursor: "abc" } }));
+
+    const { run, result } = await usage(box, server, ["--group-by", "route", "--today", "--compare", "previous", "--sort", "p95-latency"]);
+    assert.equal(run.code, 0, run.stdout);
+    const ranked = result.data.result.items.map((item) => item.route);
+    const compared = result.data.result.comparison.items.slice(0, ranked.length).map((item) => item.route);
+    assert.deepEqual(compared, ranked);
+    // p95 order differs from the service's cost order here, so this proves the sort applied.
+    assert.notDeepEqual(ranked, ["support", "research", "classifier"]);
+  });
 });

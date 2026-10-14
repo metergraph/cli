@@ -275,7 +275,8 @@ export async function runRead(options) {
         return end("verification_failed", "filter_mismatch");
       }
       for (const token of priorNotices) if (token !== "current_day_partial") notices.add(`prior_${token}`);
-      report = { ...report, comparison: compareReports(current.value, prior.value, options.grouped.compare, notices) };
+      // The ranked report, so comparison rows follow the requested --sort.
+      report = { ...report, comparison: compareReports(report, prior.value, options.grouped.compare, notices) };
     }
     return end("ok", null, report);
   } catch (error) {

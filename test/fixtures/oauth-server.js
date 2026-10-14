@@ -908,8 +908,36 @@ function sameAggregateQuery(recorded, query) {
   );
 }
 
+// A recorded window that ended at request time ends at this replay's request
+// time instead, as the service would answer now; only those end times move.
+function atRequestTime(doc, until) {
+  const days = (since) => (Date.parse(until) - Date.parse(since)) / DAY_MS;
+  const coverage = doc.coverage;
+  return {
+    ...doc,
+    window: { ...doc.window, until },
+    coverage: {
+      ...coverage,
+      as_of: until,
+      requested_window: { ...coverage.requested_window, until, days: days(coverage.requested_window.since) },
+      effective_window: { ...coverage.effective_window, until, days: days(coverage.effective_window.since) },
+    },
+    completeness: doc.completeness ? { ...doc.completeness, to: until } : doc.completeness,
+  };
+}
+
 export function usageAggregatesDocument(provenance, query) {
-  const entry = AGGREGATE_PARITY.find((recorded) => sameAggregateQuery(recorded.http_query, query));
+  let entry = AGGREGATE_PARITY.find((recorded) => sameAggregateQuery(recorded.http_query, query));
+  // The prior window "to the same elapsed time" ends wherever the current
+  // replay ended; match the recorded one by its start and end day.
+  let explicitUntil = null;
+  if (entry === undefined && query.has("until")) {
+    entry = AGGREGATE_PARITY.find((recorded) =>
+      recorded.fixture === "compare-prior-same-time" &&
+      sameAggregateQuery({ ...recorded.http_query, until: query.get("until") }, query) &&
+      recorded.http_query.until.slice(0, 10) === new Date(Date.parse(query.get("until"))).toISOString().slice(0, 10));
+    if (entry !== undefined) explicitUntil = new Date(Date.parse(query.get("until"))).toISOString();
+  }
   if (entry === undefined) {
     // A metadata grouping without a recorded document: the synthetic one.
     const dimensions = query.getAll("group_by");
@@ -917,10 +945,17 @@ export function usageAggregatesDocument(provenance, query) {
       ? syntheticMetadataAggregates(provenance, query)
       : null;
   }
-  const doc = aggregateFixture(entry.fixture);
+  let doc = aggregateFixture(entry.fixture);
+  if (doc.window.until_is_request_time) doc = atRequestTime(doc, new Date().toISOString());
+  if (explicitUntil !== null) doc = atRequestTime(doc, explicitUntil);
   return {
     ...doc,
-    provenance: { ...doc.provenance, workspace_id: provenance.workspace_id, deployment_profile: provenance.deployment_profile },
+    provenance: {
+      ...doc.provenance,
+      workspace_id: provenance.workspace_id,
+      deployment_profile: provenance.deployment_profile,
+      generated_at: new Date().toISOString(),
+    },
   };
 }
 

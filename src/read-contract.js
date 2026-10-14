@@ -564,6 +564,9 @@ const TOKEN_COUNTS = ["input_tokens", "output_tokens", "cache_read_tokens", "cac
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const utcMidnight = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
+// How far a window that ends "now" may be from this request: request latency
+// plus clock difference between this machine and the service.
+const REQUEST_TIME_SKEW_MS = 15 * 60 * 1000;
 
 const P95_METHOD = "histogram_estimate";
 // The service rounds amounts to 8 decimals; a product or sum of n rounded
@@ -602,7 +605,8 @@ function usageMetrics(row, reason) {
     !isCount(latency.samples) ||
     latency.samples > row.calls ||
     // Latency measured from no calls is no latency.
-    (latency.samples === 0 && (latency.avg_ms !== null || latency.p95_ms !== null)) ||
+    (latency.samples === 0) !== (latency.avg_ms === null) ||
+    (latency.samples === 0) !== (latency.p95_ms === null) ||
     // cost_per_call_usd must be cost_usd / calls, to the service's 8-decimal rounding.
     (row.calls > 0 && Math.abs(row.cost_per_call_usd * row.calls - row.cost_usd) > costTolerance(row.calls))
   ) {
@@ -661,16 +665,10 @@ function usageWindow(value, request, reason) {
     throw new Invalid("verification_failed", "window_mismatch");
   }
   // A window that ends at the request time (a preset, or --since without
-  // --until) must end on the UTC day of this request (or, within an hour
-  // after midnight, the day before), so a response kept from an earlier day
-  // is never read as ending now.
+  // --until) must end within a bounded clock skew of this request, so a
+  // response kept from earlier is never read as ending now.
   if (value.until_is_request_time && request.requestedAt !== undefined && request.requestedAt !== null) {
-    const today = utcMidnight(request.requestedAt);
-    const day = utcMidnight(until);
-    // The previous UTC day only for a window that ended within the hour before
-    // this request (clock skew around midnight), never a day-old response.
-    const justBeforeMidnight = day === today - DAY_MS && request.requestedAt - until <= HOUR_MS;
-    if (day !== today && !justBeforeMidnight) {
+    if (Math.abs(until - request.requestedAt) > REQUEST_TIME_SKEW_MS) {
       throw new Invalid("verification_failed", "window_mismatch");
     }
   }
@@ -842,7 +840,13 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (!isObject(body.coverage)) throw new Invalid("verification_failed", reason);
     const readEnvironments = checkUsageFilters(body.coverage, request, notices);
     const coverage = coverageOf(body.coverage, notices, reason);
-    if (coverage.rows.shape !== "top_n" || coverage.totals_scope !== "population" || coverage.rows.limit !== request.limit) {
+    if (
+      coverage.rows.shape !== "top_n" ||
+      coverage.totals_scope !== "population" ||
+      coverage.rows.limit !== request.limit ||
+      // A top-N read has no pages.
+      coverage.next_cursor !== null
+    ) {
       throw new Invalid("verification_failed", reason);
     }
     // Coverage must describe the window validated above: the same requested
@@ -962,6 +966,16 @@ export function usageAggregatesReport(body, ctx, request, notices) {
       if (truncated ? sumOf(field) > population[field] : sumOf(field) !== population[field]) {
         throw new Invalid("verification_failed", reason);
       }
+    }
+    // Calls all priced at zero cost nothing.
+    const allZero = (pricing, cost) =>
+      pricing &&
+      pricing.priced_calls > 0 &&
+      pricing.priced_calls === pricing.zero_cost_calls &&
+      pricing.partial_calls + pricing.unpriced_calls + pricing.unknown_calls === 0 &&
+      cost !== 0;
+    if (allZero(body.pricing, population.cost_usd) || items.some((item) => allZero(item.pricing, item.cost_usd))) {
+      throw new Invalid("verification_failed", reason);
     }
     // Latency samples and pricing classes add up the same way.
     const pairs = [[sumOf("latency_samples_"), population.latency.samples]];
