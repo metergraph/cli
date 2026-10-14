@@ -179,3 +179,71 @@ test("malformed coverage fails closed", () => {
   const mismatch = tracesReport(page, CTX, { days: 7, limit: 2, route: null, status: null, cursor: null }, new Set());
   assert.deepEqual(mismatch, { ok: false, outcome: "verification_failed", reason: "traces_response_invalid" });
 });
+
+test("pricing that does not account for every call fails closed instead of reading as exact", () => {
+  const body = fixture("usage-complete");
+  body.items[0].pricing = { priced_calls: 0, zero_cost_calls: 0, partial_calls: 0, unpriced_calls: 0, unknown_calls: 0, cost: "exact" };
+  assert.deepEqual(usageReport(body, CTX, { days: 7, limit: 3 }, new Set()),
+    { ok: false, outcome: "verification_failed", reason: "usage_response_invalid" });
+
+  const population = fixture("usage-complete");
+  population.pricing = { ...population.pricing, priced_calls: population.pricing.priced_calls - 1 };
+  assert.equal(usageReport(population, CTX, { days: 7, limit: 3 }, new Set()).ok, false);
+
+  const page = fixture("traces-mixed");
+  page.traces[0].pricing = { ...page.traces[0].pricing, unknown_calls: 0 };
+  const result = tracesReport(page, CTX, { days: 7, limit: 10, route: null, status: null, cursor: null }, new Set());
+  assert.deepEqual(result, { ok: false, outcome: "verification_failed", reason: "traces_response_invalid" });
+});
+
+test("a traces document claiming call-level or exact per-provider attribution fails closed", () => {
+  for (const attribution of [
+    { level: "call", cost_basis: "call", per_provider_exact: true, mixed_provider_rows: 0, mixed_model_rows: 0 },
+    { level: "trace", cost_basis: "trace_total", per_provider_exact: true, mixed_provider_rows: 1, mixed_model_rows: 1 },
+  ]) {
+    const body = { ...fixture("traces-mixed"), attribution };
+    const result = tracesReport(body, CTX, { days: 7, limit: 10, route: null, status: null, cursor: null }, new Set());
+    assert.equal(result.ok, false, JSON.stringify(attribution));
+  }
+  const usageBody = { ...fixture("usage-complete") };
+  usageBody.attribution = { ...usageBody.attribution, level: "trace", cost_basis: "trace_total", per_provider_exact: false };
+  assert.equal(usageReport(usageBody, CTX, { days: 7, limit: 3 }, new Set()).ok, false);
+});
+
+test("coverage that disagrees with the document it arrived in fails closed", () => {
+  const mutations = [
+    (c) => { c.rows.truncated = true; },
+    (c) => { c.rows.returned = 0; },
+    (c) => { c.rows.limit = 50; },
+    (c) => { c.rows.shape = "page"; },
+    (c) => { c.totals_scope = "returned_rows"; },
+    (c) => { c.requested_window.days = 30; },
+    (c) => { c.rows.matched = 1; },
+  ];
+  for (const mutate of mutations) {
+    const body = fixture("usage-complete");
+    mutate(body.coverage);
+    assert.deepEqual(usageReport(body, CTX, { days: 7, limit: 3 }, new Set()),
+      { ok: false, outcome: "verification_failed", reason: "usage_response_invalid" }, mutate.toString());
+  }
+  const page = fixture("traces-page-1");
+  page.coverage.rows.truncated = false;
+  assert.equal(tracesReport(page, CTX, { days: 7, limit: 2, route: null, status: null, cursor: null }, new Set()).ok, false);
+});
+
+test("a changed window end is shown, and legacy trace attribution stays null", () => {
+  const body = fixture("usage-capped");
+  body.coverage.effective_window.until = "2026-10-13T00:00:00+00:00";
+  const notices = new Set();
+  const report = usageReport(body, CTX, { days: 7, limit: 2 }, notices).value;
+  assert.match(textOf("usage", report, notices),
+    /Window read: .* to 2026-10-13T00:00:00\+00:00 \(requested .* to .*\)/);
+
+  const legacy = fixture("traces-mixed");
+  for (const key of ["coverage", "pricing", "attribution"]) delete legacy[key];
+  for (const trace of legacy.traces) delete trace.pricing;
+  const old = traces(legacy, { days: 7, limit: 10 }).report;
+  assert.equal(old.attribution, null);
+  assert.equal(old.coverage, null);
+  assert.equal(old.traces.find((trace) => trace.trace_id === "trace-mixed").mixed_providers, true);
+});

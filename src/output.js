@@ -619,7 +619,7 @@ export function helpText(topic, style = PLAIN) {
       "",
       "Options:",
     );
-    lines.push(...optionLines(entry.options, 18));
+    lines.push(...optionLines(entry.options, 25));
     if (entry.examples) {
       lines.push("", "Examples (add --json for one JSON line):");
       for (const [question, command] of entry.examples) lines.push(`  ${question}:`, `    ${command}`);

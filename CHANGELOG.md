@@ -6,8 +6,8 @@
 ## Unreleased
 
 - `usage` answers cost questions with grouped usage from the service: `--group-by`
-  any of provider, model, route and UTC day, plus one `metadata.KEY`, exact `--route`, `--provider`, `--model`
-  and `--environment` filters, and a UTC window (`--days N`, `--today`, or `--since`
+  any of provider, model, route and UTC day, plus one `metadata.KEY`, exact `--route`,
+  `--provider`, `--model`, `--environment` and `--metadata` filters, and a UTC window (`--days N`, `--today`, or `--since`
   with `--until`). Groups are attributed per call, totals cover every matching call,
   and coverage, pricing and attribution are shown in text and JSON. `--sort` ranks by
   cost, cost per call, calls, errors, mean latency or estimated p95 latency (labelled
@@ -23,6 +23,18 @@
   missing or unknown ones, and mixed-provider traces whose cost is never split by
   provider. A read the service reports as incomplete stays `complete: false` even on
   a last page without a cursor. Existing JSON fields are unchanged.
+- Read commands (`status`, `context`, `capabilities`, `usage`, `routes`, `traces`)
+  accept a coding-agent key with Metadata access from `METERGRAPH_AGENT_TOKEN`, or
+  from a private file named by `--agent-token-file`, when browser sign in cannot
+  finish where the agent runs. The key is verified (origin, workspace, exactly the
+  Metadata scope, no content access) before any read, is never accepted as an
+  argument, and is never written or printed. New options `--url` and `--workspace`
+  pin where it is sent and which workspace it must be for; output adds `credential`
+  and `environment`.
+- `login`, `setup` and the read commands tell a local container from an SSH session,
+  a cloud workspace and CI. Where sign in cannot finish they return a structured
+  `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
+  person's steps, the Keys page and the commands to run afterwards.
 - `usage` and `traces` take `--metadata KEY=VALUE` (repeatable, up to 5 keys, all must
   match) and `--metadata-json JSON` to keep only calls whose SDK tags have exactly
   those string values. `usage --group-by-metadata KEY` groups the window by one key,
@@ -36,19 +48,6 @@
 - Human `usage` and `traces` output no longer repeats a notice that restates a printed
   Coverage or Pricing line, and prints service warning codes once. `--json` is
   unchanged.
-- Read commands (`status`, `context`, `capabilities`, `usage`, `routes`, `traces`)
-  accept a coding-agent key with Metadata access from `METERGRAPH_AGENT_TOKEN`, or
-  from a private file named by `--agent-token-file`, when browser sign in cannot
-  finish where the agent runs. The key is verified (origin, workspace, exactly the
-  Metadata scope, no content access) before any read, is never accepted as an
-  argument, and is never written or printed. New options `--url` and `--workspace`
-  pin where it is sent and which workspace it must be for; output adds `credential`
-  and `environment`.
-- `login`, `setup` and the read commands tell a local container from an SSH session,
-  a cloud workspace and CI. Where sign in cannot finish they return a structured
-  `use_agent_key` (or, for setup, `run_on_local_machine`) next action with the
-  person's steps, the Keys page and the commands to run afterwards.
-
 - Human output (without `--json`) has a status headline with an icon, aligned fields
   and arrowed next steps. Color appears only on a terminal and respects `NO_COLOR`
   and `FORCE_COLOR`. Prose wraps to the terminal width; piped output keeps one line
