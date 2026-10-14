@@ -271,7 +271,10 @@ What `login` does, in order:
 
 1. Refuses cloud runtimes, SSH sessions, cloud development environments and CI (by the
    presence of variables such as `SSH_CONNECTION`, `CODESPACES` or `CI`; values are
-   never read into output) before any request, listener or file write.
+   never read into output) before any request, listener or file write, with a
+   `use_agent_key` next action (see [Where the agent runs](#where-the-agent-runs)). A
+   local container (`/.dockerenv`, `/run/.containerenv`, `REMOTE_CONTAINERS`,
+   `DEVCONTAINER` or `container`, with no remote marker) is not treated as remote.
 2. Reads the project binding. A project bound to another origin or workspace is refused
    with exit code 8 unless you pass `--reconnect`. A project that is already signed in
    and still verified is left as it is, with no browser and no new client.
@@ -373,7 +376,8 @@ try hosted login or ingest bootstrap against OSS. Remote runtimes are handed
 off to a local machine, with no implicit tunnel or credential forwarding. A
 session with SSH, cloud workspace or CI markers is refused as
 `run_on_local_machine` before any request is sent or the agent token file is
-read.
+read. Its next action names the local command and, under `metadata_reads`, the
+`use_agent_key` steps for Metadata reads from the remote environment.
 
 The hosted service and the released customer-local bundle are the release
 targets. The `byoc` and `oss` routes are implemented and covered by synthetic
@@ -523,10 +527,53 @@ repository, so each has its own project binding and private `.env`; pass the
 same `--workspace UUID` each time to pin the workspace; and give each
 repository its own identity.
 
+### Where the agent runs
+
+`login`, `setup` and the read commands classify where they run, report it as
+`data.environment`, and give one recommended sequence for each:
+
+| `environment` | How it is recognized | Recommended sequence |
+| --- | --- | --- |
+| `local_shell` | No marker below | `metergraph setup --runtime local --client C --json --no-browser`, rerun after each approval, then `metergraph status --json`. For an existing workspace, `metergraph login --runtime local --workspace UUID --json --no-browser`. |
+| `local_container` | `/.dockerenv`, `/run/.containerenv`, `REMOTE_CONTAINERS`, `DEVCONTAINER` or `container` | As `local_shell`. The browser must reach the container's loopback callback (a forwarded port). If it cannot, use a Metadata key as below; `browser_unavailable` names that `alternative`. |
+| `ssh_session` | `SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY` | A Metadata key (below). `login` exits 6 `ssh_session` and `setup` exits 6 `run_on_local_machine`, each with a structured next action. |
+| `cloud_workspace` | `CODESPACES`, `GITPOD_WORKSPACE_ID` or `CLOUD_SHELL` | A Metadata key. `login` exits 6 `cloud_workspace`. |
+| `ci` | `CI` | A Metadata key stored as a CI secret. `login` exits 6 `ci_environment`. |
+
+Remote markers win over container markers. Only the presence of a variable or file is
+checked; no value is read into output.
+
+The `use_agent_key` next action is the handoff a person completes on their own device:
+
+```json
+{
+  "kind": "use_agent_key",
+  "environment": "ssh_session",
+  "credential_env": "METERGRAPH_AGENT_TOKEN",
+  "person_steps": [
+    { "action": "sign_up_or_sign_in", "url": "https://app.metergraph.dev/v1/auth/signup?return_to=%2F%23api-keys" },
+    { "action": "create_metadata_key", "url": "https://app.metergraph.dev/#api-keys" },
+    { "action": "store_secret", "name": "METERGRAPH_AGENT_TOKEN" }
+  ],
+  "then_run": ["metergraph status --json", "metergraph usage --json"],
+  "message": "...",
+  "alternative": { "kind": "run_on_local_machine", "command": "metergraph login --runtime local" },
+  "url": "https://www.metergraph.dev/docs/guides/agent-access/"
+}
+```
+
+The person chooses the workspace by creating the key in it. For a deployment other
+than the hosted service there is no sign up page: the first step is
+`request_invitation`, and the agent also sets `METERGRAPH_URL` (or passes `--url`).
+The CLI never claims a browser step happened: the next run verifies the result with
+the service.
+
 ### Read commands
 
-The read commands use the grant `login` saved for this project. They never open a
-browser, never sign in on their own and never request another scope. Each one:
+The read commands use the grant `login` saved for this project or, where there is none
+on this machine, a coding-agent key with Metadata access (see
+[Reads with a Metadata key](#reads-with-a-metadata-key)). They never open a browser,
+never sign in on their own and never request another scope. Each one:
 
 - reads `.metergraph/project.json` and the saved grant, and refreshes the grant at most
   once, under the same lock and rules as `login` (an interrupted refresh is never
@@ -662,6 +709,50 @@ before the failure, and `notices` lists fixed tokens such as `rows_truncated`,
 `evidence_incomplete`, `routes_truncated_locally`, `unsafe_text_omitted` or
 `trace_links_unavailable`.
 
+#### Reads with a Metadata key
+
+For an agent where browser sign in cannot finish, a person creates a coding-agent key
+with Metadata access on the deployment's Keys page and gives it to the agent's
+environment as a secret. The CLI reads it only from:
+
+- `METERGRAPH_AGENT_TOKEN`, used when this project has no saved sign in on this machine;
+- `--agent-token-file PATH`, a private file checked like `setup`'s agent token file
+  (an absolute path with no symbolic link, a regular file owned by you with mode 0600
+  and one link, in a directory only you can write, holding one key). It is used even
+  when a saved sign in exists.
+
+A key is never accepted as an argument or on stdin, never written to a file and never
+printed. When a saved sign in exists and `METERGRAPH_AGENT_TOKEN` is set, the saved
+sign in is used and the notice `agent_key_not_used` says so.
+
+| Option or variable | Meaning |
+| --- | --- |
+| `--url ORIGIN` / `METERGRAPH_URL` | Where the key is sent for an unbound project. Default `https://app.metergraph.dev`. A bound project's origin must match, or the command exits 8 `bound_to_other_origin` with no request. |
+| `--workspace UUID` | The workspace the key must be for. A bound project pins its own. Without either, the key's own workspace is verified and used, with the notice `workspace_not_pinned`. |
+
+Before any read, in order and under one `--timeout-ms` deadline:
+
+1. A key in `METERGRAPH_AGENT_TOKEN` must be one token with no label, spaces or extra
+   lines (exit 2 `agent_token_malformed`, with no request).
+2. `GET /v1/deployment` with no credential must report a supported profile, and the
+   bound profile when there is a binding. A key file is opened only after this.
+3. `GET /v1/agent/workspace` and `GET /v1/agent/capabilities` with the key must show
+   exactly `agent:metadata`, no content access, the same profile and the pinned
+   workspace, as for a saved sign in.
+
+| Result | Exit | `next_action.kind` |
+| --- | --- | --- |
+| Key unknown, expired or revoked (401), also when revoked before the read | 12 `agent_key_rejected` | `replace_agent_key` |
+| Key valid but without Metadata access, such as an ingest key (403) | 15 `agent_key_insufficient_scope` | `replace_agent_key` |
+| Key broader than Metadata, such as a Debug key | 11 `scope_mismatch` | `use_metadata_only_key` |
+| Key for another workspace | 11 `workspace_context_mismatch` | `use_workspace_key` |
+| Key file not private or missing | 9 `agent_token_file_*` | `fix_agent_key` |
+
+Output reports `credential` as `agent_key` or `oauth_grant`. With no saved sign in and
+no key, reads exit 12 `not_signed_in` with `use_agent_key` in SSH sessions, cloud
+workspaces and CI, and with `login` (and the key handoff as its `alternative`)
+elsewhere.
+
 ## JSON output
 
 With `--json`, every command prints one line with the same top-level keys:
@@ -756,6 +847,7 @@ A successful `login`:
   "data": {
     "origin": "https://metergraph.example.com",
     "runtime": "local",
+    "environment": "local_shell",
     "deployment_profile": "managed",
     "workspace": { "id": "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01" },
     "scopes": ["agent:metadata"],
@@ -779,8 +871,10 @@ A successful `login`:
   is then `accepted`, `unconfirmed` or `not_attempted`).
 - `credential_protection` is `owner_only_file` or `dpapi`.
 - On failure `authenticated` and `configured` are `false`, `scopes` is empty, and
-  `next_action` is `null` or a handoff such as `connection_guide`, `reconnect` or
-  `no_browser`. With `--json --no-browser`, a sign in that needs approval returns
+  `next_action` is `null` or a handoff such as `use_agent_key`, `reconnect` or
+  `no_browser`. `environment` is one of the kinds in
+  [Where the agent runs](#where-the-agent-runs), or `declared_cloud` for
+  `--runtime cloud`. With `--json --no-browser`, a sign in that needs approval returns
   `action_required` with `status: "approval_pending"` and an `open_url` next action;
   see [Approval from an agent](#approval-from-an-agent).
 - The schema version `1` is the version of this CLI's own JSON output. It is unrelated
@@ -920,4 +1014,6 @@ CLI never assumes such a server is hosted.
 - They never follow a cursor or page on their own, and never widen a request: an
   unsupported option, an out of range value or a capability the grant lacks fails
   instead.
-- They accept no credential on the command line, in the environment or on stdin.
+- They accept no credential on the command line or on stdin. A coding-agent key comes
+  only from `METERGRAPH_AGENT_TOKEN` or a private `--agent-token-file`, and is never
+  written or printed.
