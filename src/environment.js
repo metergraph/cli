@@ -97,12 +97,18 @@ export function agentKeyAction(environment, origin) {
   }
   steps.push({ action: "create_metadata_key", url: pages.keys_url });
   steps.push({ action: "store_secret", name: AGENT_TOKEN_ENV });
+  // A key for a deployment other than the hosted service must only ever be
+  // sent there, so the commands name its origin; without it they would use
+  // the hosted default.
+  const hosted = origin === DEFAULT_ORIGIN;
+  const url = hosted ? "" : ` --url ${origin}`;
   return {
     kind: "use_agent_key",
     environment: environment.kind,
     credential_env: AGENT_TOKEN_ENV,
+    origin,
     person_steps: steps,
-    then_run: ["metergraph status --json", "metergraph usage --json"],
+    then_run: [`metergraph status${url} --json`, `metergraph usage${url} --json`],
     message:
       (environment.remote === false
         ? "If browser sign in cannot finish here, use a Metadata key instead. "
@@ -110,7 +116,11 @@ export function agentKeyAction(environment, origin) {
       "Ask the person to sign in on their own device, open the Keys page " +
       "in the workspace this agent should read, create a coding-agent key with Metadata access, and save it in " +
       `${where}. Do not ask them to paste the key into chat or a command. Then run the listed commands; ` +
-      "they verify the origin, workspace, scope and capabilities before reading.",
+      "they verify the origin, workspace, scope and capabilities before reading." +
+      (hosted
+        ? ""
+        : " On the open-source self-hosted server there is no Keys page: the operator provides one of its " +
+          "MG_AGENT_TOKENS values instead."),
     alternative: { kind: "run_on_local_machine", command: "metergraph login --runtime local" },
     url: CONNECTION_GUIDE_URL,
   };
@@ -120,11 +130,13 @@ export function agentKeyAction(environment, origin) {
 // application's own key and needs a local browser approval, so it runs on the
 // person's machine. Metadata reads can still use an agent key here; that key
 // is separate from the ingest key and never replaces it.
-export function remoteSetupAction(environment, origin) {
+// options are the parsed setup options; the command repeats the caller's
+// deployment, origin, workspace and skill choice so it runs as given.
+export function remoteSetupAction(environment, origin, options = {}) {
   return {
     kind: "run_on_local_machine",
     environment: environment.kind,
-    command: "metergraph setup --runtime local",
+    command: setupCommand(origin, options),
     message:
       "Setup approves an ingest key in a browser on the same machine as the CLI, so it cannot finish here. " +
       "Run it on the person's own machine, or follow the connection guide. For Metadata reads from this " +
@@ -132,4 +144,16 @@ export function remoteSetupAction(environment, origin) {
     metadata_reads: agentKeyAction(environment, origin),
     url: CONNECTION_GUIDE_URL,
   };
+}
+
+// Every value here is already validated by the argument parser: a fixed
+// deployment and client name, a normalized origin and a UUID.
+function setupCommand(origin, options) {
+  const parts = ["metergraph setup --runtime local"];
+  if (options.deployment && options.deployment !== "managed") parts.push(`--deployment ${options.deployment}`);
+  if (origin !== DEFAULT_ORIGIN) parts.push(`--url ${origin}`);
+  if (options.workspace) parts.push(`--workspace ${options.workspace}`);
+  if (options.skipSkill) parts.push("--skip-skill");
+  else parts.push(`--client ${options.client ?? "<codex|claude|cursor>"}`);
+  return parts.join(" ");
 }

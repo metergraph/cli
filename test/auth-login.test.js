@@ -385,7 +385,13 @@ test("cloud runtimes and remote sessions get a handoff before anything else, wit
     // A non-hosted origin has no sign up page: a person asks for an invitation.
     assert.deepEqual(next.person_steps.map((step) => step.action), ["request_invitation", "create_metadata_key", "store_secret"]);
     assert.equal(next.person_steps[1].url, "http://127.0.0.1:9/#api-keys");
-    assert.deepEqual(next.then_run, ["metergraph status --json", "metergraph usage --json"]);
+    // A non-hosted key is only ever sent to its own deployment, so the
+    // commands name it; the hosted default would be wrong.
+    assert.equal(next.origin, "http://127.0.0.1:9");
+    assert.deepEqual(next.then_run, [
+      "metergraph status --url http://127.0.0.1:9 --json",
+      "metergraph usage --url http://127.0.0.1:9 --json",
+    ]);
     assert.equal(next.alternative.command, "metergraph login --runtime local");
     assert.equal(fs.existsSync(box.config), false, "the config directory was created");
     assert.deepEqual(filesUnder(box.project), []);

@@ -246,7 +246,7 @@ function setupText(result, style) {
 // What an operator handoff is waiting for, in fixed text: each unconfirmed
 // prerequisite with its guidance, and the next action.
 function handoffLines(data, style) {
-  if (data?.status !== "operator_handoff") return [];
+  if (data?.status !== "operator_handoff" || data.next_action?.kind === "run_on_local_machine") return [];
   const lines = [];
   if (data.pending_prerequisites.length > 0) {
     lines.push("Confirm each prerequisite, then rerun with --confirm-prerequisites:");
