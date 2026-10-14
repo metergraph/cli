@@ -582,13 +582,13 @@ const PRICED = (calls) => ({
 
 // The shared coverage envelope, added only to metadata reads so the existing
 // read tests keep exercising a service that does not report coverage.
-function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope }) {
+function metadataCoverage(query, { shape, returned, limit, truncated, matched, totalsScope, ordering = null }) {
   return {
     as_of: new Date().toISOString(),
     requested_window: null,
     effective_window: null,
     filters: { environments: null, metadata: metadataEcho(query) },
-    rows: { shape, ordering: null, returned, limit, truncated, matched },
+    rows: { shape, ordering, returned, limit, truncated, matched },
     next_cursor: null,
     totals_scope: totalsScope,
     completeness: truncated ? "partial" : "complete",
@@ -799,6 +799,7 @@ function syntheticMetadataAggregates(provenance, query) {
     ],
     coverage: {
       ...metadataCoverage(query, {
+        ordering: "cost_usd desc, calls desc, group key asc",
         shape: "top_n",
         returned: listed.length,
         limit,

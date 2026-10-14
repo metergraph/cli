@@ -23,7 +23,7 @@ import {
   TRACES_DEFAULT_LIMIT,
   MAX_METADATA_FILTERS,
   MAX_METADATA_KEY_LENGTH,
-  MAX_METADATA_QUERY_LENGTH,
+  MAX_QUERY_LENGTH,
   MAX_METADATA_VALUE_LENGTH,
   USAGE_COMPARISONS,
   USAGE_DEFAULT_GROUP_BY,
@@ -32,7 +32,7 @@ import {
   USAGE_SORTS,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
-import { isCursor, isSafeFilter, metadataQueryValue } from "./read-contract.js";
+import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
 const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
@@ -527,7 +527,7 @@ function parseRead(command, values, flags, json, fail) {
   }
   const metadata = parseMetadata(values, fail);
   if (!metadata.ok) return metadata;
-  return {
+  const parsed = {
     ok: true,
     command,
     project: paths.project,
@@ -542,6 +542,16 @@ function parseRead(command, values, flags, json, fail) {
     groupByMetadata: null,
     json,
   };
+  // Measure the exact query the command will send (URLSearchParams encoding,
+  // every parameter), so an over-long one fails here and not after sign in.
+  const query = readQuery(parsed);
+  if (query !== null && query.toString().length > MAX_QUERY_LENGTH) {
+    return fail(
+      "query_too_long",
+      "The filters are too long to send in one request. Use fewer or shorter metadata values, or a shorter route or cursor.",
+    );
+  }
+  return parsed;
 }
 
 // Grouped usage: server-side groups by provider, model, route and UTC day,
@@ -645,14 +655,7 @@ function parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit 
   }
   const metadata = parseMetadata(values, fail);
   if (!metadata.ok) return metadata;
-  if (groupedQueryLength(groupBy, filters, metadata.filters, until !== null) > MAX_QUERY_LENGTH) {
-    return fail(
-      "query_too_long",
-      "The filters are too long to send in one request. Use fewer or shorter --route, --provider, --model, " +
-        "--environment or --metadata values.",
-    );
-  }
-  return {
+  const parsed = {
     ok: true,
     command: "usage",
     project: paths.project,
@@ -668,31 +671,27 @@ function parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit 
     grouped: { groupBy, filters, since, until, today, sort, compare },
     json,
   };
+  // Measure the exact query the read sends, and for --compare the prior
+  // window's query, which carries two timestamps.
+  const longest = [readQuery(parsed)];
+  if (compare !== null) {
+    const stamp = "0000-00-00T00:00:00.000Z";
+    longest.push(readQuery(parsed, { ...groupedRequest(parsed), days: null, since: stamp, until: stamp }));
+  }
+  if (longest.some((query) => query.toString().length > MAX_QUERY_LENGTH)) {
+    return fail(
+      "query_too_long",
+      "The filters are too long to send in one request. Use fewer or shorter --route, --provider, --model, " +
+        "--environment or --metadata values.",
+    );
+  }
+  return parsed;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const METADATA_PREFIX = "metadata.";
 const UTC_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ZONED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-
-// The transport refuses a query longer than this, so a request that would
-// exceed it is refused here as input, before any request.
-const MAX_QUERY_LENGTH = 2048;
-
-// The encoded length of the grouped usage query at its longest (a window of
-// two 24-character timestamps, or days, and the largest limit).
-function groupedQueryLength(groupBy, filters, metadataFilters, hasUntil) {
-  const query = new URLSearchParams();
-  for (const dimension of groupBy) query.append("group_by", dimension);
-  query.set("since", "0000-00-00T00:00:00.000Z");
-  if (hasUntil) query.set("until", "0000-00-00T00:00:00.000Z");
-  query.set("limit", "200");
-  for (const key of ["route", "provider", "model", "environment"]) {
-    for (const value of filters[key] ?? []) query.append(key, value);
-  }
-  if (metadataFilters) query.set("metadata", metadataQueryValue(metadataFilters));
-  return query.toString().length;
-}
 
 // A window bound as a UTC ISO 8601 string, or null. A date alone is 00:00
 // UTC; a timestamp must carry Z or an offset, so a local time is never read
@@ -778,9 +777,6 @@ function parseMetadata(values, fail) {
   const filters = entries
     .map(([key, value]) => ({ key, value }))
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  if (encodeURIComponent(metadataQueryValue(filters)).length > MAX_METADATA_QUERY_LENGTH) {
-    return fail("metadata_too_long", "The metadata filters are too long to send. Use fewer or shorter values.");
-  }
   return { ok: true, filters };
 }
 
@@ -820,10 +816,18 @@ const SENSITIVE_KEY_SUFFIXES = Object.freeze([
 ]);
 
 function metadataKeyProblem(key) {
-  if (typeof key !== "string" || key.length === 0 || key.length > MAX_METADATA_KEY_LENGTH || key.includes("\0")) {
+  // Keys are printed back (filter and grouping lines), so control and
+  // formatting characters that could rewrite terminal or log output are
+  // refused, as they are for every other printed name.
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > MAX_METADATA_KEY_LENGTH ||
+    hasUnsafeText(key)
+  ) {
     return {
       code: "invalid_metadata_key",
-      message: `must be 1 to ${MAX_METADATA_KEY_LENGTH} characters without NUL.`,
+      message: `must be 1 to ${MAX_METADATA_KEY_LENGTH} characters without control or formatting characters.`,
     };
   }
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");

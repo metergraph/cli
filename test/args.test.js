@@ -346,5 +346,20 @@ test("metadata filters are exact opaque pairs, sorted, bounded and never echoed 
     assert.ok(!parsed.message.includes("sk-live"), "an argument value was echoed");
   }
   const long = Array.from({ length: 5 }, (_, n) => ["--metadata", `k${n}=${"\"".repeat(400)}`]).flat();
-  assert.equal(parseArgs(["traces", ...long]).code, "metadata_too_long");
+  assert.equal(parseArgs(["traces", ...long]).code, "query_too_long");
+  // Measured with URLSearchParams, the encoding actually sent: 1,000
+  // apostrophes are 1,000 characters to encodeURIComponent but 3,000 here.
+  assert.equal(parseArgs(["traces", "--metadata", `k=${"'".repeat(1000)}`]).code, "query_too_long");
+  // A grouping key counts toward the same bound.
+  assert.equal(
+    parseArgs(["usage", "--group-by-metadata", "g".repeat(200), "--metadata", `k=${"'".repeat(600)}`]).code,
+    "query_too_long",
+  );
+  // Keys are printed, so terminal controls and bidi formatting are refused.
+  for (const key of ["a\nb", "a\u001b[31mb", "a\u202eb", "a\u0000b"]) {
+    assert.equal(parseArgs(["traces", "--metadata", `${key}=v`]).code, "invalid_metadata_key");
+    assert.equal(parseArgs(["usage", "--group-by-metadata", key]).code, "invalid_metadata_key");
+  }
+  // Values are never printed, so any text but NUL is a valid exact value.
+  assert.equal(parseArgs(["traces", "--metadata", "k=a\nb"]).ok, true);
 });

@@ -144,9 +144,10 @@ export const MAX_FILTER_LENGTH = 256;
 export const MAX_METADATA_FILTERS = 5;
 export const MAX_METADATA_KEY_LENGTH = 200;
 export const MAX_METADATA_VALUE_LENGTH = 1000;
-// The encoded metadata query value must leave room for the other parameters
-// inside the transport's 2048-character query bound.
-export const MAX_METADATA_QUERY_LENGTH = 1500;
+// The longest query string the transport sends. Read arguments are checked
+// against the exact query they produce, so a long one is an input error
+// before any request rather than a failure after sign in.
+export const MAX_QUERY_LENGTH = 2048;
 
 // One exit code per outcome. Documented in README.md; changing a value is a
 // breaking change for scripts. New outcomes are appended.

@@ -113,7 +113,7 @@ const isTimestamp = (value) =>
 const isDate = (value) =>
   typeof value === "string" && DATE.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
 
-function hasUnsafeText(value) {
+export function hasUnsafeText(value) {
   for (const char of value) {
     const code = char.codePointAt(0);
     if (UNSAFE_RANGES.some(([low, high]) => code >= low && code <= high)) return true;
@@ -133,6 +133,57 @@ export function isSafeFilter(value) {
 // already sorted by key, so the text is stable.
 export function metadataQueryValue(filters) {
   return JSON.stringify(Object.fromEntries(filters.map(({ key, value }) => [key, value])));
+}
+
+// The query string a read command sends, built only from validated options.
+// Argument validation measures this same object, so its length check and the
+// transport's agree exactly. The routes endpoint takes none.
+export function readQuery(options, request = null) {
+  if (options.command === "routes") return null;
+  if (options.command === "usage" && options.grouped) return groupedReadQuery(request ?? groupedRequest(options));
+  const query = new URLSearchParams();
+  query.set("days", String(options.days));
+  query.set("limit", String(options.limit));
+  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
+  if (options.command === "traces") {
+    if (options.route !== null) query.set("route", options.route);
+    if (options.status !== null) query.set("status", options.status);
+    if (options.cursor !== null) query.set("cursor", options.cursor);
+  }
+  return query;
+}
+
+// What a grouped usage document must echo back, from validated options.
+export function groupedRequest(options) {
+  const { groupBy, filters, since, until } = options.grouped;
+  return {
+    days: options.days,
+    since,
+    until,
+    limit: options.limit,
+    groupBy,
+    filters,
+    metadata: options.metadata ?? null,
+  };
+}
+
+// Grouped usage query: one group_by parameter per dimension (a metadata key
+// is sent whole, never split on a comma), a preset or an explicit window, and
+// one repeated parameter per exact filter value.
+function groupedReadQuery(request) {
+  const query = new URLSearchParams();
+  for (const dimension of request.groupBy) query.append("group_by", dimension);
+  if (request.days !== null) query.set("days", String(request.days));
+  else {
+    query.set("since", request.since);
+    if (request.until !== null) query.set("until", request.until);
+  }
+  query.set("limit", String(request.limit));
+  for (const key of ["route", "provider", "model", "environment"]) {
+    for (const value of request.filters[key] ?? []) query.append(key, value);
+  }
+  if (request.metadata) query.set("metadata", metadataQueryValue(request.metadata));
+  return query;
 }
 
 // Rows do not carry metadata, so the only proof a metadata filter applied is
@@ -748,6 +799,8 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (
       coverage.rows.returned !== items.length ||
       (matched !== null && matched < items.length) ||
+      // A top-N read has no cursor, so it fills the limit when more matched.
+      (matched !== null && items.length !== Math.min(request.limit, matched)) ||
       (coverage.rows.truncated === false && matched !== null && matched !== items.length) ||
       listedCalls > population.calls ||
       (!truncated && listedCalls !== population.calls)
@@ -766,10 +819,10 @@ export function usageAggregatesReport(body, ctx, request, notices) {
     if (costGap > costTolerance(items.length + 1) || (!truncated && -costGap > costTolerance(items.length + 1))) {
       throw new Invalid("verification_failed", reason);
     }
-    // The groups must come in the service's cost order; a cut list is only
-    // the highest-cost groups when that order is the one stated.
+    // The groups must come in the service's stated cost order; a cut list is
+    // only the highest-cost groups when that is the order.
     const costOrdered = items.every((item, index) => index === 0 || items[index - 1].cost_usd >= item.cost_usd);
-    if (!costOrdered || (truncated && coverage.rows.ordering !== AGGREGATE_ORDERING)) {
+    if (!costOrdered || coverage.rows.ordering !== AGGREGATE_ORDERING) {
       throw new Invalid("verification_failed", reason);
     }
     if (truncated) notices.add("groups_truncated");

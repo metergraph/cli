@@ -5,7 +5,8 @@ import { Stop, openStore, resolveConfigDir } from "./auth-store.js";
 import { MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
-  metadataQueryValue,
+  readQuery,
+  groupedRequest,
   CAPABILITY_NAMES,
   capabilitySummary,
   routesReport,
@@ -185,7 +186,7 @@ export async function runRead(options) {
       return read.validate(response.body, ctx, request, into);
     };
     if (!grouped) {
-      const report = await fetchOne(queryFor(options), requestOf(options), notices);
+      const report = await fetchOne(readQuery(options), requestOf(options), notices);
       if (!report.ok) return end(report.outcome, report.reason, report.detail ?? null);
       return end("ok", null, report.value);
     }
@@ -193,7 +194,7 @@ export async function runRead(options) {
     // Grouped usage: the current window, then for --compare the prior
     // window computed from the window the service actually read.
     const request = groupedRequest(options);
-    const current = await fetchOne(groupedQuery(options, request), request, notices);
+    const current = await fetchOne(readQuery(options, request), request, notices);
     if (!current.ok) return end(current.outcome, current.reason, current.detail ?? null);
     let report = rankReport(current.value, options.grouped.sort, notices);
     if (options.grouped.compare !== null) {
@@ -202,7 +203,7 @@ export async function runRead(options) {
       // The prior read's own coverage notices describe the prior window; they
       // are kept apart and summarised by the comparison.
       const priorNotices = new Set();
-      const prior = await fetchOne(groupedQuery(options, priorRequest), priorRequest, priorNotices);
+      const prior = await fetchOne(readQuery(options, priorRequest), priorRequest, priorNotices);
       if (!prior.ok) return end(prior.outcome, prior.reason, prior.detail ?? null);
       for (const token of priorNotices) if (token !== "current_day_partial") notices.add(`prior_${token}`);
       report = { ...report, comparison: compareReports(current.value, prior.value, options.grouped.compare, notices) };
@@ -231,54 +232,6 @@ function requestOf(options) {
   };
 }
 
-// What a grouped usage document must echo back.
-function groupedRequest(options) {
-  const { groupBy, filters, since, until } = options.grouped;
-  return {
-    days: options.days,
-    since,
-    until,
-    limit: options.limit,
-    groupBy,
-    filters,
-    metadata: options.metadata ?? null,
-  };
-}
-
-// Grouped usage query: one group_by parameter per dimension (a metadata key
-// is sent whole, never split on a comma), a preset or an explicit window, and
-// one repeated parameter per exact filter value.
-function groupedQuery(options, request) {
-  const query = new URLSearchParams();
-  for (const dimension of request.groupBy) query.append("group_by", dimension);
-  if (request.days !== null) query.set("days", String(request.days));
-  else {
-    query.set("since", request.since);
-    if (request.until !== null) query.set("until", request.until);
-  }
-  query.set("limit", String(request.limit));
-  for (const key of ["route", "provider", "model", "environment"]) {
-    for (const value of request.filters[key] ?? []) query.append(key, value);
-  }
-  if (request.metadata) query.set("metadata", metadataQueryValue(request.metadata));
-  return query;
-}
-
-// The query string is built here from validated options only. The routes
-// endpoint takes none.
-function queryFor(options) {
-  if (options.command === "routes") return null;
-  const query = new URLSearchParams();
-  query.set("days", String(options.days));
-  query.set("limit", String(options.limit));
-  if (options.metadata) query.set("metadata", metadataQueryValue(options.metadata));
-  if (options.command === "traces") {
-    if (options.route !== null) query.set("route", options.route);
-    if (options.status !== null) query.set("status", options.status);
-    if (options.cursor !== null) query.set("cursor", options.cursor);
-  }
-  return query;
-}
 
 // Unauthenticated GET /healthz on the bound origin, so status can tell an
 // unreachable service from a refused grant. status then checks GET

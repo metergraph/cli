@@ -640,7 +640,10 @@ and `usage` can group by one key.
 - `--metadata-json '{"a=b":"v"}'` gives the same filters as one JSON object, for a key
   that contains `=`. It cannot be combined with `--metadata`. Duplicate keys and
   non-string values exit 2.
-- Keys are 1 to 200 characters and values at most 1,000. Keys that look like
+- Keys are 1 to 200 characters without control or formatting characters (keys are
+  printed back), and values at most 1,000. The whole request query, measured as it is
+  sent, must fit in 2,048 characters, or the command exits 2 with `query_too_long`
+  before any request. Keys that look like
   credentials (ending in `api_key`, `token`, `secret`, `password`, `auth` and similar)
   are refused with exit 2, and the service refuses them too.
 - The CLI sends the filters as one JSON object in the `metadata` query parameter.
@@ -675,6 +678,10 @@ When the service warns `metadata_key_mostly_missing` (calls without a usable val
 hold at least half of the window's calls or cost), the notice
 `metadata_key_mostly_missing` is set. When no call has the key at all, human output
 says so in one line and suggests checking the key's spelling.
+Like every grouped read, a metadata grouping is refused when its rows are not highest
+cost first, when it returns fewer than `min(limit, matched)` rows (the read has no
+cursor), or when the listed calls, errors, tokens or cost exceed the totals (or,
+untruncated, do not equal them).
 
 In human output, notices that repeat a printed line are left out: the Coverage line
 replaces the incomplete-evidence and truncation notices, the Pricing line replaces the
