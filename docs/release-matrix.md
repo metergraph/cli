@@ -122,9 +122,11 @@ because the skill names the command without them.
 
 ## Pending release checks
 
-These journeys are planned but not in a released package. Through `0.2.1`
-(`latest` and `next`), `usage` takes only `--days` and `--limit`, and the read
-commands accept only a project's saved sign-in grant. Every parity report lists
+These journeys are not in a released package. In `0.2.1` (`latest` and
+`next`), `usage` takes only `--days` and `--limit`, and the read commands accept
+only a project's saved sign-in grant. `main` now has the remote Metadata-key
+path (see the Unreleased changelog), but no published version carries it yet.
+Every parity report lists
 both in `not_checked` until a released CLI ships them. Each row stays
 **Pending** until a live run of the published package passes; a packed tarball,
 source tests or an API call outside the CLI do not count. Exact flags, outcomes
@@ -138,9 +140,9 @@ saved sign-in grant.
 
 | Check | Expected result | Evidence class | Status |
 |---|---|---|---|
-| Remote markers present, no key, no grant | A precise remote reason with a structured `next_action` for the person. No browser flow is claimed from a URL alone. Nothing written | `real_deployment` | Pending |
-| A local container without remote markers | Treated as local, not as a remote session | `real_deployment` | Pending |
-| Key supplied privately (never in argv) | The CLI checks origin, workspace, scope and capabilities before any read, then `usage`, `routes` and `traces` return Metadata only | `real_deployment` | Pending |
+| Remote markers present, no key, no grant | `login` and the read commands return a precise remote reason with a `use_agent_key` next action, and `setup` returns `run_on_local_machine`. No browser flow is claimed from a URL alone. Nothing written | `real_deployment` | Pending |
+| A local container without remote markers | Reported as `local_container`, not as a remote session | `real_deployment` | Pending |
+| Key supplied privately through `METERGRAPH_AGENT_TOKEN` or `--agent-token-file`, never as an argument | The CLI checks origin, workspace, exactly the Metadata scope and no content access before any read, then `status`, `context`, `capabilities`, `usage`, `routes` and `traces` return Metadata only, with `credential` and `environment` in the output | `real_deployment` | Pending |
 | Key never disclosed | No key value in argv, stdout, stderr, JSON output, logs or project files | `real_deployment` | Pending |
 | Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Pending |
 | Signup, invitation and workspace choice | Each human step returns a `next_action`; rerunning after it shows the verified workspace and the next step, with no duplicate key | `real_deployment` | Pending |
