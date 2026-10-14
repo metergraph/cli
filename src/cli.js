@@ -239,6 +239,7 @@ function setupText(result, style) {
   if (!result.ok) lines.push(...paragraph(style, result.error.message), `  ${style.dim(`Reason: ${result.error.reason}`)}`, "");
   lines.push(...handoffLines(data, style));
   lines.push(...remoteLines(data, style));
+  lines.push(...budgetLines(data, style));
   if (result.ok) lines.push(...steps(style, [["", "Instrument your application and verify an exact trace."]]));
   return render(lines);
 }
@@ -261,6 +262,13 @@ function handoffLines(data, style) {
     ? next.message : null;
   lines.push(...steps(style, [["", message], ["Guide", next?.url ?? null]]), "");
   return lines;
+}
+
+// A refused key issuance: wait for the next window, or revoke unused keys.
+function budgetLines(data, style) {
+  const next = data?.next_action;
+  if (next?.kind !== "retry_later" && next?.kind !== "revoke_keys") return [];
+  return [...steps(style, [["", next.message], ["Keys page", next.url ?? null]]), ""];
 }
 
 // A remote session's handoff: where setup runs instead, and how this

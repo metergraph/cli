@@ -175,7 +175,7 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 | 13 | `revocation_unconfirmed` | Local credentials were removed, but the service did not confirm that the grant was revoked. |
 | 14 | `capability_unavailable` | The service does not make this read available to the project's Metadata grant. No data was read. |
 | 15 | `permission_denied` | The service refused this read for the signed in grant, for example for a missing scope or permission. |
-| 16 | `rate_limited` | The service asked the CLI to slow down. Nothing was retried. Try again later. |
+| 16 | `rate_limited` | The service asked the CLI to slow down. Try again later. Only setup retries, after a short Retry-After, to keep its approval. |
 | 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
 | 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` exit with this as soon as an approval URL exists (`next_action.kind: "open_url"`), while a background process waits for the approval until `--timeout-ms`. After approval, run the same command again to continue. |
 

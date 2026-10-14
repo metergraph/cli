@@ -783,3 +783,67 @@ test("setup over SSH, in a cloud workspace or in CI hands off with a local comma
     assert.deepEqual(fs.readdirSync(box.project), []);
   }
 });
+
+// The service's ingest-key issuance budget.
+
+test("setup waits out a short Retry-After and redeems the same approval", async () => {
+  const server = await startOAuthServer({ setup: true, setupSlowDown: 2, setupRetryAfter: "1" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "ok");
+    assert.equal(result.data.status, "ready_for_instrumentation");
+    const redeems = server.requestsTo("/v1/cli/setup/redeem");
+    assert.equal(redeems.length, 3);
+    // The same receipt each time, and one browser approval.
+    assert.equal(new Set(redeems.map((r) => new URLSearchParams(r.body).get("code"))).size, 1);
+    assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+  } finally { await server.close(); }
+});
+
+test("setup stops as rate_limited with a retry next action when the budget stays exhausted", async () => {
+  const server = await startOAuthServer({ setup: true, setupSlowDown: 10, setupRetryAfter: "1" });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "rate_limited");
+    assert.equal(result.exit_code, 16);
+    assert.equal(result.error.reason, "setup_rate_limited");
+    assert.equal(result.data.status, "delivery_pending");
+    assert.equal(result.data.next_action.kind, "retry_later");
+    assert.equal(result.data.next_action.retry_after_seconds, 1);
+    assert.match(result.data.next_action.message, /new approval/);
+    assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 3);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});
+
+test("setup does not wait out a long or missing Retry-After", async () => {
+  for (const retryAfter of ["600", "soon"]) {
+    const server = await startOAuthServer({ setup: true, setupSlowDown: 5, setupRetryAfter: retryAfter });
+    try {
+      const box = boxFor();
+      const started = Date.now();
+      const result = await setup(box, server, ["--url", server.origin]);
+      assert.equal(result.outcome, "rate_limited");
+      assert.equal(result.data.next_action.retry_after_seconds, null);
+      assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 1);
+      assert.ok(Date.now() - started < 10000);
+    } finally { await server.close(); }
+  }
+});
+
+test("the active-key cap stops setup with the Keys page and issues nothing", async () => {
+  const server = await startOAuthServer({ setup: true, setupKeyLimit: true });
+  try {
+    const box = boxFor();
+    const result = await setup(box, server, ["--url", server.origin]);
+    assert.equal(result.outcome, "conflict");
+    assert.equal(result.error.reason, "setup_key_limit");
+    assert.equal(result.data.next_action.kind, "revoke_keys");
+    assert.equal(result.data.next_action.url, `${server.origin}/#api-keys`);
+    assert.match(result.data.next_action.message, /Revoke unused CLI setup keys on the Keys page/);
+    assert.equal(server.requestsTo("/v1/cli/setup/redeem").length, 1);
+    assert.equal(fs.existsSync(path.join(box.project, ".env")), false);
+  } finally { await server.close(); }
+});

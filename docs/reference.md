@@ -459,6 +459,17 @@ the CLI out. A service without that field, a project that is already signed
 in, `--repair` and a replacement after a lost response all use the separate
 ingest-only approval.
 
+The service may limit how many ingest keys setup can issue: per person and per
+workspace each minute, and a cap on a workspace's active CLI setup keys. When
+redemption is refused with `429` and a `Retry-After` of at most 60 seconds,
+setup waits and redeems the same approval again, up to two times, so the
+person does not approve twice. If the budget stays exhausted, setup exits
+`rate_limited` (16) with reason `setup_rate_limited` and a `retry_later` next
+action carrying `retry_after_seconds`. At the cap, setup exits `conflict` (8)
+with reason `setup_key_limit` and a `revoke_keys` next action whose `url` is
+the Keys page. Neither refusal issues a key or writes `.env`. A rerun asks for a
+new approval.
+
 `METERGRAPH_INGEST_URL` is the deployment's service root. The Python SDK
 appends `/v1/ingest` itself. A setup rerun with a verified
 key repairs the endpoint value written by the first preview without minting a

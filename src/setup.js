@@ -12,6 +12,7 @@ import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
 import { preflightEnv, currentEnvValues, commitEnv, isAppToken } from "./setup-env.js";
 import { newSetupState, readSetupState, setupReceipt, withSetupState, writeSetupState } from "./setup-state.js";
 import { runSkill } from "./skill.js";
+import { handoffPages } from "./environment.js";
 import { ensureRepositoryIdentity, envRepository } from "./repository-identity.js";
 import { parseJsonObject } from "./http.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
@@ -233,8 +234,8 @@ export async function runSetup(options, progress = () => {}) {
     previous = readSetupState(root);
     const redeemed = await redeem(origin, { code: approval.code, client_id: approval.clientId,
       redirect_uri: approval.redirectUri, code_verifier: approval.verifier,
-      family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal);
-    if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending");
+      family_id: state.family_id, workspace_id: workspaceId }, profile, trap.signal, progress);
+    if (!redeemed.ok) return stop(redeemed.outcome, redeemed.reason, "delivery_pending", redeemNext(redeemed, origin));
     const written = await commitEnv(plan, { token: redeemed.token, ingestUrl: origin, signal: trap.signal });
     const checked = await checkCredential(origin, redeemed.token, state, profile, trap.signal);
     if (!checked.ok || checked.keyId !== redeemed.keyId) return stop("verification_failed", "issued_key_unverified", "delivery_pending");
@@ -371,11 +372,76 @@ async function discoverSetup(origin, profile, cancel) {
   return { ok: true, offeredClientId: offered, loginSetup: doc.login_ingest_setup_supported === true };
 }
 
-async function redeem(origin, form, profile, cancel) {
-  const response = await send(origin, SETUP_PATHS.redeem, { method: "POST", form,
-    signal: deadline(AUTH_HTTP_TIMEOUT_MS, cancel).signal, maxBytes: 32768 });
-  const failed = failureOf(response);
-  if (failed) return { ok: false, ...failed };
+// The service budgets how many ingest keys setup may issue per person and per
+// workspace each minute. A refusal leaves the receipt unredeemed, and only
+// this process holds its PKCE verifier, so setup waits out a short
+// Retry-After and redeems the same receipt rather than asking for another
+// approval. It gives up after REDEEM_RETRIES waits.
+const REDEEM_RETRIES = 2;
+const MAX_RETRY_AFTER_SECONDS = 60;
+
+async function redeem(origin, form, profile, cancel, progress = () => {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await send(origin, SETUP_PATHS.redeem, { method: "POST", form,
+      signal: deadline(AUTH_HTTP_TIMEOUT_MS, cancel).signal, maxBytes: 32768 });
+    const failed = failureOf(response);
+    if (failed) return { ok: false, ...failed };
+    if (response.status === 429) {
+      const wait = retryAfterSeconds(response);
+      if (wait === null || attempt >= REDEEM_RETRIES) {
+        return { ok: false, outcome: "rate_limited", reason: "setup_rate_limited", retryAfter: wait };
+      }
+      progress(`The service is pacing new ingest keys. Retrying in ${wait} seconds.`);
+      if (!(await pause(wait * 1000, cancel))) return { ok: false, outcome: "authorization_failed", reason: "cancelled" };
+      continue;
+    }
+    if (response.status === 409 && parseJsonObject(response)?.error === "setup_key_limit") {
+      return { ok: false, outcome: "conflict", reason: "setup_key_limit" };
+    }
+    return redeemResult(response, origin, form, profile);
+  }
+}
+
+// Seconds from Retry-After (or the body's retry_after_seconds), 1 to 60, or
+// null when the service gave no usable delay.
+function retryAfterSeconds(response) {
+  const header = Number.parseInt(String(response.headers?.["retry-after"] ?? ""), 10);
+  const body = parseJsonObject(response)?.retry_after_seconds;
+  const value = Number.isInteger(header) ? header : Number.isInteger(body) ? body : null;
+  return value !== null && value >= 1 && value <= MAX_RETRY_AFTER_SECONDS ? value : null;
+}
+
+function pause(ms, cancel) {
+  return new Promise((resolve) => {
+    if (cancel.aborted) return resolve(false);
+    const done = (value) => {
+      clearTimeout(timer);
+      cancel.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => done(false);
+    const timer = setTimeout(() => done(true), ms);
+    cancel.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// The next action for a budget refusal. Nothing was issued, and a rerun asks
+// for a new approval.
+function redeemNext(result, origin) {
+  if (result.reason === "setup_rate_limited") {
+    return { kind: "retry_later", retry_after_seconds: result.retryAfter ?? null,
+      message: "The service limits how many ingest keys setup can issue each minute for one person and one " +
+        "workspace. Nothing was issued. Wait a minute, then run setup again; it asks for a new approval." };
+  }
+  if (result.reason === "setup_key_limit") {
+    return { kind: "revoke_keys", url: handoffPages(origin).keys_url,
+      message: "This workspace has reached its limit of active CLI setup keys. Nothing was issued. Revoke " +
+        "unused CLI setup keys on the Keys page, then run setup again." };
+  }
+  return null;
+}
+
+function redeemResult(response, origin, form, profile) {
   if (response.status !== 200) return { ok: false, outcome: "authorization_failed", reason: "setup_redeem_rejected" };
   const body = parseJsonObject(response);
   if (body?.schema_version !== SCHEMA || body.token_type !== "ingest" || body.scope !== "ingest" ||
