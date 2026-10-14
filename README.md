@@ -68,8 +68,11 @@ Sign in needs a service that offers Metadata-only CLI grants and grant revocatio
 service without them is reported as unsupported, and the CLI never falls back to
 broader access. `setup` also needs the deployment's ingest bootstrap API and approval by
 a workspace member. Sign in needs a browser on the same machine. From SSH sessions,
-cloud development environments and CI, `login` and `setup` hand off to a local machine
-instead (exit 6).
+cloud development environments and CI, `login` and `setup` exit 6 with a structured
+`next_action`: a person creates a coding-agent key with Metadata access on the Keys
+page and saves it as the secret `METERGRAPH_AGENT_TOKEN`, and the read commands use it
+after verifying the origin, workspace, scope and capabilities. Ingest setup still runs
+on a local machine.
 
 ## Using it with a coding agent
 

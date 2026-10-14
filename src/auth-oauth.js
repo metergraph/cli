@@ -392,9 +392,17 @@ function decodeClaims(token) {
 // Nothing else is read: no telemetry, content or provider requests.
 // Returns { ok: true, workspaceId, documents } or { ok: false, outcome, reason, denied }
 // where denied means the service refused the token (401 or 403).
-export async function verifyContext(origin, accessToken, { profile, workspaceId }, signal) {
+// workspaceId is the workspace the credential must be for. Only an agent key
+// with nothing to pin it to passes anyWorkspace: true with workspaceId null,
+// and then the workspace the service reports is checked for consistency and
+// returned as the verified one.
+export async function verifyContext(origin, accessToken, { profile, workspaceId, anyWorkspace = false }, signal) {
   const workspace = await bearerJson(origin, AUTH_PATHS.workspace, accessToken, WORKSPACE_BYTES, signal, "workspace");
   if (!workspace.ok) return workspace;
+  if (workspaceId === null && anyWorkspace === true) {
+    workspaceId = normalizeUuid(workspace.body.workspace?.id);
+    if (workspaceId === null) return stop("verification_failed", "workspace_response_invalid");
+  }
   const checked = checkWorkspace(workspace.body, { profile, workspaceId });
   if (!checked.ok) return checked;
 
@@ -475,7 +483,7 @@ async function bearerJson(origin, path, accessToken, maxBytes, signal, document)
   const failure = failureOf(response);
   if (failure !== null) return { ok: false, ...failure };
   if (response.status === 401 || response.status === 403) {
-    return { ok: false, outcome: "verification_failed", reason: "access_rejected", denied: true };
+    return { ok: false, outcome: "verification_failed", reason: "access_rejected", denied: true, status: response.status };
   }
   if (response.status !== 200) return stop("unsupported", "unexpected_status");
   const body = parseJsonObject(response);

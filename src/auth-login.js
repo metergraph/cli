@@ -1,4 +1,4 @@
-import { detectRemoteSession, openBrowser } from "./auth-browser.js";
+import { openBrowser } from "./auth-browser.js";
 import { startCallbackListener } from "./auth-callback.js";
 import {
   BINDING_PATH,
@@ -30,8 +30,9 @@ import {
   withSlotLock,
   writeCredential,
 } from "./auth-store.js";
-import { AUTH_HTTP_TIMEOUT_MS, CONNECTION_GUIDE_URL, METADATA_SCOPE } from "./constants.js";
+import { AUTH_HTTP_TIMEOUT_MS, METADATA_SCOPE } from "./constants.js";
 import { runDoctor } from "./doctor.js";
+import { agentKeyAction, classifyEnvironment } from "./environment.js";
 import { deadline, trapSignals } from "./transport.js";
 
 // login and logout. Each returns { outcome, reason, data }; every string in
@@ -59,14 +60,20 @@ export async function runLogin(options, progress) {
     configured: false,
     status: null,
     previousGrant: null,
+    environment: null,
   };
   const end = (outcome, reason, next = null) => ({ outcome, reason, data: loginData(ctx, next) });
 
   // Handoffs come first: no listener, request or file write happens for a
-  // session that cannot finish sign in.
-  if (options.runtime !== "local") return end("unsupported", "runtime_not_supported", GUIDE);
-  const remote = detectRemoteSession();
-  if (remote !== null) return end("unsupported", remote, GUIDE);
+  // session that cannot finish sign in. The next action tells the agent how
+  // a person hands it a Metadata key instead.
+  const environment = options.environment ?? classifyEnvironment();
+  ctx.environment = environment.kind;
+  if (options.runtime !== "local") {
+    ctx.environment = "declared_cloud";
+    return end("unsupported", "runtime_not_supported", agentKeyAction({ kind: "declared_cloud" }, options.origin));
+  }
+  if (environment.remote) return end("unsupported", environment.reason, agentKeyAction(environment, options.origin));
   const trap = trapSignals();
   try {
     const root = resolveProject(options.project);
@@ -246,6 +253,12 @@ async function authorize(options, ctx, cancel, progress, announce) {
         return fail("authorization_failed", "browser_unavailable", {
           kind: "no_browser",
           message: "Run login again with --no-browser, without --json, and open the URL it prints.",
+          // A local container's loopback callback is reachable only when its
+          // port is forwarded to the person's machine. A Metadata key avoids
+          // the callback altogether.
+          ...(ctx.environment === "local_container"
+            ? { alternative: agentKeyAction({ kind: "local_container", remote: false }, ctx.origin) }
+            : {}),
         });
       }
       progress(setupPkce === null
@@ -418,7 +431,6 @@ export function openUrl(url, seconds, purpose) {
   };
 }
 
-const GUIDE = { kind: "connection_guide", url: CONNECTION_GUIDE_URL };
 const RECONNECT = {
   kind: "reconnect",
   message: "Run login again with --reconnect to switch this project, or run logout first.",
@@ -432,6 +444,7 @@ function loginData(ctx, next) {
   return {
     origin: ctx.origin,
     runtime: ctx.runtime,
+    environment: ctx.environment,
     deployment_profile: ctx.profile,
     workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
     scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
