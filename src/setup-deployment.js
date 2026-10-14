@@ -1,4 +1,4 @@
-import { detectRemoteSession } from "./auth-browser.js";
+import { classifyEnvironment, remoteSetupAction } from "./environment.js";
 import { runDoctor } from "./doctor.js";
 import { action, planDeploymentRoute, verifyDeploymentRoute } from "./deployment-route.js";
 import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
@@ -164,8 +164,9 @@ export async function preflightNonHostedSetup(options, { env = process.env } = {
   // Setup itself refuses a remote session, but only after this preflight.
   // Refuse here first, so a remote shell sends no request and never reads the
   // separate agent token file.
-  if (detectRemoteSession(env) !== null) {
-    return handoff("unsupported", "run_on_local_machine", action("run_on_customer_machine"), {
+  const environment = classifyEnvironment(env);
+  if (environment.remote) {
+    return handoff("unsupported", "run_on_local_machine", remoteSetupAction(environment, plan.origin, options), {
       profile: plan.deployment_profile, origin: plan.origin, workspaceId: plan.workspace_id,
     });
   }

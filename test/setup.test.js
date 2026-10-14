@@ -654,7 +654,9 @@ test("setup over SSH, in a cloud workspace or in CI hands off with a local comma
     const next = result.data.next_action;
     assert.equal(next.kind, "run_on_local_machine");
     assert.equal(next.environment, environment);
-    assert.equal(next.command, "metergraph setup --runtime local");
+    // The command is runnable as given: it keeps the caller's client.
+    assert.equal(next.command, "metergraph setup --runtime local --client claude");
+    assert.deepEqual(next.metadata_reads.then_run, ["metergraph status --json", "metergraph usage --json"]);
     // Metadata reads stay possible here with a key that is separate from,
     // and never replaces, the application's ingest key.
     assert.equal(next.metadata_reads.kind, "use_agent_key");
