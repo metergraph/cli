@@ -642,7 +642,10 @@ Bounds and honesty rules:
   - A trace `cost_usd` is the whole-trace total and is `null` when no call in it is
     priced. `mixed_providers` and `mixed_models` mark traces that span more than
     one, and `attribution.per_provider_exact` is always `false` for traces: a trace
-    total is never split by provider. Usage rows are attributed per call.
+    total is never split by provider. Usage rows are attributed per call. When a
+    `--route` or `--status` filter selected calls rather than whole traces,
+    `attribution.cost_basis` is `matching_calls` and each row's cost, pricing and
+    flags cover only its matching calls.
   - A final `traces` page without `next_cursor` is still `complete: false` when the
     service reports any other reason, for example pending ingestion.
   - The evidence must describe the document it arrives in, or the read exits 11

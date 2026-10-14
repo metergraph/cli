@@ -355,8 +355,9 @@ function resultLines(command, report, lines) {
     if (report.next_cursor !== null) lines.push(`Next page: --cursor ${report.next_cursor}`);
     coverageLines(lines, report);
     const mixed = report.traces.filter((trace) => trace.mixed_providers).length;
+    const matching = report.attribution?.cost_basis === "matching_calls";
     lines.push(
-      "Costs: whole-trace totals" +
+      (matching ? "Costs: matching calls only (a filter selected calls, not whole traces)" : "Costs: whole-trace totals") +
         (mixed > 0 ? `; ${mixed} trace${mixed === 1 ? "" : "s"} used several providers, not split by provider` : ""),
     );
     lines.push(`Evidence: ${report.complete ? "complete" : "incomplete"}`);
