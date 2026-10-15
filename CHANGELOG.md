@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+- The browser page shown after a sign-in or setup approval now matches the service's consent
+  page (Metergraph band and card) instead of a bare line of text, and says plainly that the
+  command finishes in the terminal. The pages stay static and script-free; the policy is still
+  `default-src 'none'`, with the one inline stylesheet allowed by its hash.
 - A budget refusal met by the `--json --no-browser` background waiter is no longer lost. The
   waiter records what it is doing with an approval in `.metergraph/setup-refusal.json`; the agent's
   rerun waits while it is still redeeming (`setup_in_progress`) and then reports `retry_later` or

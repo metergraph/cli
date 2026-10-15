@@ -1,9 +1,11 @@
 // The loopback OAuth callback listener, exercised over real sockets.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import http from "node:http";
 import { test } from "node:test";
 
 import { startCallbackListener } from "../src/auth-callback.js";
+import { PAGE_CSP, PAGES } from "../src/callback-page.js";
 
 const STATE = "synthetic-state-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const CODE = "synthetic-code-bbbbbbbbbbbbbbbbbbbbbbbb";
@@ -81,7 +83,8 @@ test("stray, forged and malformed requests are refused and the listener keeps wa
     assert.equal(accepted.status, 200);
     assert.ok(!accepted.body.includes(CODE) && !accepted.body.includes(STATE));
     assert.equal(accepted.headers["cache-control"], "no-store");
-    assert.equal(accepted.headers["content-security-policy"], "default-src 'none'");
+    assert.equal(accepted.headers["content-security-policy"], PAGE_CSP);
+    assert.match(accepted.body, /Authorization received/);
     assert.equal(accepted.headers["referrer-policy"], "no-referrer");
     assert.deepEqual(await waiting, { kind: "code", code: CODE });
 
@@ -262,5 +265,18 @@ test("a setup receipt is accepted next to the code only when the wait asks for i
     assert.deepEqual(await denied.waiting, { kind: "error", reason: "callback_invalid" });
   } finally {
     await denied.listener.close();
+  }
+});
+
+test("pages are static, script-free and styled only by the hashed inline stylesheet", () => {
+  assert.match(PAGE_CSP, /^default-src 'none'; style-src 'sha256-[A-Za-z0-9+/]+=*'$/);
+  assert.ok(!PAGE_CSP.includes("unsafe"));
+  for (const body of Object.values(PAGES)) {
+    const styles = [...body.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((match) => match[1]);
+    assert.equal(styles.length, 1);
+    const hash = createHash("sha256").update(styles[0]).digest("base64");
+    assert.ok(PAGE_CSP.includes(`'sha256-${hash}'`), "the inline stylesheet is not the hashed one");
+    assert.ok(!/<script|\son[a-z]+=|\sstyle=|\shref=|\ssrc=/i.test(body), "a page loads or runs something");
+    assert.ok(!body.includes("\u2014"), "a page uses an em dash");
   }
 });
