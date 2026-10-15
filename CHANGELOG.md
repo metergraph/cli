@@ -7,10 +7,12 @@
 
 - The bundled skills, and the setup skill in the Python `metergraph-skills` package
   (0.1.5), now come from [metergraph/skills](https://github.com/metergraph/skills) at
-  `87e315c`. The setup skill gives one CLI sequence per place the agent runs,
-  including a Metadata key for remote agents, and a static-token route for the open
-  source server, and keeps workspace identity out of public repositories and CI
-  logs. The investigation skill answers cost questions with grouped `usage`, splits
+  `a5678d1`. The setup skill gives one CLI sequence per place the agent runs,
+  including the deployment, address and workspace for customer-local and
+  customer-owned AWS setup and a Metadata key for remote agents, sends the open
+  source server to its MCP route, and keeps workspace identity out of public
+  repositories and CI logs. A key used without `--workspace` continues once the
+  person confirms the verified workspace. The investigation skill answers cost questions with grouped `usage`, splits
   cost by prompt with exact metadata rather than by route, and never judges a code
   change's cost impact from its diff alone. The analysis skill shows an analysis
   run's stages as a timeline.

@@ -21,8 +21,11 @@ chosen a client, runtime and deployment.
 
 **With the CLI** (preferred when `metergraph --version` works):
 
-1. Run `metergraph status --json`. Continue only when it exits 0 with
-   `data.authenticated: true` and `data.workspace.match: true`. When it prints
+1. Run `metergraph status --json`. Continue when it exits 0 with
+   `data.authenticated: true` and `data.workspace.match: true`. When `match`
+   is null because no workspace was pinned (a coding-agent key without
+   `--workspace`), name `data.workspace.actual` and continue only after the
+   person confirms it is the workspace they mean. When it prints
    `data.next_action` (for example sign in again, or the coding-agent Metadata
    key path for a remote session), follow it; never ask for the key in chat.
 2. Run `metergraph capabilities --json` and build the plan from
@@ -109,8 +112,10 @@ and day); use the tool instead, or say a newer CLI is needed.
 
 Rank only what was returned. When `coverage.rows.truncated` is true (more
 groups matched than `limit`), a ranking by calls, errors or latency covers
-only the listed groups; raise `limit` to `coverage.rows.matched` (at most 200)
-or narrow the read before naming a "top" group. Name the latency you report:
+only the listed groups. Before naming a "top" group, raise `limit` to
+`coverage.rows.matched` when that is at most 200 and at most the
+capabilities' `bounds.max_rows`; otherwise narrow the read. Name the latency
+you report:
 `latency.avg_ms` is the mean over `latency.samples` calls that reported one,
 and `latency.p95_ms` is an estimate from a fixed histogram
 (`p95_method: histogram_estimate`), not an exact percentile.

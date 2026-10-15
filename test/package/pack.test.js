@@ -74,7 +74,7 @@ const EXPECTED_FILES = [
   "src/verify-output.js",
   "src/verify.js",
 ];
-const SKILL_SHA256 = "6a68d93c86ad54ee1b30fd820aca177ce6a259431da79556f55127181f8c9721";
+const SKILL_SHA256 = "0ff55211eaf880d767eda21073c5fe48f462cc0c603b72aac42b5093efad6ae9";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;
