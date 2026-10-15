@@ -83,7 +83,9 @@ smallest tool that can answer:
 | Known alert or anomaly | none; use MCP | `metergraph_list_incidents` | small `limit` |
 | Cost or calls for one prompt, workflow or other tag value | `metergraph usage --group-by metadata.KEY --json`, or `--metadata KEY=VALUE` | `metergraph_get_usage_aggregates` with `group_by` including `metadata.<key>`, or `metadata` (exact pairs) | days, small limit |
 | One failed call | `metergraph traces --status error --limit 1 --json` (also `--route`, `--metadata`) | `metergraph_query_traces` with `status` set to the failure status, and `route`, `trace_id`, `request_id` or `metadata` | limit 1 to 5 |
-| One slow or costly call (it may have succeeded) | `metergraph traces --route NAME --limit 5 --json` with no `--status`, then compare cost and span count on that page | `metergraph_query_traces` with `route`, `trace_id`, `request_id` or `metadata`, no `status` | limit 1 to 5 |
+| One costly call (it may have succeeded) | `metergraph traces --route NAME --limit 5 --json` with no `--status`, then compare cost on that page | `metergraph_query_traces` with `route`, `trace_id`, `request_id` or `metadata`, no `status` | limit 1 to 5 |
+| Which routes are slow (route level, not one call) | `metergraph usage --group-by route --sort p95-latency --json`; CLI `traces` returns no latency | `metergraph_get_usage_aggregates` grouped by route | days, small limit |
+| One slow call | none; CLI `traces` has no latency, so ask for its trace or request ID and use MCP, or send the person to the trace in the app | `metergraph_query_traces` with that `trace_id` or `request_id` | limit 1 |
 | A finished analysis | none; use MCP | `metergraph_list_reports`, then `metergraph_get_report` | small `limit` |
 
 Use grouped usage (`metergraph usage --group-by`, or
