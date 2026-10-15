@@ -43,6 +43,7 @@ const EXPECTED_FILES = [
   "src/auth-oauth.js",
   "src/auth-session.js",
   "src/auth-store.js",
+  "src/callback-page.js",
   "src/cli.js",
   "src/constants.js",
   "src/deployment-credential.js",
