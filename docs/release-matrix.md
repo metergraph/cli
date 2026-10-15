@@ -153,6 +153,17 @@ Not in this plan: an expired key (no way to make one expire on demand),
 signup and invitation (they need a new person's account), and Linux and
 Windows hosts.
 
+#### Run of 2026-10-15
+
+`metergraph-cli@0.2.2` from the registry on macOS, against the hosted service, in a
+new test workspace. Traffic was 33 synthetic calls (3 routes, 2 models, 3 failures,
+`prompt_id` and `workflow_name` tags) captured by the published `metergraph` SDK
+from an OpenAI client pointed at a local mock server, so no provider was called.
+Remote sessions were marked with `SSH_CONNECTION`. Manual steps: 4 (sign up and
+approve setup, create the Metadata key, save it to a 0600 file, revoke it).
+Still Pending: a capability the deployment lacks, signup and invitation reruns,
+and both skill discovery rows.
+
 ### Metadata reads from a remote agent session with an existing key
 
 The agent runs in a session the CLI identifies as remote (SSH, a cloud
@@ -161,11 +172,11 @@ saved sign-in grant.
 
 | Check | Expected result | Evidence class | Status |
 |---|---|---|---|
-| Remote markers present, no key, no grant | `login` and the read commands return a precise remote reason with a `use_agent_key` next action, and `setup` returns `run_on_local_machine`. No browser flow is claimed from a URL alone. Nothing written | `real_deployment` | Pending |
-| A local container without remote markers | Reported as `local_container`, not as a remote session | `real_deployment` | Pending |
-| Key supplied privately through `METERGRAPH_AGENT_TOKEN` or `--agent-token-file`, never as an argument | The CLI checks origin, workspace, exactly the Metadata scope and no content access before any read, then `status`, `context`, `capabilities`, `usage`, `routes` and `traces` return Metadata only, with `credential` and `environment` in the output | `real_deployment` | Pending |
-| Key never disclosed | No key value in argv, stdout, stderr, JSON output, logs or project files | `real_deployment` | Pending |
-| Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Pending |
+| Remote markers present, no key, no grant | `login` and the read commands return a precise remote reason with a `use_agent_key` next action, and `setup` returns `run_on_local_machine`. No browser flow is claimed from a URL alone. Nothing written | `real_deployment` | Pass (0.2.2): SSH markers; `login` exit 6 `ssh_session`, `status`, `usage`, `routes` and `traces` exit 12 `not_signed_in`, all with `use_agent_key`; `setup` exit 6 `run_on_local_machine`; nothing written |
+| A local container without remote markers | Reported as `local_container`, not as a remote session | `real_deployment` | Pass (0.2.2): `status` in a `node:22-slim` Docker container reports `environment: local_container` with a `login` next action |
+| Key supplied privately through `METERGRAPH_AGENT_TOKEN` or `--agent-token-file`, never as an argument | The CLI checks origin, workspace, exactly the Metadata scope and no content access before any read, then `status`, `context`, `capabilities`, `usage`, `routes` and `traces` return Metadata only, with `credential` and `environment` in the output | `real_deployment` | Pass (0.2.2): with SSH markers and no grant, `--agent-token-file` (0600) and `METERGRAPH_AGENT_TOKEN` both verify origin, profile and `agent:metadata` with `content_access: false`; `status`, `context`, `capabilities`, `usage` (grouped and route by day), `routes` and `traces` exit 0 with `credential: agent_key` and `environment: ssh_session`. Without `--workspace`, `workspace.match` is null with `workspace_not_pinned`; with it, true |
+| Key never disclosed | No key value in argv, stdout, stderr, JSON output, logs or project files | `real_deployment` | Pass (0.2.2): the key was never an argument (an unknown `--token` option exits 2); a scan of every stdout, stderr and JSON output, the project, the config directory and the npm logs found no key value |
+| Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Partial (0.2.2): `--workspace` for another workspace exits 11 `workspace_context_mismatch` (`use_workspace_key`); an unknown key and a key revoked on the Keys page exit 12 `agent_key_rejected` (`replace_agent_key`); no data read. A second workspace's own key, an expired key and a key with broader scopes were not run |
 | Signup, invitation and workspace choice | Each human step returns a `next_action`; rerunning after it shows the verified workspace and the next step, with no duplicate key | `real_deployment` | Pending |
 | A coding agent in a remote session follows the skill | It uses the official CLI with the key path and does not write its own API client | `client_discovery` | Pending |
 
@@ -180,15 +191,15 @@ the agent API.
 
 | Question | Expected result | Evidence class | Status |
 |---|---|---|---|
-| Most expensive route today | Routes ranked by cost over an explicit UTC window | `real_deployment` | Pending |
-| Spend with one provider | A provider filter over a bounded window | `real_deployment` | Pending |
-| Spend by model | Grouped by model | `real_deployment` | Pending |
-| One route's daily trend | Grouped by UTC day for one route | `real_deployment` | Pending |
-| Cost ranked by a metadata key | Grouped by an eligible metadata key, kept distinct from route | `real_deployment` | Pending |
-| Comparison with the prior period | Both windows shown in UTC, with a warning when a partial current day is compared with a full prior day | `real_deployment` | Pending |
-| Coverage and cost attribution | Shown in text and JSON for every answer above | `real_deployment` | Pending |
+| Most expensive route today | Routes ranked by cost over an explicit UTC window | `real_deployment` | Pass (0.2.2): `usage --group-by route --today` ranks 3 routes by cost over the UTC day so far, marked partial |
+| Spend with one provider | A provider filter over a bounded window | `real_deployment` | Pass (0.2.2): `usage --group-by provider --provider openai --days 7` |
+| Spend by model | Grouped by model | `real_deployment` | Pass (0.2.2): `usage --group-by model --days 7` |
+| One route's daily trend | Grouped by UTC day for one route | `real_deployment` | Pass (0.2.2): `usage --route NAME --group-by day --days 14` |
+| Cost ranked by a metadata key | Grouped by an eligible metadata key, kept distinct from route | `real_deployment` | Pass (0.2.2): `usage --group-by metadata.prompt_id --days 7` (groups sum to the totals) and `--metadata workflow_name=VALUE` as a filter |
+| Comparison with the prior period | Both windows shown in UTC, with a warning when a partial current day is compared with a full prior day | `real_deployment` | Pass (0.2.2): `usage --group-by route --today --compare previous` shows both UTC windows, says "Not like for like" and returns a `compare_like_for_like` next action naming `--compare previous-same-time` |
+| Coverage and cost attribution | Shown in text and JSON for every answer above | `real_deployment` | Pass (0.2.2): coverage, pricing (a lower bound with partially priced calls) and per-call attribution in text and JSON for every row above |
 | A capability the deployment lacks | Exit 14 `capability_unavailable` or a documented `next_action`, with nothing read | `real_deployment` | Pending |
-| Parity with the agent API | Same totals, groups and window as the server read | `real_deployment` | Pending |
+| Parity with the agent API | Same totals, groups and window as the server read | `real_deployment` | Pass (0.2.2): `metergraph_get_usage_aggregates` with the same key returns the same totals, groups and UTC window for route, model and `metadata.prompt_id`. The CLI names a metadata group `metadata_key`/`metadata_value` where the tool uses `metadata.<key>` |
 | A coding agent answers a cost question from the skill | It runs the smallest bounded `usage` read that answers it, and does not attribute a cost change to a commit from a diff alone | `client_discovery` | Pending |
 
 These runs read Metadata only and make no provider call.
