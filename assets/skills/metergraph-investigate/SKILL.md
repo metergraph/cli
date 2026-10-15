@@ -19,7 +19,8 @@ chosen a client, runtime and deployment.
 
 ## 1. Discover before reading data
 
-**With the CLI** (preferred when `metergraph --version` works):
+**With the CLI** (preferred when `metergraph --help` lists `status`,
+`capabilities` and `usage`; an older CLI can run but lack them):
 
 1. Run `metergraph status --json`. Continue when it exits 0 with
    `data.authenticated: true` and `data.workspace.match: true`. When `match`
@@ -64,9 +65,12 @@ incidents, ingestion health or reports.
 ## 2. Fix the question and the bound
 
 Restate the question, the route or workload if known, and an explicit UTC
-window. Windows are UTC: `days: N` means the current UTC day so far plus the
-`N - 1` whole UTC days before it, so today is always partial; `since`
-(inclusive) and `until` (exclusive) give an exact window of at most 90 days.
+window. For grouped usage, windows are UTC: `days: N` means the current UTC
+day so far plus the `N - 1` whole UTC days before it, so today is always
+partial; `since` (inclusive) and `until` (exclusive) give an exact window.
+Plain `metergraph usage --days N` (no grouping) is instead the last N x 24
+hours, rolling and not aligned to UTC days; say so when you report it. Keep
+every window within 90 days and within the capabilities' `bounds.max_days`.
 Default to the shortest window that answers the question. Then choose the
 smallest tool that can answer:
 
@@ -275,8 +279,9 @@ and what Metergraph measured.
    `metergraph_query_traces` with `status` set to the failure status, the
    agreed `days` and `limit` 1). If the user gave a request ID and the match is
    ambiguous, list the candidates and ask which one.
-3. Explain from metadata: route, model, provider, tokens, cost, latency, status
-   and span count, with the citations above. If metadata is enough, stop here.
+3. Explain from metadata: route, model, provider, tokens, cost, status and
+   span count, plus latency only when the read returns it (CLI `traces` does
+   not; never infer it from timestamps), with the citations above. If metadata is enough, stop here.
 4. Optional content: with consent, `metergraph_get_trace` for that one trace to
    read the error, tool calls and root-cause classification.
 5. Optional replay: only with explicit approval and when the trace is replay

@@ -7,7 +7,7 @@
 
 - The bundled skills, and the setup skill in the Python `metergraph-skills` package
   (0.1.5), now come from [metergraph/skills](https://github.com/metergraph/skills) at
-  `a5678d1`. The setup skill gives one CLI sequence per place the agent runs,
+  `9b767fb`. The setup skill gives one CLI sequence per place the agent runs,
   including the deployment, address and workspace for customer-local and
   customer-owned AWS setup and a Metadata key for remote agents, sends the open
   source server to its MCP route, and keeps workspace identity out of public
