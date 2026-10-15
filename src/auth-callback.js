@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import http from "node:http";
 
+import { PAGE_CSP, PAGES } from "./callback-page.js";
+
 // Loopback listener for the OAuth redirect (RFC 8252 section 7.3). It binds
 // 127.0.0.1 on an ephemeral port and accepts exactly one callback: a GET on
 // the fixed path, with the exact Host, one state that matches, and either one
@@ -21,18 +23,11 @@ export const SETUP_CODE_PARAM = "ingest_setup_code";
 const PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": "default-src 'none'",
+  "content-security-policy": PAGE_CSP,
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   connection: "close",
-};
-const page = (text) =>
-  `<!doctype html><meta charset="utf-8"><title>Metergraph CLI</title><p>${text}</p>\n`;
-const PAGES = {
-  done: page("Metergraph CLI: authorization received. You can close this tab and return to the terminal."),
-  failed: page("Metergraph CLI: authorization did not complete. Return to the terminal for details."),
-  invalid: page("Metergraph CLI: this request was not accepted."),
 };
 
 // Starts listening. Resolves with { redirectUri, wait, close }.
