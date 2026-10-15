@@ -122,15 +122,36 @@ because the skill names the command without them.
 
 ## Pending release checks
 
-These journeys are not in a released package. In `0.2.1` (`latest` and
-`next`), `usage` takes only `--days` and `--limit`, and the read commands accept
-only a project's saved sign-in grant. `main` now has the remote Metadata-key
-path (see the Unreleased changelog), but no published version carries it yet.
-Every parity report lists
-both in `not_checked` until a released CLI ships them. Each row stays
-**Pending** until a live run of the published package passes; a packed tarball,
-source tests or an API call outside the CLI do not count. Exact flags, outcomes
-and reasons are recorded from the released help when the row is run.
+`0.2.2` is the first version that carries both journeys. Through `0.2.1`, `usage`
+takes only `--days` and `--limit`, and the read commands accept only a project's
+saved sign-in grant. Every parity report lists both journeys in `not_checked`
+until the harness has scenarios for them. Each row stays **Pending** until a live
+run of the published package passes; a packed tarball, source tests or an API
+call outside the CLI do not count. Exact flags, outcomes and reasons are recorded
+from the released help when the row is run.
+
+Both journeys need a service that offers them. A service release that predates
+grouped usage, the metadata filter echo and the combined setup approval does not
+advertise them. Against it, `usage` with grouping exits 14 `capability_unavailable`
+(`usage_aggregates_unavailable`) and points to `usage --days 7`, metadata filters
+exit `metadata_filter_unsupported`, and a first `setup` keeps two approvals.
+
+### Run plan for the published `0.2.2`
+
+Run from the registry (`--package metergraph-cli@0.2.2`) on macOS with an approved
+test workspace. Rows not listed stay Pending.
+
+| Journey | Rows | Against | Needs |
+|---|---|---|---|
+| Remote key | Remote markers with no key or grant; a local container; key supplied privately; key never disclosed | Hosted, with a service release that offers the key reads | A Metadata key a person creates on the Keys page, held in a 0600 file or the environment |
+| Remote key | Key for another workspace, revoked, or missing a scope | Hosted | A second workspace's key, and a key the person revokes after the first row |
+| Usage | Every question row from most expensive route today through parity with the agent API, except a capability the deployment lacks | Hosted, with a service release that offers grouped usage | A Metadata grant or key on a workspace with recent traffic |
+| Usage | A capability the deployment lacks | A customer-local bundle that predates grouped usage | The bundle's own administrator approvals |
+| Both | Skill discovery rows | The hosted projects above | Approval for the bounded agent prompts |
+
+Not in this plan: an expired key (no way to make one expire on demand),
+signup and invitation (they need a new person's account), and Linux and
+Windows hosts.
 
 ### Metadata reads from a remote agent session with an existing key
 

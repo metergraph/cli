@@ -2,7 +2,7 @@
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-`0.2.1` is published on the `latest` npm tag, and `next` points to it until a newer
+`0.2.2` is published on the `latest` npm tag, and `next` points to it until a newer
 prerelease ships. The hosted service supports sign in, Metadata reads and ingest bootstrap.
 Subsequent releases must pass the checks below before publication.
 

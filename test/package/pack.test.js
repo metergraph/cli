@@ -43,6 +43,7 @@ const EXPECTED_FILES = [
   "src/auth-oauth.js",
   "src/auth-session.js",
   "src/auth-store.js",
+  "src/callback-page.js",
   "src/cli.js",
   "src/constants.js",
   "src/deployment-credential.js",
@@ -74,7 +75,7 @@ const EXPECTED_FILES = [
   "src/verify-output.js",
   "src/verify.js",
 ];
-const SKILL_SHA256 = "d527a67efc42a55245b9c2c8fd2687c1f31f553e154a6242d0f31466993e314e";
+const SKILL_SHA256 = "ebf784673eff0280d85974504f93c683a1dabfb54156c9d27e091131462e9d5f";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;

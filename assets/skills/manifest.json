@@ -1,13 +1,13 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "839da0fc82c331598db78022610620390a81703a",
+  "commit": "39411ce1eceed6929ab3e5c4c20649f02e8eabb4",
   "skills": [
     {
       "name": "metergraph-analyze",
-      "sha256": "e8bf1debf62aa7d33d3dd363e5d95d8f781e8ca23cde4619b5bb4133dd47a7a5",
-      "size": 9360,
-      "revision": "sha256-e8bf1debf62a"
+      "sha256": "c45756ad1d33a360c7c845ca299d8c1ab1e2b8162865f635bc25c78358c2a1e6",
+      "size": 12148,
+      "revision": "sha256-c45756ad1d33"
     },
     {
       "name": "metergraph-candidates",
@@ -23,9 +23,9 @@
     },
     {
       "name": "metergraph-investigate",
-      "sha256": "775dbe7ca1100b17638d0905302ef1324694a60b90372c6c3df7b598a8f70438",
-      "size": 6091,
-      "revision": "sha256-775dbe7ca110"
+      "sha256": "470579faf9e8b5f1a562060d51ec5a71d1b9c47213403a2447dd40af56a74869",
+      "size": 19331,
+      "revision": "sha256-470579faf9e8"
     },
     {
       "name": "metergraph-iterate",
@@ -47,15 +47,15 @@
     },
     {
       "name": "metergraph-onboarding",
-      "sha256": "6e6f418933f37b34437035ab3171344d43f37dee3770815b19f97efb62e5f1d1",
-      "size": 10267,
-      "revision": "sha256-6e6f418933f3"
+      "sha256": "409d105f3b042514fd347a1fffc5489a94c01d1bc8aac55800e8c9f13a66a2c1",
+      "size": 10751,
+      "revision": "sha256-409d105f3b04"
     },
     {
       "name": "metergraph-report",
-      "sha256": "58add8f6a32191e6fc01ca533a700e190a8e6da412e619bca38c65a481ea9fb5",
-      "size": 4521,
-      "revision": "sha256-58add8f6a321"
+      "sha256": "0cdbeb684c4f7f87932784db832f376cff984fe0220a1167f1a73edd550450b7",
+      "size": 5471,
+      "revision": "sha256-0cdbeb684c4f"
     },
     {
       "name": "metergraph-workloads",

@@ -12,8 +12,8 @@ import { assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL = fs.readFileSync(path.join(ROOT, "assets", "skill", "SKILL.md"));
-const SHA256 = "d527a67efc42a55245b9c2c8fd2687c1f31f553e154a6242d0f31466993e314e";
-const REVISION = "sha256-d527a67efc42";
+const SHA256 = "ebf784673eff0280d85974504f93c683a1dabfb54156c9d27e091131462e9d5f";
+const REVISION = "sha256-ebf784673eff";
 const GUIDE_URL = "https://www.metergraph.dev/docs/guides/agent-access/";
 const FAULTS = pathToFileURL(fileURLToPath(new URL("./fixtures/fs-faults.js", import.meta.url))).href;
 const isWindows = process.platform === "win32";
@@ -156,7 +156,7 @@ function trySymlink(target, link, type) {
 
 test("the bundled skill matches the pinned hash and its manifest", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "assets", "skill", "manifest.json"), "utf8"));
-  assert.equal(SKILL.length, 13666);
+  assert.equal(SKILL.length, 19764);
   assert.equal(sha256(SKILL), SHA256);
   assert.deepEqual(manifest, {
     manifest_version: 1,
@@ -164,7 +164,7 @@ test("the bundled skill matches the pinned hash and its manifest", () => {
     file: "SKILL.md",
     source_url: "https://www.metergraph.dev/SKILL.md",
     sha256: SHA256,
-    size: 13666,
+    size: 19764,
     revision: REVISION,
   });
   assert.ok(SKILL.toString("utf8").startsWith("---\nname: metergraph\ndescription: "));

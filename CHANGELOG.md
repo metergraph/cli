@@ -1,9 +1,32 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.1`.
+`latest` stays on the last stable version, currently `0.2.2`.
 
-## Unreleased
+## 0.2.2
+
+- The bundled skills, and the setup skill in the Python `metergraph-skills` package
+  (0.1.5), now come from [metergraph/skills](https://github.com/metergraph/skills) at
+  `39411ce`. The setup skill gives one CLI sequence per place the agent runs,
+  including the deployment, address and workspace for customer-local and
+  customer-owned AWS setup and a Metadata key for remote agents, sends the open
+  source server to its MCP route, and keeps workspace identity out of public
+  repositories and CI logs. A key used without `--workspace` continues once the
+  person confirms the verified workspace. The investigation skill answers cost questions with grouped `usage`, splits
+  cost by prompt with exact metadata rather than by route, and never judges a code
+  change's cost impact from its diff alone. The analysis skill shows an analysis
+  run's stages as a timeline.
+- `usage` answers cost questions with grouped usage computed per call by the service:
+  `--group-by provider,model,route,day`, exact `--route`, `--provider`, `--model` and
+  `--environment` filters, an explicit UTC window (`--days N`, `--today`, or
+  `--since`/`--until`), `--sort` by cost, cost per call, calls, errors, mean or p95
+  latency or day, and `--compare previous|previous-same-time` with the change per
+  group. `--compare previous` warns when a window ending part way through today is
+  compared with a whole prior period. Help lists six worked examples. Without any of
+  these options `usage` keeps its route-by-day listing. A service that does not
+  offer grouped usage to the grant exits `capability_unavailable`
+  (`usage_aggregates_unavailable`), reads nothing and, when the grant has the
+  route-by-day read, points to `metergraph usage --days 7`.
 
 - The browser page shown after a sign-in or setup approval now matches the service's consent
   page (Metergraph band and card) instead of a bare line of text, and says plainly that the
