@@ -1547,3 +1547,18 @@ function checkFilters(body, rows, request) {
     }
   }
 }
+
+// Shared with the experiments validators (experiments-contract.js), which
+// hold their documents to the same rules.
+export {
+  Invalid,
+  displayText,
+  isAmount,
+  isCount,
+  isObject,
+  isTimestamp,
+  isToken,
+  provenance,
+  rowObject,
+  run,
+};

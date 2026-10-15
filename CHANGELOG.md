@@ -3,6 +3,21 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.2.2`.
 
+## Unreleased
+
+- `experiments list`, `estimate`, `start` and `get` replay a workload's last 10 to 40
+  production calls on 1 to 3 treatments (a provider, model and settings) and report
+  cost, latency and output statistics per treatment next to production on the same
+  calls. `estimate` prices it against the service's budget and writes nothing; `start`
+  takes the same arguments; `get` says when to poll and, once finished, prints the
+  statistics, which show differences and never judge them. The reads use the saved
+  Metadata grant or a Metadata key and never read inputs or outputs. `start` needs a
+  separate coding-agent key with Debug access and Allow analysis starts, checked for
+  exactly that and used only for the start request. A service refusal (budget, daily
+  cap, experiments running, an unpriced model) exits with the new code 19, `refused`;
+  a start the service may have recorded without confirming it exits with the new code
+  20, `unconfirmed`, and says to list experiments before starting again.
+
 ## 0.2.2
 
 - The bundled skills, and the setup skill in the Python `metergraph-skills` package
