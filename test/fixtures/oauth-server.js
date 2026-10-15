@@ -73,6 +73,15 @@ export async function startOAuthServer(initial = {}) {
     // Static agent read tokens an operator configured, accepted on the
     // bearer documents for the behavior's workspace, as MG_AGENT_TOKENS are.
     agentTokens: [],
+    // Coding-agent keys with Debug access and the experiment start grant
+    // (agent:read with agent:analysis-run), for experiments start.
+    startTokens: [],
+    // Experiments: a hook that rewrites each document (kind is list,
+    // estimate, start or get), and experimentsRaw, which may answer the
+    // request itself and return true. experimentStatus is what get reports.
+    experiments: (doc) => doc,
+    experimentsRaw: null,
+    experimentStatus: "done",
     ...initial,
   };
 
@@ -151,8 +160,9 @@ export async function startOAuthServer(initial = {}) {
     }
     if (path === "/v1/oauth/token" && request.method === "POST") return token(response, new URLSearchParams(body));
     if (path === "/v1/oauth/revoke" && request.method === "POST") return revokeToken(response, new URLSearchParams(body));
-    if (path === "/v1/agent/workspace" || path === "/v1/agent/capabilities" || READ_DOCUMENTS[path]) {
-      return bearer(request, response, path, url.searchParams);
+    if (path === "/v1/agent/workspace" || path === "/v1/agent/capabilities" || READ_DOCUMENTS[path] ||
+        path === "/v1/agent/experiments" || path.startsWith("/v1/agent/experiments/")) {
+      return bearer(request, response, path, url.searchParams, body);
     }
     return send(response, 404, { error: "not_found" });
   }
@@ -423,11 +433,12 @@ export async function startOAuthServer(initial = {}) {
     return response.end("{}");
   }
 
-  function bearer(request, response, path, query) {
+  function bearer(request, response, path, query, body = "") {
     const header = request.headers.authorization ?? "";
     const presented = header.startsWith("Bearer ") ? header.slice(7) : null;
     const grant = presented === null ? undefined : state.access.get(presented) ??
-      (behavior.agentTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false } : undefined);
+      (behavior.agentTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false } : undefined) ??
+      (behavior.startTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false, start: true } : undefined);
     if (grant === undefined || grant.revoked) {
       response.writeHead(401, {
         "content-type": "application/json",
@@ -443,8 +454,13 @@ export async function startOAuthServer(initial = {}) {
       source: "synthetic-fixture",
     };
     if (path === "/v1/agent/workspace") {
-      served.workspace = behavior.workspace(workspaceDocument(provenance, grant.workspaceId));
+      const doc = workspaceDocument(provenance, grant.workspaceId);
+      if (grant.start) doc.access = { scopes: ["agent:analysis-run", "agent:read"] };
+      served.workspace = behavior.workspace(doc);
       return send(response, 200, served.workspace);
+    }
+    if (path === "/v1/agent/experiments" || path.startsWith("/v1/agent/experiments/")) {
+      return experiments(request, response, path, query, body, grant, provenance);
     }
     if (READ_DOCUMENTS[path]) {
       if (behavior.readRaw !== null && behavior.readRaw(request, response, path, query)) return undefined;
@@ -465,12 +481,49 @@ export async function startOAuthServer(initial = {}) {
       served.read = behavior[name](built, query);
       return send(response, 200, served.read);
     }
-    served.capabilities = behavior.capabilities(capabilitiesDocument(provenance));
+    served.capabilities = behavior.capabilities(capabilitiesDocument(provenance, { start: grant.start === true }));
     return send(response, 200, served.capabilities);
   }
 
+  // The experiments endpoints, answered as the service answers them.
+  function experiments(request, response, path, query, body, grant, provenance) {
+    if (behavior.experimentsRaw !== null && behavior.experimentsRaw(request, response, path, query, body, grant)) return undefined;
+    const refuse = (status, code, extra = {}) => send(response, status, {
+      schema_version: CONTRACT_VERSION, error: { code, message: "SYNTHETIC_BODY_MARKER", ...extra },
+    });
+    let payload = null;
+    if (request.method === "POST") {
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        return refuse(422, "invalid_argument");
+      }
+    }
+    const workspace = grant.workspaceId;
+    if (request.method === "POST" && path === "/v1/agent/experiments/estimate") {
+      served.experiment = behavior.experiments(experimentEstimateDocument(provenance, payload, origin, workspace), "estimate");
+      return send(response, 200, served.experiment);
+    }
+    if (request.method === "POST" && path === "/v1/agent/experiments") {
+      if (!grant.start) return refuse(403, "forbidden");
+      served.experiment = behavior.experiments(experimentStartDocument(provenance, payload, origin, workspace), "start");
+      return send(response, 202, served.experiment);
+    }
+    if (request.method === "GET" && path === "/v1/agent/experiments") {
+      served.experiment = behavior.experiments(experimentListDocument(provenance, query, origin, workspace), "list");
+      return send(response, 200, served.experiment);
+    }
+    const id = path.slice("/v1/agent/experiments/".length);
+    if (request.method === "GET" && id === EXPERIMENT_ID) {
+      served.experiment = behavior.experiments(
+        experimentSummaryDocument(provenance, behavior.experimentStatus, origin, workspace), "get");
+      return send(response, 200, served.experiment);
+    }
+    return refuse(404, "not_found");
+  }
+
   // The last bearer documents actually sent, so tests can assert the wire shape.
-  const served = { workspace: null, capabilities: null, read: null };
+  const served = { workspace: null, capabilities: null, read: null, experiment: null };
 
   return {
     origin,
@@ -526,7 +579,9 @@ const capability = (available, content, privacyClass, requiredScope, schema, ext
   external_calls: externalCalls,
 });
 
-export function capabilitiesDocument(provenance) {
+// A start key (Debug with the start grant) is offered content, replay and the
+// experiment start too; a Metadata grant sees them listed but unavailable.
+export function capabilitiesDocument(provenance, { start = false } = {}) {
   const metadata = (schema) => capability(true, false, "metadata", "agent:metadata", schema, false);
   return {
     schema_version: CONTRACT_VERSION,
@@ -543,6 +598,14 @@ export function capabilitiesDocument(provenance) {
       report_evidence: capability(false, false, "content", "agent:read", "agent-access/report-evidence", false),
       trace_content: capability(false, true, "content", "agent:read", "trace-debug/trace", false),
       trace_replay: capability(false, false, "replay", "agent:replay", "trace-debug/replay", true),
+      experiments: metadata("agent-access/experiments"),
+      experiment_estimate: metadata("agent-access/experiment-estimate"),
+      experiment: metadata("agent-access/experiment"),
+      experiment_cases: capability(start, true, "content", "agent:read", "agent-access/experiment-cases", false),
+      experiment_start: {
+        ...capability(start, true, "replay", "agent:analysis-run", "agent-access/experiment-start", true),
+        mutates: true,
+      },
     },
     privacy_classes: {
       content: { description: "Synthetic content class.", fields: ["identifiers", "spans[].content.request.text"] },
@@ -994,4 +1057,123 @@ function readBody(request) {
 function send(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
+}
+
+// Experiments, in the service's field types. The case content the dashboard
+// and metergraph_get_experiment_cases show never appears in these Metadata
+// documents; a stray content field carries a marker so tests prove an
+// unknown field is never printed.
+export const EXPERIMENT_ID = "3f2b8c1d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+const EXPERIMENT_CREATED = "2026-10-14T12:00:00+00:00";
+
+const experimentLink = (origin, workspace, query) =>
+  `${origin}/#experiments?${new URLSearchParams({ ...query, workspace }).toString()}`;
+
+function normalizedRequest(payload) {
+  return {
+    workload_id: payload.workload_id,
+    sample: { last_n: payload.sample?.last_n ?? 20, ...(payload.sample?.model ? { model: payload.sample.model } : {}) },
+    treatments: payload.treatments.map((arm, index) => ({
+      label: arm.label ?? `Treatment ${String.fromCharCode(65 + index)}`,
+      provider: arm.provider,
+      model: arm.model,
+      settings: arm.settings ?? {},
+    })),
+    tracked_fields: payload.tracked_fields ?? [],
+  };
+}
+
+function armEstimates(request) {
+  return request.treatments.map((arm) => ({ label: arm.label, gateway_model: `${arm.provider}/${arm.model}`, estimate_usd: 0.0123 }));
+}
+
+const SAMPLE = (request) => ({ last_n: request.sample.last_n, model: request.sample.model ?? null, cases: 12, models_seen: { "gpt-5.4": 12 } });
+
+export function experimentEstimateDocument(provenance, payload, origin, workspace) {
+  const request = normalizedRequest(payload);
+  return {
+    schema_version: CONTRACT_VERSION, provenance, warnings: [], content_included: false,
+    request,
+    estimate: {
+      estimate_usd: 0.0123 * request.treatments.length, budget_usd: 5, over_budget: false, daily_budget_usd: 20,
+      spent_24h_usd: 1.5, daily_budget_exhausted: false, sample: SAMPLE(request), arms: armEstimates(request),
+    },
+    blocking_reasons: [],
+    start: { tool: "metergraph_start_experiment", arguments: request, required_scope: "agent:analysis-run", granted: false },
+    metergraph_links: {
+      new_experiment: experimentLink(origin, workspace, { workload: request.workload_id, view: "new" }),
+      experiments: experimentLink(origin, workspace, { workload: request.workload_id }),
+    },
+  };
+}
+
+export function experimentStartDocument(provenance, payload, origin, workspace) {
+  const request = normalizedRequest(payload);
+  return {
+    schema_version: CONTRACT_VERSION, provenance, warnings: [], content_included: false,
+    request,
+    experiment: {
+      id: EXPERIMENT_ID, status: "queued", terminal: false, workload_id: request.workload_id, error_code: null,
+      estimate_usd: 0.0123, budget_usd: 5, sample: SAMPLE(request), arms: armEstimates(request),
+    },
+    app_url: experimentLink(origin, workspace, { workload: request.workload_id, id: EXPERIMENT_ID }),
+    follow: { tool: "metergraph_get_experiment", arguments: { experiment_id: EXPERIMENT_ID }, poll_after_seconds: 15 },
+  };
+}
+
+const LUNA = { label: "Luna", provider: "openai", model: "gpt-6-luna", settings: { temperature: 0.2 } };
+
+export function experimentListDocument(provenance, query, origin, workspace) {
+  const limit = Number(query.get("limit"));
+  const workload = query.get("workload_id");
+  return {
+    schema_version: CONTRACT_VERSION, provenance, warnings: [], content_included: false,
+    workload_id: workload,
+    page: { limit, truncated: false, next_cursor: null },
+    experiments: [{
+      id: EXPERIMENT_ID, status: "done", terminal: true, workload_id: workload ?? "summarizeTicket",
+      sample: { last_n: 20, model: null, cases: 12 }, arms: [LUNA],
+      estimate_usd: 0.0123, budget_usd: 5, spent_usd: 0.004, error_code: null,
+      created_at: EXPERIMENT_CREATED, finished_at: EXPERIMENT_CREATED,
+      app_url: experimentLink(origin, workspace, { workload: workload ?? "summarizeTicket", id: EXPERIMENT_ID }),
+    }],
+    metergraph_links: { experiments: experimentLink(origin, workspace, workload ? { workload } : {}) },
+  };
+}
+
+const STATS = (latency, cost) => ({
+  cases: 10, errors: 0, cost_per_call_usd: cost, latency_ms_p50: latency, output_tokens_p50: 40, output_chars_p50: 180,
+  json_parse_rate: 1, same_keys_rate: 0.9, empty_or_refused_rate: 0, cut_off_rate: 0, temperature_dropped: 0,
+  response_format_dropped: 0, temperature_ignored_with_reasoning: 0,
+});
+
+export function experimentSummaryDocument(provenance, status, origin, workspace) {
+  const terminal = status === "done" || status === "failed";
+  return {
+    schema_version: CONTRACT_VERSION, provenance, content_included: false,
+    warnings: [{ code: "content_omitted", message: "SYNTHETIC_BODY_MARKER" }],
+    experiment: {
+      id: EXPERIMENT_ID, status, terminal, workload_id: "summarizeTicket", error_code: null,
+      created_at: EXPERIMENT_CREATED, started_at: EXPERIMENT_CREATED, finished_at: terminal ? EXPERIMENT_CREATED : null,
+      sample: {
+        last_n: 20, model: null, cases: 12, replayed: terminal ? 10 : 0, not_replayable: 2,
+        not_replayable_reasons: { tool_messages_unsupported: 2 }, limitations: {},
+      },
+      tracked_fields: ["$.priority"],
+      spend: { estimate_usd: 0.0123, budget_usd: 5, spent_usd: 0.004, reserved_usd: 0, replay_spent_usd: 0 },
+      control: {
+        model: "gpt-5.4", provider: "openai", settings_seen: { temperature: [0.3] }, models_seen: { "gpt-5.4": 12 },
+        summary: STATS(1800, 0.0042),
+      },
+      arms: [{
+        ...LUNA, temperature_ignored_with_reasoning: false,
+        summary: STATS(420, 0.0004), control_summary: STATS(1800, 0.0042),
+      }],
+      app_url: experimentLink(origin, workspace, { workload: "summarizeTicket", id: EXPERIMENT_ID }),
+    },
+    follow: terminal ? null : { tool: "metergraph_get_experiment", arguments: { experiment_id: EXPERIMENT_ID }, poll_after_seconds: 15 },
+    cases: { tool: "metergraph_get_experiment_cases", arguments: { experiment_id: EXPERIMENT_ID }, required_scope: "agent:read", granted: false },
+    // Not part of the Metadata contract: never read, never printed.
+    case_previews: ["SYNTHETIC_CONTENT_MARKER prompt"],
+  };
 }

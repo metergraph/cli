@@ -2,6 +2,14 @@ import { parseRepository } from "./repository-identity.js";
 import {
   DEFAULT_ORIGIN,
   DEFAULT_TIMEOUT_MS,
+  EXPERIMENT_LAST_N,
+  EXPERIMENT_LIST_DEFAULT_LIMIT,
+  EXPERIMENT_LIST_MAX_LIMIT,
+  EXPERIMENT_MAX_TOKENS,
+  EXPERIMENT_MAX_TRACKED_FIELDS,
+  EXPERIMENT_MAX_TREATMENTS,
+  EXPERIMENT_REASONING_EFFORTS,
+  EXPERIMENT_TEXT_LIMITS,
   HANDOFF_SKILL_CLIENTS,
   HANDOFF_SKILL_RUNTIMES,
   HANDOFF_LOGIN_RUNTIMES,
@@ -35,8 +43,9 @@ import { parseOrigin } from "./origin.js";
 import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "skills", "login", "logout", "setup", "verify", ...READ_COMMANDS]);
+const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+export const EXPERIMENT_ACTIONS = Object.freeze(["list", "estimate", "start", "get"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
 const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
@@ -63,6 +72,16 @@ const OPTIONS = {
     ...READ_BASE, ...READ_KEY, "--days", "--limit", "--route", "--status", "--cursor", "--metadata", "--metadata-json",
   ]),
   verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
+  experiments: new Set([
+    ...READ_BASE, ...READ_KEY, "--workload", "--limit", "--treatment", "--last-n", "--sample-model", "--track", "--id",
+  ]),
+};
+// Which experiments options each action takes, beyond READ_BASE and READ_KEY.
+const EXPERIMENT_OPTIONS = {
+  list: new Set(["--workload", "--limit"]),
+  estimate: new Set(["--workload", "--treatment", "--last-n", "--sample-model", "--track"]),
+  start: new Set(["--workload", "--treatment", "--last-n", "--sample-model", "--track"]),
+  get: new Set(["--id"]),
 };
 // Requests the read commands recognize and refuse, so a script gets an
 // explicit unsupported result instead of an unknown argument or, worse, a
@@ -96,6 +115,7 @@ const REFUSED_MESSAGES = {
 };
 // Options that may be given more than once; their values are kept in order.
 const REPEATABLE = new Set(["--metadata"]);
+const EXPERIMENT_REPEATABLE = new Set(["--treatment", "--track"]);
 // usage takes several values for each of its exact-match filters.
 const USAGE_REPEATABLE = new Set(["--route", "--provider", "--model", "--environment"]);
 // usage reads a time range and environments itself, through grouped usage.
@@ -147,7 +167,7 @@ export function parseArgs(argv) {
 
   const fail = (code, message, outcome = "invalid_input") => ({
     ok: false,
-    command: (command === "skill" || command === "skills") && action !== null
+    command: (command === "skill" || command === "skills" || command === "experiments") && action !== null
       ? `${command} ${action}`
       : command ?? (version ? "version" : null),
     json,
@@ -182,6 +202,10 @@ export function parseArgs(argv) {
       action = arg;
       continue;
     }
+    if (command === "experiments" && action === null && EXPERIMENT_ACTIONS.includes(arg)) {
+      action = arg;
+      continue;
+    }
 
     if (READ_COMMANDS.includes(command)) {
       const equals = arg.indexOf("=");
@@ -212,7 +236,8 @@ export function parseArgs(argv) {
         if (value === undefined) {
           return fail("missing_value", `${name} requires a value.`);
         }
-        if (REPEATABLE.has(name) || (command === "usage" && USAGE_REPEATABLE.has(name))) {
+        if (REPEATABLE.has(name) || (command === "usage" && USAGE_REPEATABLE.has(name)) ||
+            (command === "experiments" && EXPERIMENT_REPEATABLE.has(name))) {
           values[name] = [...(values[name] ?? []), value];
           continue;
         }
@@ -242,6 +267,12 @@ export function parseArgs(argv) {
         `Unknown skills subcommand at argument ${position}. Use install, update or list.`,
       );
     }
+    if (command === "experiments" && action === null && !arg.startsWith("-")) {
+      return fail(
+        "unknown_subcommand",
+        `Unknown experiments subcommand at argument ${position}. Use list, estimate, start or get.`,
+      );
+    }
     return fail(
       "unknown_argument",
       `Unrecognized argument at position ${position}. Run "metergraph --help" for usage.`,
@@ -257,6 +288,7 @@ export function parseArgs(argv) {
   if (command === "login") return parseLogin(values, flags, json, fail);
   if (command === "setup") return parseSetup(values, flags, json, fail);
   if (command === "verify") return parseVerify(values, flags, json, fail);
+  if (command === "experiments") return parseExperiments(action, values, json, fail);
   if (READ_COMMANDS.includes(command)) return parseRead(command, values, flags, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
@@ -278,6 +310,177 @@ export function parseArgs(argv) {
   }
 
   return { ok: true, command: "doctor", origin, timeoutMs, json };
+}
+
+// --url, --workspace and --agent-token-file, shared by the read commands and
+// experiments: { ok: true, origin, workspace, agentTokenFile } or a failure.
+function parseKeyTarget(values, fail) {
+  let origin = null;
+  if (values["--url"] !== undefined) {
+    origin = parseOrigin(values["--url"]);
+    if (origin === null) return fail("invalid_url", INVALID_URL);
+  }
+  const rawWorkspace = values["--workspace"];
+  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
+    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  }
+  const agentTokenFile = values["--agent-token-file"] ?? null;
+  if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
+    return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
+  }
+  return {
+    ok: true,
+    origin,
+    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    agentTokenFile,
+  };
+}
+
+// experiments list | estimate | start | get. estimate and start take the same
+// request, so an agent starts exactly what it priced: the workload, 1 to 3
+// --treatment PROVIDER/MODEL[,label=..][,temperature=..][,max_tokens=..]
+// [,reasoning_effort=..], and optionally --last-n, --sample-model and up to ten
+// --track JSON paths. The service validates every request in full; these
+// checks only refuse what it would refuse before anything is sent.
+function parseExperiments(action, values, json, fail) {
+  if (action === null) {
+    return fail(
+      "missing_subcommand",
+      'experiments requires a subcommand: list, estimate, start or get. Run "metergraph help experiments" for usage.',
+    );
+  }
+  for (const name of Object.keys(values)) {
+    if (!READ_BASE.includes(name) && !READ_KEY.includes(name) && !EXPERIMENT_OPTIONS[action].has(name)) {
+      return fail("unknown_argument", `experiments ${action} does not take ${name}. Run "metergraph help experiments" for usage.`);
+    }
+  }
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs = rawTimeout === undefined
+    ? READ_DEFAULT_TIMEOUT_MS
+    : parseTimeout(rawTimeout, READ_MIN_TIMEOUT_MS, READ_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) {
+    return fail("invalid_timeout", `--timeout-ms must be a whole number from ${READ_MIN_TIMEOUT_MS} to ${READ_MAX_TIMEOUT_MS}.`);
+  }
+  const target = parseKeyTarget(values, fail);
+  if (!target.ok) return target;
+  delete target.ok;
+  const parsed = {
+    ok: true, command: "experiments", action, ...target, project: paths.project, configDir: paths.configDir,
+    timeoutMs, json, experiment: { id: null, workloadId: null, limit: null, request: null },
+  };
+  const workload = values["--workload"];
+  if (workload !== undefined && !experimentText(workload, EXPERIMENT_TEXT_LIMITS.workload)) {
+    return fail("invalid_workload", `--workload must be 1 to ${EXPERIMENT_TEXT_LIMITS.workload} characters without control characters.`);
+  }
+  if (action === "get") {
+    const id = values["--id"];
+    if (id === undefined || !UUID.test(id)) return fail("invalid_experiment_id", "--id must be an experiment ID in UUID form.");
+    parsed.experiment.id = id.toLowerCase();
+    return parsed;
+  }
+  if (action === "list") {
+    const limit = values["--limit"] === undefined
+      ? EXPERIMENT_LIST_DEFAULT_LIMIT
+      : parseBounded(values["--limit"], 1, EXPERIMENT_LIST_MAX_LIMIT);
+    if (limit === null) return fail("invalid_limit", `--limit must be a whole number from 1 to ${EXPERIMENT_LIST_MAX_LIMIT}.`);
+    // The exact query list sends, so an over-long one fails here and not after sign in.
+    const query = new URLSearchParams({ ...(workload === undefined ? {} : { workload_id: workload }), limit: String(limit) });
+    if (query.toString().length > MAX_QUERY_LENGTH) {
+      return fail("query_too_long", "--workload is too long to send in one request once encoded.");
+    }
+    parsed.experiment.workloadId = workload ?? null;
+    parsed.experiment.limit = limit;
+    return parsed;
+  }
+  if (workload === undefined) return fail("missing_workload", "--workload is required: the workload (route) whose calls to replay.");
+  const specs = values["--treatment"] ?? [];
+  if (specs.length < 1 || specs.length > EXPERIMENT_MAX_TREATMENTS) {
+    return fail("invalid_treatments", `Give 1 to ${EXPERIMENT_MAX_TREATMENTS} --treatment values.`);
+  }
+  const treatments = [];
+  for (const spec of specs) {
+    const treatment = parseTreatment(spec);
+    if (treatment === null) {
+      return fail(
+        "invalid_treatment",
+        "--treatment must be PROVIDER/MODEL, optionally followed by ,label=NAME ,temperature=0..2 " +
+          `,max_tokens=1..${EXPERIMENT_MAX_TOKENS} or ,reasoning_effort=${EXPERIMENT_REASONING_EFFORTS.join("|")}.`,
+      );
+    }
+    treatments.push(treatment);
+  }
+  const labels = treatments.map((treatment) => treatment.label).filter((label) => label !== undefined);
+  if (new Set(labels.map((label) => label.toLowerCase())).size !== labels.length ||
+      labels.some((label) => label.toLowerCase() === "control")) {
+    return fail("invalid_treatments", 'Treatment labels must be unique and cannot be "control".');
+  }
+  const sample = { last_n: EXPERIMENT_LAST_N.default };
+  if (values["--last-n"] !== undefined) {
+    sample.last_n = parseBounded(values["--last-n"], EXPERIMENT_LAST_N.min, EXPERIMENT_LAST_N.max);
+    if (sample.last_n === null) {
+      return fail("invalid_last_n", `--last-n must be a whole number from ${EXPERIMENT_LAST_N.min} to ${EXPERIMENT_LAST_N.max}.`);
+    }
+  }
+  if (values["--sample-model"] !== undefined) {
+    if (!experimentText(values["--sample-model"], EXPERIMENT_TEXT_LIMITS.model)) {
+      return fail("invalid_sample_model", `--sample-model must be 1 to ${EXPERIMENT_TEXT_LIMITS.model} characters without control characters.`);
+    }
+    sample.model = values["--sample-model"];
+  }
+  const tracked = values["--track"] ?? [];
+  if (tracked.length > EXPERIMENT_MAX_TRACKED_FIELDS ||
+      tracked.some((field) => !experimentText(field, EXPERIMENT_TEXT_LIMITS.path) || !field.startsWith("$"))) {
+    return fail("invalid_tracked_fields", `Give at most ${EXPERIMENT_MAX_TRACKED_FIELDS} --track JSON paths, each starting with $.`);
+  }
+  parsed.experiment.request = { workload_id: workload, sample, treatments, tracked_fields: [...new Set(tracked)] };
+  return parsed;
+}
+
+function experimentText(value, max) {
+  return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= max && !hasUnsafeText(value);
+}
+
+const TREATMENT_KEYS = new Set(["label", "temperature", "max_tokens", "reasoning_effort"]);
+
+// PROVIDER/MODEL[,key=value...] as a treatment, or null. The model may itself
+// contain "/" (a gateway ID such as anthropic/claude-haiku-4.5).
+function parseTreatment(spec) {
+  const [head, ...options] = spec.split(",");
+  const slash = head.indexOf("/");
+  if (slash <= 0) return null;
+  const provider = head.slice(0, slash);
+  const model = head.slice(slash + 1);
+  if (!experimentText(provider, EXPERIMENT_TEXT_LIMITS.provider) || !experimentText(model, EXPERIMENT_TEXT_LIMITS.model)) {
+    return null;
+  }
+  const treatment = { provider, model };
+  const settings = {};
+  for (const option of options) {
+    const equals = option.indexOf("=");
+    const key = option.slice(0, equals);
+    const value = option.slice(equals + 1);
+    if (equals <= 0 || !TREATMENT_KEYS.has(key) || Object.hasOwn(settings, key) || (key === "label" && treatment.label !== undefined)) {
+      return null;
+    }
+    if (key === "label") {
+      if (!experimentText(value, EXPERIMENT_TEXT_LIMITS.label)) return null;
+      treatment.label = value;
+    } else if (key === "temperature") {
+      if (!/^(?:[0-1](?:\.[0-9]{1,3})?|2(?:\.0{1,3})?)$/.test(value)) return null;
+      settings.temperature = Number(value);
+    } else if (key === "max_tokens") {
+      const tokens = /^[0-9]{1,5}$/.test(value) ? Number(value) : 0;
+      if (tokens < 1 || tokens > EXPERIMENT_MAX_TOKENS) return null;
+      settings.max_tokens = tokens;
+    } else {
+      if (!EXPERIMENT_REASONING_EFFORTS.includes(value)) return null;
+      settings.reasoning_effort = value;
+    }
+  }
+  if (Object.keys(settings).length > 0) treatment.settings = settings;
+  return treatment;
 }
 
 function parseVerify(values, flags, json, fail) {
@@ -515,24 +718,9 @@ function parseRead(command, values, flags, json, fail) {
   }
   // Where to read and with which key: the same for every read, grouped usage
   // included.
-  let origin = null;
-  if (values["--url"] !== undefined) {
-    origin = parseOrigin(values["--url"]);
-    if (origin === null) return fail("invalid_url", INVALID_URL);
-  }
-  const rawWorkspace = values["--workspace"];
-  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
-    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
-  }
-  const agentTokenFile = values["--agent-token-file"] ?? null;
-  if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
-    return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
-  }
-  const target = {
-    origin,
-    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
-    agentTokenFile,
-  };
+  const target = parseKeyTarget(values, fail);
+  if (!target.ok) return target;
+  delete target.ok;
   if (command === "usage" && (USAGE_GROUPED.some((name) => values[name] !== undefined) || flags.has("--today"))) {
     return parseGroupedUsage(values, flags, json, fail, { paths, timeoutMs, limit, target });
   }

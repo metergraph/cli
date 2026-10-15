@@ -19,6 +19,7 @@ import {
 } from "./read-contract.js";
 import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
+import { experimentNextAction, experimentRead } from "./experiments.js";
 import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
@@ -211,6 +212,16 @@ export async function runRead(options) {
       return end("ok", null, context.value);
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
+    if (options.command === "experiments") {
+      const read = await experimentRead(session.session, options, ctx, documents, limit.signal, notices);
+      if (!read.ok) {
+        const settled = read.outcome === "refused" ? read : settle(read);
+        const report = read.refusal ? { refusal: read.refusal }
+          : read.retryAfter !== undefined ? { retry_after_seconds: read.retryAfter } : null;
+        return end(settled.outcome, settled.reason, report);
+      }
+      return end("ok", null, read.value);
+    }
 
     const read = grouped ? GROUPED_USAGE : READS[options.command];
     const entry = capabilities.value.agent[read.capability];
@@ -328,7 +339,7 @@ const INSUFFICIENT_SCOPE = /(?:^|[\s,])error\s*=\s*"?insufficient_scope"?(?:$|[\
 // True when any string in value (keys included) contains one of the known
 // credential values. An exact containment check against values this run
 // holds, not a guess at what looks secret.
-function holdsKnown(value, known) {
+export function holdsKnown(value, known) {
   if (known.length === 0) return false;
   if (typeof value === "string") return known.some((secret) => value.includes(secret));
   if (value === null || typeof value !== "object") return false;
@@ -403,6 +414,7 @@ function readData(ctx, report, notices, outcome, options, extra = {}) {
     result: outcome === "ok" ? report : null,
     retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
       ? report?.retry_after_seconds ?? null : null,
+    ...(options.command === "experiments" ? { refusal: outcome === "refused" ? report?.refusal ?? null : null } : {}),
     notices: [...notices].sort(),
     next_action: nextAction(outcome, ctx, options, extra),
   };
@@ -460,6 +472,8 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
   const reason = ctx.reason;
   const capabilities = ctx.capabilities;
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
+  const experiment = experimentNextAction(outcome, ctx, options, report);
+  if (experiment !== undefined) return experiment;
   if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
     // Offer the route-by-day read only when this grant actually has it.
     if (capabilities?.agent?.usage?.available !== true) return null;

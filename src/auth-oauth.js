@@ -1,6 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { AGENT_CONTRACT_VERSION, AUTH_PATHS, METADATA_SCOPE } from "./constants.js";
+import {
+  AGENT_CONTRACT_VERSION,
+  AUTH_PATHS,
+  EXPERIMENT_START_KEY_SCOPES,
+  EXPERIMENT_START_SCOPE,
+  METADATA_SCOPE,
+} from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import { failureOf, send } from "./transport.js";
 
@@ -396,14 +402,19 @@ function decodeClaims(token) {
 // with nothing to pin it to passes anyWorkspace: true with workspaceId null,
 // and then the workspace the service reports is checked for consistency and
 // returned as the verified one.
-export async function verifyContext(origin, accessToken, { profile, workspaceId, anyWorkspace = false }, signal) {
+// access is "metadata" (every read command and sign in) or
+// "experiment_start" (experiments start only: a coding-agent key with Debug
+// access and the start grant, checked for exactly that and used for nothing else).
+export async function verifyContext(origin, accessToken, { profile, workspaceId, anyWorkspace = false, access = "metadata" }, signal) {
   const workspace = await bearerJson(origin, AUTH_PATHS.workspace, accessToken, WORKSPACE_BYTES, signal, "workspace");
   if (!workspace.ok) return workspace;
   if (workspaceId === null && anyWorkspace === true) {
     workspaceId = normalizeUuid(workspace.body.workspace?.id);
     if (workspaceId === null) return stop("verification_failed", "workspace_response_invalid");
   }
-  const checked = checkWorkspace(workspace.body, { profile, workspaceId });
+  const checked = access === "experiment_start"
+    ? checkStartWorkspace(workspace.body, { profile, workspaceId })
+    : checkWorkspace(workspace.body, { profile, workspaceId });
   if (!checked.ok) return checked;
 
   const capabilities = await bearerJson(
@@ -415,11 +426,18 @@ export async function verifyContext(origin, accessToken, { profile, workspaceId,
     "capabilities",
   );
   if (!capabilities.ok) return capabilities;
-  const allowed = checkCapabilities(capabilities.body, { profile, workspaceId });
+  const allowed = access === "experiment_start"
+    ? checkStartCapabilities(capabilities.body, { profile, workspaceId })
+    : checkCapabilities(capabilities.body, { profile, workspaceId });
   if (!allowed.ok) return allowed;
   // The verified documents stay in memory for read commands, which print
   // only fields they validate themselves.
-  return { ok: true, workspaceId, documents: { workspace: workspace.body, capabilities: capabilities.body } };
+  return {
+    ok: true,
+    workspaceId,
+    scopes: checked.scopes ?? [METADATA_SCOPE],
+    documents: { workspace: workspace.body, capabilities: capabilities.body },
+  };
 }
 
 // Both documents carry the service's contract version string in
@@ -440,6 +458,41 @@ export function checkWorkspace(body, { profile, workspaceId }) {
   }
   if (!isObject(body.content) || body.content.included !== false) {
     return stop("verification_failed", "content_access_granted");
+  }
+  return { ok: true };
+}
+
+// A start key's workspace document: the same identity checks as
+// checkWorkspace, and exactly the scopes Debug and the start grant.
+export function checkStartWorkspace(body, { profile, workspaceId }) {
+  const identity = checkWorkspace({ ...body, access: { scopes: [METADATA_SCOPE] } }, { profile, workspaceId });
+  if (!identity.ok) return identity;
+  const scopes = body.access?.scopes;
+  if (
+    !Array.isArray(scopes) ||
+    scopes.length !== EXPERIMENT_START_KEY_SCOPES.length ||
+    !EXPERIMENT_START_KEY_SCOPES.every((scope) => scopes.includes(scope))
+  ) {
+    return stop("permission_denied", "experiment_start_not_granted");
+  }
+  return { ok: true, scopes: [...scopes].sort() };
+}
+
+// A start key's capabilities document: the same identity checks as
+// checkCapabilities, and the start capability offered to this key.
+export function checkStartCapabilities(body, { profile, workspaceId }) {
+  if (body.schema_version !== AGENT_CONTRACT_VERSION || !isObject(body.provenance) || !isObject(body.agent)) {
+    return stop("verification_failed", "capabilities_response_invalid");
+  }
+  if (normalizeUuid(body.provenance.workspace_id) !== workspaceId) {
+    return stop("verification_failed", "workspace_context_mismatch");
+  }
+  if (body.provenance.deployment_profile !== profile || body.deployment_profile !== profile) {
+    return stop("verification_failed", "profile_mismatch");
+  }
+  const start = body.agent.experiment_start;
+  if (!isObject(start) || start.available !== true || start.required_scope !== EXPERIMENT_START_SCOPE || start.mutates !== true) {
+    return stop("capability_unavailable", "experiment_start_unavailable");
   }
   return { ok: true };
 }

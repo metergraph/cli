@@ -232,6 +232,37 @@ const READ_BASE_OPTIONS = [
       "Without it, METERGRAPH_AGENT_TOKEN is used when this project has no saved sign in on this machine.",
   },
 ];
+const EXPERIMENTS_USAGE = [
+  "metergraph experiments list [--workload ID] [--limit N] [read options] [--json]",
+  "metergraph experiments estimate --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] " +
+    "[--sample-model MODEL] [--track PATH]... [read options] [--json]",
+  "metergraph experiments start (same as estimate) [--agent-token-file PATH] [--json]",
+  "metergraph experiments get --id UUID [read options] [--json]",
+];
+const EXPERIMENTS_OPTIONS = [
+  { name: "--workload", value: "ID", summary: "The workload (route) whose recent production calls are replayed. Required for estimate and start; a filter for list." },
+  {
+    name: "--treatment",
+    value: "SPEC",
+    summary:
+      "1 to 3 times. PROVIDER/MODEL, optionally followed by ,label=NAME ,temperature=0..2 ,max_tokens=1..32000 " +
+      "or ,reasoning_effort=none|minimal|low|medium|high|xhigh|max. Unset settings follow production.",
+  },
+  { name: "--last-n", value: "N", summary: "Replay the last N replayable calls, 10 to 40. Default 20." },
+  { name: "--sample-model", value: "MODEL", summary: "Only production calls made with this exact model, for a single-model control." },
+  { name: "--track", value: "PATH", summary: "Up to 10 times. A JSON path such as $.priority whose values the dashboard compares." },
+  { name: "--id", value: "UUID", summary: "The experiment to read (get)." },
+  { name: "--limit", value: "N", summary: "Experiments to list, 1 to 50. Default 20." },
+  ...READ_BASE_OPTIONS.filter((option) => option.name !== "--agent-token-file"),
+  {
+    name: "--agent-token-file",
+    value: "PATH",
+    summary:
+      "Private (0600) file holding a coding-agent key. For list, estimate and get: a key with Metadata access. " +
+      "For start: a key with Debug access and Allow analysis starts, used for that one request.",
+  },
+  JSON_OPTION,
+];
 const DAYS_OPTION = {
   name: "--days",
   value: "N",
@@ -431,6 +462,7 @@ export function helpData(topic) {
       SETUP_USAGE,
       VERIFY_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
+      ...EXPERIMENTS_USAGE,
     ],
     commands: [
       {
@@ -513,6 +545,14 @@ export function helpData(topic) {
         name: "verify",
         summary: "Poll Metadata for one exact trace in an explicit invocation window. Never sends application traffic.",
         options: VERIFY_OPTIONS,
+      },
+      {
+        name: "experiments",
+        summary:
+          "Estimate, start, list and read experiments: a workload's recent production calls replayed on 1 to 3 " +
+          "treatments, with built-in statistics per arm next to production. list, estimate and get are Metadata " +
+          "reads; start needs a key with Debug access and Allow analysis starts and spends within the server's budget.",
+        options: EXPERIMENTS_OPTIONS,
       },
       ...READ_HELP.map(({ name, summary, options, examples }) => ({
         name,
@@ -599,6 +639,30 @@ export function helpText(topic, style = PLAIN) {
       "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
     lines.push(...optionLines(VERIFY_OPTIONS, 22));
+  } else if (topic === "experiments") {
+    lines.push(
+      "Usage:",
+      ...EXPERIMENTS_USAGE.map((usage) => `  ${usage}`),
+      "",
+      "An experiment replays a workload's last 10 to 40 replayable production calls on 1 to 3 treatments",
+      "(a provider, model and settings) and compares each with what production returned on the same calls:",
+      "cost per call, p50 latency and output tokens, output length, JSON parse rate, same top-level keys,",
+      "empty or refused and cut-off rates. The statistics show differences; they do not judge them.",
+      "",
+      "estimate prices it against the server's budget and daily cap and writes nothing. start takes the",
+      "same arguments, so it starts exactly what was priced; poll it with get until it is terminal.",
+      "Each start creates a new experiment, so a start that succeeded is never retried.",
+      "",
+      "list, estimate and get use this project's saved Metadata grant or a Metadata key, as the read",
+      "commands do, and never read inputs, outputs or tracked field values; those are in the dashboard.",
+      "start needs a coding-agent key with Debug access and Allow analysis starts, which only a workspace",
+      "owner can grant, in --agent-token-file or METERGRAPH_AGENT_TOKEN. The CLI checks the key has exactly",
+      "that before it sends the one start request, and never uses it for anything else. The service then",
+      "replays the sampled calls' captured prompts on each treatment's provider within its budget.",
+      "",
+      "Options:",
+    );
+    lines.push(...optionLines(EXPERIMENTS_OPTIONS, 22));
   } else if (READ_HELP.some((entry) => entry.name === topic)) {
     const entry = READ_HELP.find((candidate) => candidate.name === topic);
     lines.push(
@@ -699,6 +763,7 @@ export function helpText(topic, style = PLAIN) {
       "  metergraph usage [options]       Daily usage per route, Metadata only",
       "  metergraph routes [options]      Routes and evaluation contract versions",
       "  metergraph traces [options]      One page of trace metadata",
+      "  metergraph experiments list|estimate|start|get  Replay a workload on other models",
       "",
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',
@@ -706,6 +771,7 @@ export function helpText(topic, style = PLAIN) {
       'Run "metergraph help login" or "metergraph help logout" for sign in options.',
       'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
+      'Run "metergraph help experiments" for experiment options.',
       "",
       ...AGENT_PATH_HELP,
     );

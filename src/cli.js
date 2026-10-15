@@ -15,6 +15,8 @@ import {
   versionData,
 } from "./output.js";
 import { runRead } from "./read.js";
+import { runExperimentStart } from "./experiments.js";
+import { experimentsMessage, experimentsText } from "./experiments-output.js";
 import { readMessage, readText } from "./read-output.js";
 import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
@@ -133,6 +135,22 @@ async function run(argv, { stdout, stderr }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : readText(result, message, style));
+    return result;
+  }
+
+  if (parsed.command === "experiments") {
+    // start is the one write: its own key session (experiments.js). The other
+    // actions are Metadata reads through runRead's shared session.
+    const { outcome, reason, data } = parsed.action === "start" ? await runExperimentStart(parsed) : await runRead(parsed);
+    const message = experimentsMessage(outcome, reason);
+    const result = envelope({
+      command: `experiments ${parsed.action}`,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : experimentsText(result, message, style, parsed.action));
     return result;
   }
 
