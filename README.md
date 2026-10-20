@@ -135,6 +135,8 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
 | Command | What it does | Network |
 | --- | --- | --- |
+| `pricing lookup`, `pricing cost` | Public catalog rates and a core-calculated token-cost estimate; no sign in (hosted contract pending verification) | Yes |
+| `pricing history`, `pricing market` | Effective-dated price charts, an HTML export and a terminal market board ([local preview and contract](docs/pricing.md)) | Yes |
 | `setup` | Sign in, choose a workspace, write the ingest key to `.env`, record the repository, install the skill | Yes |
 | `verify` | Confirm that one exact trace, by trace ID or request ID, reached the workspace | Yes |
 | `usage` | Daily calls, errors, cost, tokens and latency per route, or cost grouped by provider, model, route or UTC day with exact filters, rankings and a prior-period comparison; filtered by exact metadata or grouped by one metadata key | Yes |
@@ -151,6 +153,20 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 `metergraph help COMMAND` lists a command's options. The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and
 writes, and full JSON examples.
+
+## Public pricing preview
+
+```sh
+metergraph pricing market --channel openai-api
+metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api
+metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --format html > history.html
+```
+
+These commands require no account or workspace. The proposed hosted HTTP contract
+is **not yet verified**; use the [core-backed local adapter](docs/pricing.md#run-end-to-end-locally)
+to try them today with `--url http://127.0.0.1:8765`. The market board shows the last
+recorded price change; the shareable history card plots actual catalog windows,
+with sources and gaps. Use `pricing cost` for conditional/batch/cache calculations.
 
 ## Exit codes
 
@@ -194,6 +210,8 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 - **Files it writes in your project:** `.env` (from `setup`), the skill file, and
   secret-free state under `.metergraph/` that is safe to commit. The skill installer
   never replaces a file it did not write and has no force option.
+- **Public pricing.** Pricing reads send no credentials and return public catalog data.
+  `--format html` emits a standalone document; it does not launch a browser.
 - **Network.** Only `GET` requests to fixed paths for reads, no redirects followed,
   bounded response sizes and fixed timeouts. Mistyped arguments are never echoed, since
   they may hold a secret. `--help`, `--version` and `skill` make no network requests.

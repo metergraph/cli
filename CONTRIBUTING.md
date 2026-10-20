@@ -42,3 +42,11 @@ python -m unittest discover -s python/metergraph-skills/tests
 
 Report security issues privately, as described in [SECURITY.md](SECURITY.md), not in a
 public issue. Releases are covered in [RELEASING.md](RELEASING.md).
+
+## Public pricing integration
+
+`node --test test/pricing.test.js` checks the HTTP contract and CLI presentation
+against synthetic loopback responses. For actual pricing arithmetic and catalog
+history, run the isolated core-backed smoke checks in [docs/pricing.md](docs/pricing.md#run-end-to-end-locally).
+Set `PRICING_BIN` to an installed packed CLI to check the distributed artifact.
+The Python reference adapter is development tooling and is not an npm dependency.

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add unauthenticated `pricing lookup`, `cost`, `history` and `market` commands,
+  terminal charts and a self-contained HTML history export. The proposed hosted
+  pricing HTTP contract requires deployment verification; a core-backed loopback
+  reference adapter and smoke checks are included for local integration.
+
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.2.2`.
 

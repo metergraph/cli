@@ -113,3 +113,41 @@ jobs:
             python -m build --no-isolation --outdir "$OUT" "$DIR"
             python scripts/check_python_dist.py "$DIR" "$OUT"
           done
+
+  pricing:
+    name: Public pricing with real core
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out CLI
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check out pinned public core 0.5.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: PioneerSquareLabs/metergraph
+          ref: 62fb9fcee7e49280f924d7c1ccfbc37f442555a4
+          path: .pricing-core
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install isolated core engine
+        run: |
+          python -m venv "$RUNNER_TEMP/pricing-venv"
+          "$RUNNER_TEMP/pricing-venv/bin/python" -m pip install ./.pricing-core/core
+      - name: Run source and packed CLI against real core
+        run: |
+          PRICING_PYTHON="$RUNNER_TEMP/pricing-venv/bin/python" node scripts/pricing-smoke.mjs
+          mkdir -p "$RUNNER_TEMP/pricing-pack"
+          npm pack --pack-destination "$RUNNER_TEMP/pricing-pack"
+          npm install --prefix "$RUNNER_TEMP/pricing-install" "$RUNNER_TEMP"/pricing-pack/*.tgz --no-audit --no-fund
+          PRICING_PYTHON="$RUNNER_TEMP/pricing-venv/bin/python" \
+            PRICING_BIN="$RUNNER_TEMP/pricing-install/node_modules/metergraph-cli/bin/metergraph.js" \
+            node scripts/pricing-smoke.mjs

@@ -1,3 +1,4 @@
+import { PRICING_OPTIONS } from "./pricing-args.js";
 import {
   CONNECTION_GUIDE_URL,
   DEFAULT_ORIGIN,
@@ -424,6 +425,7 @@ export function helpData(topic) {
       "metergraph --help [--json]",
       "metergraph --version [--json]",
       "metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
+      "metergraph pricing lookup|cost|history|market [options] [--json]",
       ...SKILL_USAGE,
       ...SKILLS_USAGE,
       LOGIN_USAGE,
@@ -433,6 +435,9 @@ export function helpData(topic) {
       ...READ_HELP.map((entry) => entry.usage),
     ],
     commands: [
+      { name: "pricing", summary: "Public catalog lookup, cost, history and market board. No sign in. Hosted contract is pending verification.",
+        options: [...PRICING_OPTIONS.map(name => ({ name, value: "VALUE", summary: "See metergraph help pricing and docs/pricing.md." })),
+          { name: "--batch", value: null, summary: "Use batch pricing for cost." }, JSON_OPTION] },
       {
         name: "doctor",
         summary:
@@ -535,6 +540,34 @@ export function helpData(topic) {
 
 export function helpText(topic, style = PLAIN) {
   const lines = [];
+  if (topic === "pricing") {
+    return `Usage: metergraph pricing lookup|cost|history|market [options] [--json]
+
+Public catalog prices. No account, project or token is required.
+lookup  --model ID [--provider ID | --channel ID] [--region ID] [--at YYYY-MM-DD]
+cost    Same selectors; --input-tokens N --output-tokens N [--batch]
+        Optional --cache-read-tokens N, --cache-write-tokens N, or
+        --cache-write-5m-tokens N / --cache-write-1h-tokens N.
+history --model ID --channel ID [--region ID] [--format table|chart|html]
+market  --channel ID [--region ID] [--limit 1..100]
+
+All actions: --url ORIGIN --at YYYY-MM-DD --timeout-ms 100..30000 --json
+Default origin: https://app.metergraph.dev (hosted pricing not yet verified).
+Date defaults to today's UTC date at midnight. History/market region defaults
+to global. Cost counts left out stay unknown; partial costs are known subtotals.
+--json prints one stable JSON envelope; do not combine it with --format.
+
+Examples:
+  metergraph pricing lookup --model openai/gpt-6-sol --channel openai-api --json
+  metergraph pricing cost --model openai/gpt-6-sol --provider openai --input-tokens 1000 --output-tokens 200
+  metergraph pricing market --channel openai-api
+  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api
+  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --format html > history.html
+
+Charts show effective-dated base list rates, not invoices or daily observations.
+See docs/pricing.md for the proposed HTTP contract and local core-backed adapter.
+`;
+  }
   if (topic === "doctor") {
     lines.push(
       "Usage: metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
@@ -699,6 +732,7 @@ export function helpText(topic, style = PLAIN) {
       "  metergraph usage [options]       Daily usage per route, Metadata only",
       "  metergraph routes [options]      Routes and evaluation contract versions",
       "  metergraph traces [options]      One page of trace metadata",
+      "  metergraph pricing <action>      Public lookup, cost, history and market board",
       "",
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',

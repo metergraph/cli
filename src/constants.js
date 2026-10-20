@@ -99,7 +99,13 @@ export const READ_PATHS = Object.freeze({
   routes: "/v1/agent/routes",
   traces: "/v1/agent/traces",
 });
+const PRICING_QUERY_KEYS = Object.freeze(["model", "provider", "channel", "region", "at", "limit",
+  "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens", "batch"]);
 export const READ_QUERY_KEYS = Object.freeze({
+  "/v1/pricing/lookup": PRICING_QUERY_KEYS,
+  "/v1/pricing/cost": PRICING_QUERY_KEYS,
+  "/v1/pricing/history": PRICING_QUERY_KEYS,
+  "/v1/pricing/market": PRICING_QUERY_KEYS,
   "/v1/agent/usage": Object.freeze(["days", "limit", "metadata"]),
   "/v1/agent/usage/aggregates": Object.freeze([
     "group_by", "days", "since", "until", "limit", "route", "provider", "model", "environment", "metadata",
