@@ -64,9 +64,23 @@ export const LOGIN_MIN_TIMEOUT_MS = 1000;
 export const LOGIN_MAX_TIMEOUT_MS = 900000;
 export const AUTH_HTTP_TIMEOUT_MS = 15000;
 
-// The only scope this CLI requests. It never asks for agent:read (Debug) or
+// The scope sign in requests. It never asks for agent:read (Debug) or
 // agent:replay, and never falls back to them.
 export const METADATA_SCOPE = "agent:metadata";
+// The Debug role and the workflow permissions an owner adds to it, by the
+// names the Keys page uses. Writing and testing evaluations and starting
+// analyses need Debug with all three. Replay is never used by this CLI.
+export const DEBUG_SCOPE = "agent:read";
+export const REPLAY_SCOPE = "agent:replay";
+export const WORKFLOW_PERMISSIONS = Object.freeze([
+  Object.freeze({ field: "allow_evaluation_writes", scope: "agent:eval-write", label: "Allow evaluation writes" }),
+  Object.freeze({ field: "allow_evaluation_previews", scope: "agent:eval-preview", label: "Allow evaluation previews" }),
+  Object.freeze({ field: "allow_analysis_starts", scope: "agent:analysis-run", label: "Allow analysis starts" }),
+]);
+export const WORKFLOW_SCOPES = Object.freeze(WORKFLOW_PERMISSIONS.map(({ scope }) => scope).sort());
+// The permissions are offered where the deployment reports managed
+// evaluations; customer-owned AWS (byoc-core) and the open-source server do not.
+export const WORKFLOW_DEPLOYMENT_CAPABILITY = "evaluations";
 
 // The service's agent access contract version, as sent in schema_version by
 // GET /v1/agent/workspace and GET /v1/agent/capabilities. It is the
@@ -134,20 +148,19 @@ export const USAGE_COMPARISONS = Object.freeze(["previous", "previous-same-time"
 // Experiments: replay a workload's recent production calls on 1 to 3
 // treatments and compare them with production. The list, estimate and
 // summary are Metadata reads at these fixed paths (one experiment is
-// EXPERIMENT_PATHS.list plus "/" and its UUID). Starting one is the only
-// write this CLI makes to a workspace: it needs a separate coding-agent key
-// with Debug access and the EXPERIMENT_START_SCOPE grant, used for that one
-// request and nothing else. The limits match the service's own.
+// EXPERIMENT_PATHS.list plus "/" and its UUID). Starting one needs a
+// coding-agent key with Debug access and the EXPERIMENT_START_SCOPE grant.
+// The limits match the service's own.
 export const EXPERIMENT_PATHS = Object.freeze({
   list: "/v1/agent/experiments",
   estimate: "/v1/agent/experiments/estimate",
   start: "/v1/agent/experiments",
 });
 export const EXPERIMENT_START_SCOPE = "agent:analysis-run";
-// Exactly the scopes a start key carries: Debug and the start grant. A key
-// with any other scope (Replay, other workflow grants, Metadata, ingest) is
-// refused, so the key in an agent's environment can do no more than this.
-export const EXPERIMENT_START_KEY_SCOPES = Object.freeze(["agent:read", EXPERIMENT_START_SCOPE]);
+// The scopes a start key must carry: Debug and the start grant. It may also
+// carry the other workflow permissions; a key with
+// Replay, Metadata only or any other scope is refused.
+export const EXPERIMENT_START_KEY_SCOPES = Object.freeze([DEBUG_SCOPE, EXPERIMENT_START_SCOPE]);
 export const EXPERIMENT_LAST_N = Object.freeze({ min: 10, max: 40, default: 20 });
 export const EXPERIMENT_MAX_TREATMENTS = 3;
 export const EXPERIMENT_MAX_TRACKED_FIELDS = 10;

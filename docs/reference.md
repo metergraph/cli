@@ -209,7 +209,7 @@ CI fails while they differ.
 `skills install` copies the Metergraph workflow skills bundled with this CLI into one
 client's project skill directory, one folder per skill. They come from
 [metergraph/skills](https://github.com/metergraph/skills) at the commit pinned in
-`skills-source.json`, and cover investigation and the model-swap loop: choose a
+`skills-source.json`, and cover investigation and model swap: choose a
 workload, choose traces and models, define the eval, run the analysis, summarize the
 report and rerun. Start with the `metergraph-model-swap` skill. The pack also has
 `metergraph-local-bundle`, which verifies and starts the signed customer-local bundle
@@ -701,7 +701,7 @@ times for the grant.
 
 | Command | Request | What it prints |
 | --- | --- | --- |
-| `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
+| `status` | `GET /healthz` and `GET /v1/deployment` (no credentials, checked as `doctor` does), then the two checks above | `configured`, `reachable`, `healthy`, `authenticated`, the bound (`intended`) and verified (`actual`) workspace, the bound deployment profile and `deployment_profile_verified`, scopes and capability flags, `content_access` (whether the credential could read content through Agent Access; the read commands never do) and `access`: `access.role` (`metadata` or `debug`), `access.permissions` with one boolean per workflow permission (`allow_evaluation_writes`, `allow_evaluation_previews`, `allow_analysis_starts`) and `access.permissions_offered`, which is `false` on a deployment without managed evaluations (customer-owned AWS, the open-source server) and `null` when the capabilities were not read. Writing and testing evaluations and starting analyses need the Debug role with all three permissions; when the credential lacks any of them on a deployment that offers them, the text output says how to grant them there. A `/v1/deployment` profile that differs from the binding exits 11 with `profile_mismatch` before the grant is used. `application_traffic_verified` is always `false`: a signed in project, existing data or a configured SDK does not prove that your application sends traffic. |
 | `context` | the two checks above | Workspace ID, slug, name and creation time, Metadata retention days, whether the workspace captures content (never included here) and the access scope. |
 | `capabilities` | the two checks above | Each known agent capability with `available`, `privacy_class`, `required_scope` and flags, and the service's bounds. Privacy class descriptions are not printed. |
 | `usage` | `GET /v1/agent/usage?days=N&limit=N[&metadata=]` | Daily rows per route: calls, errors, cost, tokens and latency (latency may be `null`), the window, evidence completeness, warning codes and totals of the returned rows. |
@@ -1041,14 +1041,17 @@ Before any read, in order and under one `--timeout-ms` deadline:
 2. `GET /v1/deployment` with no credential must report a supported profile, and the
    bound profile when there is a binding. A key file is opened only after this.
 3. `GET /v1/agent/workspace` and `GET /v1/agent/capabilities` with the key must show
-   exactly `agent:metadata`, no content access, the same profile and the pinned
-   workspace, as for a saved sign in.
+   the Metadata role (exactly `agent:metadata`, with no content capability offered) or
+   the Debug role with any workflow permissions (`agent:read` with any of
+   `agent:eval-write`, `agent:eval-preview` and `agent:analysis-run`), the same profile and the pinned workspace. A key with
+   `agent:replay`, or one mixing Metadata with other scopes, is refused. With either
+   access, the read commands send only their Metadata requests.
 
 | Result | Exit | `next_action.kind` |
 | --- | --- | --- |
 | Key unknown, expired or revoked (401), also when revoked before the read | 12 `agent_key_rejected` | `replace_agent_key` |
 | Key valid but without Metadata access, such as an ingest key (403) | 15 `agent_key_insufficient_scope` | `replace_agent_key` |
-| Key broader than Metadata, such as a Debug key | 11 `scope_mismatch` | `use_metadata_only_key` |
+| Key with Replay access, or with scopes this CLI does not use | 11 `scope_mismatch` | `use_metadata_only_key` |
 | Key for another workspace | 11 `workspace_context_mismatch` | `use_workspace_key` |
 | Key file not private or missing | 9 `agent_token_file_*` | `fix_agent_key` |
 
@@ -1108,7 +1111,7 @@ metergraph experiments get --id 3f2b8c1d-4e5f-4a6b-8c7d-9e0f1a2b3c4d --json
   optionally for one workload.
 
 `list`, `estimate` and `get` are read commands: they use the project's saved Metadata
-grant or a Metadata key exactly as `usage` does, and the service's Metadata documents
+grant or a coding-agent key exactly as `usage` does, and the service's Metadata documents
 never carry an input, an output or a tracked field's value. Those are in the dashboard,
 and in the service's separate content tool for a Debug credential, which this CLI never
 calls. Every field printed is validated; the service's refusal messages are not printed.
@@ -1116,9 +1119,10 @@ calls. Every field printed is validated; the service's refusal messages are not 
 `start` needs a coding-agent key with Debug access (`agent:read`) and the Allow analysis
 starts grant (`agent:analysis-run`), which only a workspace owner can grant on the Keys
 page. It comes from `--agent-token-file` or `METERGRAPH_AGENT_TOKEN`, never a saved sign
-in. Before the start, the service's workspace document must show exactly the scopes
-`agent:read` and `agent:analysis-run` (a key that also holds Replay, another workflow
-grant, Metadata or ingest is refused) for the expected workspace and profile, and its
+in. Before the start, the service's workspace document must show `agent:read` and
+`agent:analysis-run`, optionally with the other workflow permissions (a
+key that also holds Replay, Metadata or ingest is refused), for the expected workspace and
+profile, and its
 capabilities document must offer `experiment_start`. Only then is the
 one `POST` sent with the key. Without such a key the command exits 15
 (`permission_denied`, `experiment_start_key_required` or `experiment_start_not_granted`)

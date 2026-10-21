@@ -3,7 +3,15 @@ import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
 import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.js";
-import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE, READ_MAX_BYTES, READ_MAX_LIMIT, READ_PATHS } from "./constants.js";
+import {
+  DEFAULT_ORIGIN,
+  MAX_BODY_BYTES,
+  READ_MAX_BYTES,
+  READ_MAX_LIMIT,
+  READ_PATHS,
+  WORKFLOW_DEPLOYMENT_CAPABILITY,
+  WORKFLOW_PERMISSIONS,
+} from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import {
   readQuery,
@@ -61,6 +69,9 @@ export async function runRead(options) {
     healthy: null,
     profileVerified: null,
     authenticated: false,
+    // The credential's access ("metadata" or "debug") and scopes, once verified.
+    access: null,
+    scopes: [],
     verifiedWorkspace: null,
     capabilities: null,
   };
@@ -179,13 +190,15 @@ export async function runRead(options) {
     }
 
     const session = useKey
-      ? await keySession({ target, source, env, signal: limit.signal, verifiedProfile })
+      ? await keySession({ target, source, env, signal: limit.signal, verifiedProfile, access: "read" })
       : await sessionFor(binding, store, limit.signal);
     if (!session.ok) {
       const settled = settle(session);
       return end(settled.outcome, settled.reason);
     }
     ctx.profile = session.session.profile;
+    ctx.access = session.session.access;
+    ctx.scopes = session.session.scopes;
     if (ctx.workspaceId === null) {
       ctx.workspaceId = session.session.workspaceId;
       notices.add("workspace_not_pinned");
@@ -410,7 +423,7 @@ function readData(ctx, report, notices, outcome, options, extra = {}) {
     environment: ctx.environment.kind,
     credential: ctx.credential,
     authenticated: ctx.authenticated,
-    scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
+    scopes: ctx.authenticated ? ctx.scopes : [],
     result: outcome === "ok" ? report : null,
     retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
       ? report?.retry_after_seconds ?? null : null,
@@ -447,13 +460,31 @@ function statusData(ctx, notices, outcome, options) {
           ? null
           : ctx.verifiedWorkspace === ctx.intendedWorkspace,
     },
-    scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
+    scopes: ctx.authenticated ? ctx.scopes : [],
     capabilities:
       agent === null ? null : Object.fromEntries(CAPABILITY_NAMES.map((name) => [name, agent[name]?.available ?? null])),
-    content_access: false,
+    // Whether this credential may read content through Agent Access. The
+    // read commands never do, whatever it allows.
+    content_access: ctx.access === "debug",
+    access: accessFor(ctx),
     application_traffic_verified: false,
     notices: [...notices].sort(),
     next_action: nextAction(outcome, ctx, options),
+  };
+}
+
+// The credential's role and workflow permissions, by the names the Keys page
+// uses. Either role reads. Writing and testing evaluations and starting
+// analyses need Debug with all three permissions, on a deployment that offers
+// managed evaluations: permissions_offered is false where it does not, and
+// null when the capabilities were not read.
+export function accessFor(ctx) {
+  if (!ctx.authenticated) return null;
+  const deployment = ctx.capabilities?.deployment_capabilities ?? null;
+  return {
+    role: ctx.access,
+    permissions: Object.fromEntries(WORKFLOW_PERMISSIONS.map(({ field, scope }) => [field, ctx.scopes.includes(scope)])),
+    permissions_offered: deployment === null ? null : deployment.includes(WORKFLOW_DEPLOYMENT_CAPABILITY),
   };
 }
 
@@ -527,8 +558,8 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
       kind: "use_metadata_only_key",
       url: handoffPages(origin).keys_url,
       message:
-        "This key grants more than Metadata access, so the CLI does not use it. Ask the person for a " +
-        "coding-agent key limited to Metadata access.",
+        "This key has Replay access or another scope the CLI does not use. Ask the person for a coding-agent " +
+        "key with the Metadata or Debug role, and to replace the secret.",
     };
   }
   if (keyed && reason === "workspace_context_mismatch") {

@@ -18,6 +18,7 @@ const sandbox = sandboxes(workDir);
 
 const METADATA_KEY = "mgak_synthetic_metadata_key_7777777777777777";
 const START_KEY = "mgak_synthetic_start_key_8888888888888888";
+const DEBUG_KEY = "mgak_synthetic_debug_key_9999999999999999";
 const SSH = { SSH_CONNECTION: "192.0.2.1 50000 192.0.2.2 22" };
 const ESTIMATE = [
   "experiments", "estimate", "--workload", "summarizeTicket",
@@ -52,7 +53,7 @@ async function run(server, args, { key = METADATA_KEY, json = true, env = {} } =
   const keyEnv = key === null ? {} : { METERGRAPH_AGENT_TOKEN: key };
   const result = await runCli(full, { env: { ...LOCAL_ENV, ...SSH, METERGRAPH_URL: server.origin, ...keyEnv, ...env } });
   const { result: parsed } = checked(assert, result, { box, json });
-  for (const secret of [METADATA_KEY, START_KEY]) {
+  for (const secret of [METADATA_KEY, START_KEY, DEBUG_KEY]) {
     assert.ok(!result.stdout.includes(secret) && !result.stderr.includes(secret), "a key was printed");
   }
   assert.ok(!result.stdout.includes("SYNTHETIC_CONTENT_MARKER"), "content outside the contract was printed");
@@ -186,15 +187,24 @@ test("start with a start key sends one POST and hands back the experiment to pol
     assert.equal(result.data.next_action.command, `metergraph experiments get --id ${EXPERIMENT_ID} --json`);
   }));
 
-test("the start key is never accepted for reads, which stay Metadata only", () =>
+test("a start key also reads, and the reads send only their Metadata requests", () =>
   withServer({}, async (server) => {
+    const before = server.requests.length;
     const { result } = await run(server, ["experiments", "list"], { key: START_KEY });
-    assert.equal(result.outcome, "verification_failed");
-    assert.equal(result.error.reason, "scope_mismatch");
-    assert.equal(server.requestsTo("/v1/agent/experiments").length, 0);
+    assert.equal(result.outcome, "ok", JSON.stringify(result.error));
+    assert.deepEqual(result.data.scopes, ["agent:analysis-run", "agent:read"]);
+    assert.ok(sent(server, before).every((line) => line.startsWith("GET ")));
   }));
 
-for (const extra of ["ingest", "agent:replay", "agent:eval-write"]) {
+test("a Debug key with every workflow permission starts an experiment", () =>
+  withServer({ debugTokens: [DEBUG_KEY] }, async (server) => {
+    const { result } = await run(server, ["experiments", "start", ...ESTIMATE.slice(2)], { key: DEBUG_KEY });
+    assert.equal(result.outcome, "ok", JSON.stringify(result.error));
+    assert.deepEqual(result.data.scopes, ["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"]);
+    assert.equal(server.requestsTo("/v1/agent/experiments").filter((request) => request.method === "POST").length, 1);
+  }));
+
+for (const extra of ["ingest", "agent:replay", "agent:metadata"]) {
   test(`a start key that also holds ${extra} cannot start`, () =>
     withServer({
       workspace: (doc) => (doc.access.scopes.includes("agent:read")
