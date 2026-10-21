@@ -212,11 +212,13 @@ function bundle({ agentKey = true, mode = 0o755 } = {}) {
   return dir;
 }
 
+// The platform is explicit so the offer's logic is tested on every runner;
+// only the Windows test passes "win32".
 async function offer(answers, options = {}) {
   const io = scripted(answers);
   const runs = [];
   await offerAgentAccess({
-    client: "claude", origin: "http://localhost:8080", prompter: io, say: io.say,
+    client: "claude", origin: "http://localhost:8080", prompter: io, say: io.say, platform: "linux",
     run: async (command, args, cwd) => {
       runs.push({ command, args, cwd });
       return options.exitCode ?? 0;
