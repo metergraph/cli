@@ -20,15 +20,15 @@ import { deadline, failureOf, send, trapSignals } from "./transport.js";
 //
 // list, estimate and get are Metadata reads. runRead (read.js) establishes
 // their session exactly as for every other read command, a saved grant or a
-// Metadata key, and calls experimentRead with it. They send only these
+// coding-agent key, and calls experimentRead with it. They send only these
 // requests and print only validated fields; no input, output or tracked
 // field value is ever requested.
 //
-// start is the only command that changes a workspace. It needs a separate
-// coding-agent key with Debug access and the agent:analysis-run grant, from
-// --agent-token-file or METERGRAPH_AGENT_TOKEN, verified for exactly that
-// (auth-oauth.js checkStartWorkspace and checkStartCapabilities) before it is
-// used for this one POST. A saved sign in is Metadata only and never starts
+// start changes a workspace. It needs a coding-agent key with Debug access
+// and the agent:analysis-run grant (Allow analysis starts), from
+// --agent-token-file or METERGRAPH_AGENT_TOKEN, verified before it is used
+// for this one POST (auth-oauth.js checkStartWorkspace and
+// checkStartCapabilities). A saved sign in is Metadata only and never starts
 // one. Each start creates a new experiment, so a start that succeeded is not
 // retried.
 
@@ -167,8 +167,8 @@ function pollOrOpen(experiment, { started = false } = {}) {
     return {
       kind: "poll_experiment",
       message: started
-        ? `The experiment is ${experiment.status}. Poll it in about ${POLL_AFTER_SECONDS} seconds with a Metadata key ` +
-          "or this project's sign in; the start key is not used for reads."
+        ? `The experiment is ${experiment.status}. Poll it in about ${POLL_AFTER_SECONDS} seconds with ` +
+          "this project's sign in or a coding-agent key."
         : `The experiment is ${experiment.status}. Run the same command again in about ${POLL_AFTER_SECONDS} seconds.`,
       command: `metergraph experiments get --id ${experiment.id} --json`,
       poll_after_seconds: POLL_AFTER_SECONDS,
@@ -356,7 +356,7 @@ function startNextAction(outcome, ctx, report) {
       kind: "check_before_retry",
       message:
         "The start request reached the service, but its answer was not confirmed: an experiment may exist and " +
-        "may be running. List the newest experiments with a Metadata key or this project's sign in before " +
+        "may be running. List the newest experiments with this project's sign in or a coding-agent key before " +
         "starting again; each start creates a new experiment.",
       command: "metergraph experiments list --json",
     };
@@ -376,8 +376,9 @@ function startNextAction(outcome, ctx, report) {
       kind: "use_experiment_start_key",
       url: keys,
       message:
-        "Starting an experiment needs a coding-agent key with Debug access and Allow analysis starts, which only " +
-        "a workspace owner can grant on the Keys page. Pass it with --agent-token-file or METERGRAPH_AGENT_TOKEN; " +
+        "Starting an experiment needs a coding-agent key with the Debug role and Allow analysis starts, which " +
+        "only a workspace owner can grant on the Keys page (or, on the customer-local bundle, with " +
+        "bin/agent-key). Pass it with --agent-token-file or METERGRAPH_AGENT_TOKEN; " +
         "do not ask for it in chat. A start replays the sampled calls' captured prompts on each treatment's " +
         "provider within the server's budget. Or start the experiment in the dashboard.",
       required_scope: EXPERIMENT_START_SCOPE,

@@ -76,6 +76,8 @@ export async function startOAuthServer(initial = {}) {
     // Coding-agent keys with Debug access and the experiment start grant
     // (agent:read with agent:analysis-run), for experiments start.
     startTokens: [],
+    // Keys with the Debug role and all three workflow permissions.
+    debugTokens: [],
     // Experiments: a hook that rewrites each document (kind is list,
     // estimate, start or get), and experimentsRaw, which may answer the
     // request itself and return true. experimentStatus is what get reports.
@@ -438,7 +440,9 @@ export async function startOAuthServer(initial = {}) {
     const presented = header.startsWith("Bearer ") ? header.slice(7) : null;
     const grant = presented === null ? undefined : state.access.get(presented) ??
       (behavior.agentTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false } : undefined) ??
-      (behavior.startTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false, start: true } : undefined);
+      (behavior.startTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false, start: true } : undefined) ??
+      (behavior.debugTokens.includes(presented)
+        ? { workspaceId: behavior.workspaceId, revoked: false, start: true, allPermissions: true } : undefined);
     if (grant === undefined || grant.revoked) {
       response.writeHead(401, {
         "content-type": "application/json",
@@ -455,7 +459,8 @@ export async function startOAuthServer(initial = {}) {
     };
     if (path === "/v1/agent/workspace") {
       const doc = workspaceDocument(provenance, grant.workspaceId);
-      if (grant.start) doc.access = { scopes: ["agent:analysis-run", "agent:read"] };
+      if (grant.allPermissions) doc.access = { scopes: ["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"] };
+      else if (grant.start) doc.access = { scopes: ["agent:analysis-run", "agent:read"] };
       served.workspace = behavior.workspace(doc);
       return send(response, 200, served.workspace);
     }

@@ -126,9 +126,14 @@ const AGENT_PATH_HELP = [
   "  SSH, cloud workspace or CI       A person creates a coding-agent key with Metadata access",
   "                                   on the Keys page and saves it as the secret",
   "                                   METERGRAPH_AGENT_TOKEN; then status --json, usage --json",
-  "  Metadata key, no saved sign in   The same: reads use METERGRAPH_AGENT_TOKEN, or",
+  "  A key, no saved sign in          The same: reads use METERGRAPH_AGENT_TOKEN, or",
   "                                   --agent-token-file PATH, after verifying the workspace",
-  "Never pass a key as an argument. Debug and Replay keys are refused, not reduced.",
+  "  Evaluations and analyses         A workspace owner creates a key with the Debug role and",
+  "                                   Allow evaluation writes, Allow evaluation previews and",
+  "                                   Allow analysis starts; the same METERGRAPH_AGENT_TOKEN",
+  "                                   serves the reads. status --json reports the role and each",
+  "                                   permission in data.access",
+  "Never pass a key as an argument. Replay keys are refused.",
 ];
 
 const CONFIG_DIR_OPTION = {
@@ -217,7 +222,7 @@ const READ_BASE_OPTIONS = [
     name: "--url",
     value: "ORIGIN",
     summary:
-      "Where a Metadata key is sent when the project is not bound. Default METERGRAPH_URL, else the hosted service. " +
+      "Where a coding-agent key is sent when the project is not bound. Default METERGRAPH_URL, else the hosted service. " +
       "A bound project's origin cannot be changed here.",
   },
   {
@@ -229,7 +234,7 @@ const READ_BASE_OPTIONS = [
     name: "--agent-token-file",
     value: "PATH",
     summary:
-      "Private (0600) file holding a coding-agent key with Metadata access. Used instead of a saved sign in. " +
+      "Private (0600) file holding a coding-agent key with the Metadata or Debug role. Used instead of a saved sign in. " +
       "Without it, METERGRAPH_AGENT_TOKEN is used when this project has no saved sign in on this machine.",
   },
 ];
@@ -297,15 +302,17 @@ const REFUSED_NOTE =
   "are recognized and refused with exit code 6 before any request, except --environment, --since and --until on usage.";
 
 // The read commands. Each uses the project's saved Metadata grant or a
-// coding-agent key with Metadata access, makes GET requests to fixed paths on
-// the verified origin and never opens a browser.
+// coding-agent key with the Metadata or Debug role, makes GET requests to fixed
+// paths on the verified origin and never opens a browser.
 export const READ_HELP = Object.freeze([
   {
     name: "status",
     usage: `metergraph status ${READ_BASE_USAGE}`,
     summary:
       "Show whether this project is configured, the service is reachable and reports the bound deployment " +
-      "profile, and the grant is verified for the bound workspace, with its Metadata capabilities. " +
+      "profile, and the grant is verified for the bound workspace, with its Metadata capabilities. Reports " +
+      "the credential's role (Metadata or Debug) and its workflow permissions (Allow evaluation writes, Allow " +
+      "evaluation previews, Allow analysis starts) in data.access, and how to grant them. " +
       "Never claims application traffic is verified.",
     options: [...READ_BASE_OPTIONS, JSON_OPTION],
   },
@@ -492,7 +499,7 @@ export function helpData(topic) {
       {
         name: "skills install",
         summary:
-          "Copy the Metergraph workflow skills bundled with this CLI, such as the model-swap loop, into one " +
+          "Copy the Metergraph workflow skills bundled with this CLI, such as model swap, into one " +
           "client's project skill directory. Never replaces a skill it did not install. No network requests, no sign in.",
         options: SKILL_OPTIONS,
       },
@@ -695,12 +702,12 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "same arguments, so it starts exactly what was priced; poll it with get until it is terminal.",
       "Each start creates a new experiment, so a start that succeeded is never retried.",
       "",
-      "list, estimate and get use this project's saved Metadata grant or a Metadata key, as the read",
+      "list, estimate and get use this project's saved sign in or a coding-agent key, as the read",
       "commands do, and never read inputs, outputs or tracked field values; those are in the dashboard.",
-      "start needs a coding-agent key with Debug access and Allow analysis starts, which only a workspace",
-      "owner can grant, in --agent-token-file or METERGRAPH_AGENT_TOKEN. The CLI checks the key has exactly",
-      "that before it sends the one start request, and never uses it for anything else. The service then",
-      "replays the sampled calls' captured prompts on each treatment's provider within its budget.",
+      "start needs a coding-agent key with the Debug role and Allow analysis starts, which only a",
+      "workspace owner can grant, in --agent-token-file or METERGRAPH_AGENT_TOKEN.",
+      "The CLI checks the key before it sends the one start request. The service then replays the",
+      "sampled calls' captured prompts on each treatment's provider within its budget.",
       "",
       "Options:",
     );
@@ -713,10 +720,10 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       entry.summary,
       "",
       "Uses this project's saved Metadata grant (see \"metergraph help login\"), or, where there is none on",
-      "this machine, a coding-agent key with Metadata access from METERGRAPH_AGENT_TOKEN or",
-      "--agent-token-file. A key is sent only after the origin answers as a supported Metergraph service,",
-      "and nothing is read until the service shows exactly the Metadata scope, no content access and the",
-      "expected workspace. Sends GET requests only, to fixed paths on that origin, follows no redirects and",
+      "this machine, a coding-agent key from METERGRAPH_AGENT_TOKEN or --agent-token-file, with the",
+      "Metadata role or the Debug role. A key is sent only after the origin answers as a supported",
+      "Metergraph service, and nothing is read until the service shows one of those roles (never",
+      "Replay) and the expected workspace. Sends GET requests only, to fixed paths on that origin, follows no redirects and",
       "reads bounded responses. Never opens a browser, signs in, writes project files or the key, reads",
       "retained content, replays or calls a model provider. It may refresh its own saved grant, and the",
       "service may record the access (for example last used times); it never changes workspace",
@@ -762,7 +769,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "Copies the Metergraph workflow skills bundled with this CLI into one client's project",
       "skill directory, one folder per skill, and records ownership of each in",
       ".metergraph/skills/NAME.json. The skills come from https://github.com/metergraph/skills",
-      "at the commit this release pins. They cover investigation and the model-swap loop:",
+      "at the commit this release pins. They cover investigation and model swap:",
       "choose a workload, choose traces and models, define the eval, run the analysis,",
       "summarize the report and rerun. The setup skill is installed by \"metergraph skill\".",
       "",
@@ -794,7 +801,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "  metergraph --version [--json]    Show the CLI version",
       "  metergraph doctor [options]      Check a Metergraph service, read only",
       "  metergraph skill install|update  Install or update the agent skill in a project",
-      "  metergraph skills install|update|list  Workflow skills, such as the model-swap loop",
+      "  metergraph skills install|update|list  Workflow skills, such as model swap",
       "  metergraph login [options]       Sign in and bind a project to a workspace",
       "  metergraph logout [options]      Revoke and remove a project's sign in",
       "  metergraph setup [options]       Approve and write a private ingest key",

@@ -9,6 +9,7 @@ import {
   authorizationUrl,
   checkCapabilities,
   checkWorkspace,
+  credentialAccess,
   clientFor,
   discover,
   endpointsFor,
@@ -294,12 +295,12 @@ test("the agent contract version is the service's exact string on both sides", (
 test("the real workspace shape is verified exactly, and enabled capture is not a reason to refuse", () => {
   const good = workspaceDocument(PROVENANCE, WORKSPACE_A);
   assert.equal(good.content.captured, true);
-  assert.deepEqual(checkWorkspace(good, CONTEXT), { ok: true });
-  assert.deepEqual(checkWorkspace({ ...good, content: { captured: false, included: false } }, CONTEXT), { ok: true });
+  assert.deepEqual(checkWorkspace(good, CONTEXT), { ok: true, access: "metadata", scopes: ["agent:metadata"] });
+  assert.deepEqual(checkWorkspace({ ...good, content: { captured: false, included: false } }, CONTEXT), { ok: true, access: "metadata", scopes: ["agent:metadata"] });
   // Upper case UUIDs from the server are the same workspace.
   const upper = clone(good);
   upper.workspace.id = WORKSPACE_A.toUpperCase();
-  assert.deepEqual(checkWorkspace(upper, CONTEXT), { ok: true });
+  assert.deepEqual(checkWorkspace(upper, CONTEXT), { ok: true, access: "metadata", scopes: ["agent:metadata"] });
 
   const mutate = (change) => {
     const doc = clone(good);
@@ -402,4 +403,41 @@ test("the fixtures carry the field types of the service's documents", () => {
     }
     assert.ok(["metadata", "content", "replay"].includes(entry.privacy_class));
   }
+});
+
+test("a credential is Metadata, or Debug with workflow permissions; anything else is refused", () => {
+  assert.equal(credentialAccess(["agent:metadata"]), "metadata");
+  assert.equal(credentialAccess(["agent:read"]), "debug");
+  assert.equal(credentialAccess(["agent:analysis-run", "agent:read"]), "debug");
+  assert.equal(credentialAccess(["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"]), "debug");
+  for (const scopes of [
+    [],
+    ["agent:read", "agent:replay"],
+    ["agent:metadata", "agent:read"],
+    ["agent:analysis-run"],
+    ["agent:read", "ingest"],
+    ["agent:read", "agent:read"],
+    ["agent:read", 1],
+    "agent:read",
+    null,
+  ]) {
+    assert.equal(credentialAccess(scopes), null, JSON.stringify(scopes));
+  }
+});
+
+test("Debug with every permission passes only where the caller accepts Debug, and its capabilities are not refused", () => {
+  const debug = workspaceDocument(PROVENANCE, WORKSPACE_A);
+  debug.access = { scopes: ["agent:read", "agent:eval-write", "agent:eval-preview", "agent:analysis-run"] };
+  assert.equal(checkWorkspace(debug, CONTEXT).reason, "scope_mismatch");
+  assert.deepEqual(checkWorkspace(debug, { ...CONTEXT, debug: true }), {
+    ok: true,
+    access: "debug",
+    scopes: ["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"],
+  });
+  const replay = { ...debug, access: { scopes: ["agent:read", "agent:replay"] } };
+  assert.equal(checkWorkspace(replay, { ...CONTEXT, debug: true }).reason, "scope_mismatch");
+
+  const offered = capabilitiesDocument(PROVENANCE, { start: true });
+  assert.equal(checkCapabilities(offered, CONTEXT).reason, "content_access_granted");
+  assert.deepEqual(checkCapabilities(offered, { ...CONTEXT, access: "debug" }), { ok: true });
 });

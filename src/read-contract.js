@@ -1,4 +1,4 @@
-import { normalizeUuid } from "./auth-oauth.js";
+import { credentialAccess, normalizeUuid } from "./auth-oauth.js";
 import {
   AGENT_CONTRACT_VERSION,
   MAX_CURSOR_LENGTH,
@@ -17,7 +17,8 @@ import { traceLink } from "./trace-contract.js";
 // with fixed tokens. notices is a Set that collects fixed notice tokens.
 
 // Every capability name the contract defines. Content, replay and start
-// entries are never available to a Metadata grant.
+// entries are never available to a Metadata grant; a Debug credential with
+// workflow permissions may be offered content and starts.
 export const CAPABILITY_NAMES = Object.freeze([
   "workspace_context",
   "capability_discovery",
@@ -1128,7 +1129,8 @@ export function workspaceContext(body, ctx, notices) {
       throw new Invalid("verification_failed", "content_access_granted");
     }
     const scopes = body.access?.scopes;
-    if (!Array.isArray(scopes) || scopes.length !== 1 || scopes[0] !== METADATA_SCOPE) {
+    const access = credentialAccess(scopes);
+    if (access === null || access !== (ctx.access ?? "metadata")) {
       throw new Invalid("verification_failed", "scope_mismatch");
     }
     return {
@@ -1141,12 +1143,15 @@ export function workspaceContext(body, ctx, notices) {
       },
       retention: { metadata_days: body.retention.metadata_days },
       content: { captured: body.content.captured, included: false },
-      access: { scopes: [METADATA_SCOPE] },
+      access: { scopes: [...scopes].sort() },
     };
   });
 }
 
-function capabilityEntry(entry, reason) {
+// access is the credential's: a Metadata credential is never offered a
+// sensitive capability; a Debug credential may be, and read commands still
+// never use one.
+function capabilityEntry(entry, reason, access = "metadata") {
   if (
     !isObject(entry) ||
     typeof entry.available !== "boolean" ||
@@ -1166,8 +1171,10 @@ function capabilityEntry(entry, reason) {
     entry.privacy_class === "metadata" &&
     entry.required_scope === METADATA_SCOPE;
   // checkCapabilities already refuses this; it is checked again here so a
-  // summary can never show a sensitive capability as available.
-  if (!metadataOnly && entry.available) throw new Invalid("verification_failed", "content_access_granted");
+  // summary can never show a sensitive capability as available to Metadata.
+  if (!metadataOnly && entry.available && access === "metadata") {
+    throw new Invalid("verification_failed", "content_access_granted");
+  }
   return {
     available: entry.available,
     content: entry.content,
@@ -1194,7 +1201,7 @@ export function capabilitySummary(body, ctx, notices) {
     if (!isObject(body.agent)) throw new Invalid("verification_failed", reason);
     const agent = {};
     for (const name of CAPABILITY_NAMES) {
-      agent[name] = Object.hasOwn(body.agent, name) ? capabilityEntry(body.agent[name], reason) : null;
+      agent[name] = Object.hasOwn(body.agent, name) ? capabilityEntry(body.agent[name], reason, ctx.access) : null;
     }
     if (Object.keys(body.agent).some((name) => !CAPABILITY_NAMES.includes(name))) {
       notices.add("unrecognized_capabilities_ignored");
