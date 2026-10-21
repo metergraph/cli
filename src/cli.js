@@ -80,9 +80,11 @@ async function run(argv, { stdout, stderr, stdin }) {
       return envelope({ command: "setup", outcome: "cancelled", reason: "questions_cancelled",
         message: "Setup was cancelled. Nothing was changed." });
     }
-    say("", `Running: ${commandLine(filled)}`, "");
     argv = filled;
     parsed = parseArgs(argv);
+    // Only a command that parses is shown: a value the parser refuses may be
+    // a mistyped credential, and its error never echoes input.
+    if (parsed.ok) say("", `Running: ${commandLine(filled)}`, "");
   }
 
   if (!parsed.ok) {

@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
+import { PassThrough } from "node:stream";
+
 import { parseArgs } from "../src/args.js";
+import { main } from "../src/cli.js";
 import {
   AGENT_KEY_COMMAND,
   agentAccessOffer,
@@ -39,12 +42,18 @@ function scripted(answers) {
   };
 }
 
-const fill = (argv, answers, { found = false, saved = null } = {}) => {
+// remote is explicit: CI itself counts as a remote session.
+const fill = (argv, answers, { found = false, saved = null, remote = false } = {}) => {
   const io = scripted(answers);
+  const probed = [];
   const result = fillSetupArgv(argv, {
-    ask: io.ask, say: io.say, probe: async () => found, savedProfile: () => saved,
+    ask: io.ask, say: io.say, remote, savedProfile: () => saved,
+    probe: async (origin) => {
+      probed.push(origin);
+      return found;
+    },
   });
-  return result.then((filled) => ({ filled, ...io }));
+  return result.then((filled) => ({ filled, probed, ...io }));
 };
 
 test("only a person at a terminal is asked: never --json, a pipe or CI", () => {
@@ -120,6 +129,51 @@ test("a cancel at any question changes nothing", async () => {
   }
 });
 
+test("a cancel at the deployment menu is a cancel even when the client was given", async () => {
+  const { filled } = await fill(["setup", "--client", "codex"], []);
+  assert.equal(filled, null);
+});
+
+test("a remote session sends no request before setup hands it off", async () => {
+  const { filled, probed, said } = await fill(["setup"], ["", ""], { found: true, remote: true });
+  assert.deepEqual(probed, []);
+  assert.ok(!said.some((line) => line.startsWith("Found a Metergraph bundle")));
+  assert.deepEqual(filled, ["setup", "--runtime", "local", "--client", "claude"]);
+});
+
+// A terminal for main(): answers are written to stdin as the person types.
+function terminal() {
+  const stdin = new PassThrough();
+  stdin.isTTY = true;
+  stdin.setRawMode = () => stdin;
+  const written = [];
+  const stdout = new PassThrough();
+  stdout.isTTY = true;
+  stdout.columns = 80;
+  stdout.on("data", (chunk) => written.push(String(chunk)));
+  const errors = [];
+  const stderr = { write: (value) => errors.push(String(value)) };
+  return { stdin, stdout, stderr, text: () => written.join("") + errors.join("") };
+}
+
+test("a filled command that does not parse is never echoed", async () => {
+  const secret = "mg_this_is_a_mistyped_credential_value";
+  const io = terminal();
+  const saved = process.env.CI;
+  delete process.env.CI;
+  try {
+    // Nothing is asked: only --runtime is missing, and it is assumed.
+    const code = await main(["setup", "--deployment", "managed", "--workspace", secret, "--client", "codex"], io);
+    assert.equal(code, 2);
+  } finally {
+    if (saved !== undefined) process.env.CI = saved;
+    io.stdin.end();
+  }
+  assert.ok(!io.text().includes(secret), "the refused value was printed");
+  assert.ok(!io.text().includes("Running:"));
+  assert.match(io.text(), /--workspace must be a workspace ID/);
+});
+
 test("the printed command reruns setup without questions", () => {
   assert.equal(commandLine(["setup", "--url", "http://localhost:8080", "--project", "my app"]),
     "metergraph setup --url http://localhost:8080 --project 'my app'");
@@ -178,7 +232,7 @@ test("declining the offer runs nothing and says how to do it later", async () =>
   assert.ok(said.some((line) => line.includes(AGENT_KEY_COMMAND)));
 });
 
-test("accepting runs the bundle's bin/agent-key, which asks for its own confirmation", async () => {
+test("accepting runs the bundle's bin/agent-key, which asks for its own confirmation", { skip: process.platform === "win32" }, async () => {
   const dir = bundle();
   const { runs, said, asked } = await offer(["y", "/nowhere", dir, "y"]);
   // Setup names the exact program before running it.
@@ -193,7 +247,7 @@ test("accepting runs the bundle's bin/agent-key, which asks for its own confirma
   assert.ok(said.some((line) => line.includes("claude mcp add-json")));
 });
 
-test("nothing in the current project is a default or runs without a typed path", async () => {
+test("nothing in the current project is a default or runs without a typed path", { skip: process.platform === "win32" }, async () => {
   // A project directory that imitates a bundle, as a cloned repository could.
   const planted = bundle();
   const previous = process.cwd();
@@ -209,12 +263,12 @@ test("nothing in the current project is a default or runs without a typed path",
   }
 });
 
-test("declining to run the named program runs nothing", async () => {
+test("declining to run the named program runs nothing", { skip: process.platform === "win32" }, async () => {
   const { runs } = await offer(["y", bundle(), "n"]);
   assert.equal(runs.length, 0);
 });
 
-test("a bin/agent-key other users can change is never run", async () => {
+test("a bin/agent-key other users can change is never run", { skip: process.platform === "win32" }, async () => {
   const dir = bundle({ mode: 0o777 });
   const { runs, said } = await offer(["y", dir, "y"]);
   assert.equal(runs.length, 0);
@@ -228,10 +282,17 @@ test("an older bundle without bin/agent-key is sent to the Keys page", async () 
   assert.ok(said.some((line) => line.includes("http://localhost:8080/#api-keys")));
 });
 
-test("a failed bin/agent-key run says how to rerun it, with no connect steps", async () => {
+test("a failed bin/agent-key run says how to rerun it, with no connect steps", { skip: process.platform === "win32" }, async () => {
   const { said } = await offer(["y", bundle(), "y"], { exitCode: 1 });
   assert.ok(said.some((line) => line.startsWith("bin/agent-key did not finish")));
   assert.ok(!said.some((line) => line.includes("mcp add")));
+});
+
+test("on Windows the command is printed for WSL and nothing is asked or run", async () => {
+  const { runs, asked, said } = await offer(["y", bundle(), "y"], { platform: "win32" });
+  assert.equal(runs.length, 0);
+  assert.equal(asked.length, 0);
+  assert.ok(said.some((line) => line.includes("inside WSL") && line.includes(AGENT_KEY_COMMAND)));
 });
 
 test("connect steps name the variable, never a token", () => {

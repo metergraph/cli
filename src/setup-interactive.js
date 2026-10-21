@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 
 import { resolveProject } from "./auth-binding.js";
 import { runDoctor } from "./doctor.js";
-import { handoffPages, shellArg } from "./environment.js";
+import { classifyEnvironment, handoffPages, shellArg } from "./environment.js";
 import { prerequisitesFor } from "./setup-deployment.js";
 import { readSetupState } from "./setup-state.js";
 
@@ -82,7 +82,9 @@ export function terminalPrompter(stdin, stdout) {
 
 // Resolves with argv plus the flags the answers stand for, or null when the
 // person cancelled. Flags already given are never asked for or changed.
-export async function fillSetupArgv(argv, { ask, say, probe = probeLocalBundle, savedProfile = savedSetupProfile }) {
+export async function fillSetupArgv(argv, {
+  ask, say, probe = probeLocalBundle, savedProfile = savedSetupProfile, remote = classifyEnvironment().remote,
+}) {
   const has = (flag) => argv.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
   const added = [];
   // A person at a terminal runs setup for a coding agent on this machine.
@@ -92,11 +94,13 @@ export async function fillSetupArgv(argv, { ask, say, probe = probeLocalBundle, 
   let deployment = valueOf(argv, "--deployment");
   // A rerun in a project set up before resumes that route without asking.
   if (deployment === undefined && savedProfile(valueOf(argv, "--project")) === null) {
-    const found = await probe(LOCAL_BUNDLE_ORIGIN);
+    // A remote shell sends no request before setup hands it off to the
+    // person's own machine, and its localhost is not that machine anyway.
+    const found = remote ? false : await probe(LOCAL_BUNDLE_ORIGIN);
     if (found) say(`Found a Metergraph bundle at ${LOCAL_BUNDLE_ORIGIN}.`);
     deployment = await choose(ask, say, "Where is Metergraph running?", DEPLOYMENTS,
       found ? "customer-local" : "managed");
-    if (deployment === null) return null;
+    if (deployment === undefined) return null;
     if (deployment !== "managed") added.push("--deployment", deployment);
   }
 
@@ -249,10 +253,16 @@ export function agentAccessOffer(origin) {
 // before running it.
 const BUNDLE_MARKERS = [["bin", "start"], ["docker-compose.yml"], ["metergraph-byoc-release.json"]];
 
-export async function offerAgentAccess({ client, origin, prompter, say, run = runInherited }) {
+export async function offerAgentAccess({ client, origin, prompter, say, run = runInherited, platform = process.platform }) {
   say("", "Your coding agent has Metadata access. It can also write evaluations and start analyses.",
     "That reads captured prompts and responses, and an analysis sends captured content to your model",
     "provider and spends money on your account.");
+  if (platform === "win32") {
+    // The bundle's commands are shell scripts that run inside WSL, and
+    // Windows has no owner-only file mode to check, so say what to run there.
+    say(`To allow it, run this in the bundle directory inside WSL: ${AGENT_KEY_COMMAND}`);
+    return;
+  }
   const wanted = await yesNo(prompter.ask, "Give it that access now? [y/N] ");
   if (!wanted) {
     say(`Later, run this in the bundle directory: ${AGENT_KEY_COMMAND}`);

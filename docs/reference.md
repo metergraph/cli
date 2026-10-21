@@ -366,11 +366,13 @@ Run by a person at a terminal (stdin and stdout both terminals, no `--json`, no
 `CI`), setup asks for what its flags leave out instead of failing: where Metergraph
 runs, the address and workspace of a non-hosted installation, whether its
 prerequisites are done, and which client gets the skill. It assumes `--runtime
-local`, offers a bundle answering on `http://localhost:8080` as the default, and
+local`, offers a bundle answering on `http://localhost:8080` as the default (a
+remote session is not probed, so it sends no request before its handoff), and
 resumes a project's saved route without asking about it. Flags already given are
 never asked for. The answers become ordinary flags, and setup prints the full
 command (`Running: metergraph setup ...`) before running it, so it can be rerun
-without questions. Ctrl-C or Ctrl-D at a question exits with 17 `cancelled` and
+without questions. A command that does not parse is not printed: its error never
+echoes the refused value. Ctrl-C or Ctrl-D at a question exits with 17 `cancelled` and
 changes nothing. An agent or script never gets a question: it keeps the flag errors
 and the handoffs below.
 
@@ -465,7 +467,8 @@ instead. At a terminal, setup asks instead. The person types the bundle director
 bundle's `bin/agent-key` only if the person owns it and nobody else can change
 it, and only after naming its full path and asking. `bin/agent-key` then asks
 for its own confirmation, and setup prints how to load the key and add the MCP
-server for the chosen client. A hosted setup has no `agent_access`.
+server for the chosen client. On Windows, where the bundle runs inside WSL, setup
+prints the command to run there instead of asking. A hosted setup has no `agent_access`.
 
 A rerun of customer-local or BYOC setup can omit `--deployment`, `--url`,
 `--workspace` and `--confirm-prerequisites`, as a hosted rerun does. Setup then
