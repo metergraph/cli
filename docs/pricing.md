@@ -273,3 +273,35 @@ subtotal as complete. Unsupported billing channels, tool versions, rates and
 search-content token accounting remain explicitly partial. The independent
 `request` component retains flat fees per model request and is never relabelled
 as a fee per search. JSON output preserves all fee provenance returned by the API.
+
+The client also binds each returned search quantity to the count it sent. A
+positive count requires exactly one matching `web_search` fee, or an explicitly
+partial/unpriced result with a specific missing search dimension. Zero cannot
+be charged as a positive quantity, and a response cannot add a positive search
+fee when the CLI sent no search usage. Duplicate fee lines and unsupported fee
+operations or units are refused. Lookup responses have no fee fields.
+
+Provenance validation checks field structure, active dates, billing channel,
+region fallback, and arithmetic consistency. The returned catalog version,
+hash, and source URL identify the server's stated catalog; these checks do not
+cryptographically authenticate that catalog or independently verify supplier
+usage. Costs are list-price calculations from supplied usage, not verified
+invoices, and unknown dimensions remain visible.
+
+Version 2 also requires an `assumptions` array. This flag-based CLI never sends
+`context.search_content_tokens_included`, so it requires an empty array in
+responses. A server cannot introduce an accounting assertion that this client
+did not supply. Nonempty assumptions are refused as a contract mismatch, even
+when their names are recognized.
+
+Raw native API callers can explicitly supply search-content accounting evidence.
+The API labels an inclusion assertion as `search_content_tokens_included` and
+an excluded fixed-block scenario as
+`search_content_tokens_excluded_fixed_block`. Those are caller-supplied
+conditions, not independently verified provider facts. The excluded mini-model
+scenario prices each search as 8,000 uncached input tokens; cache eligibility
+for that block is not independently verified. `priced` means the catalog
+calculation is complete **conditional on the supplied usage and assumptions**.
+It does not certify that a provider reported the usage or that an actual
+invoice has been reconciled. This CLI does not construct these native search
+accounting assertions.

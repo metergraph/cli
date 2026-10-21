@@ -470,8 +470,13 @@ test("the installed CLI exposes public pricing actions without requiring login",
 });
 
 test("installed package negotiates and verifies search-fee totals", async () => {
+  let responseMode = "valid", lookupResult;
   const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
   const server = await startServer({
+    "/v1/pricing/lookup": (req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ results: [lookupResult] }));
+    },
     "/v1/pricing/calculate": async (req, res) => {
       let body = "";
       for await (const part of req) body += part;
@@ -482,13 +487,19 @@ test("installed package negotiates and verifies search-fee totals", async () => 
         source_url: "https://example.com/tokens", effective_from: "2026-01-01", effective_to: null, rules: {},
         input_per_mtok: "1", output_per_mtok: "1", cache_read_per_mtok: null, cache_write_5m_per_mtok: null,
         cache_write_1h_per_mtok: null, batch_input_per_mtok: null, batch_output_per_mtok: null, request_fee_per_1k: null };
-      const fee = { operation: "web_search", tool: "web_search", channel: "anthropic-api", unit: "search", quantity: 5,
+      const fee = { operation: "web_search", tool: "web_search", channel: "anthropic-api", unit: "completed_search", quantity: 5,
         rate_per_1k: "10", currency: "USD", cost: "0.05000000", price_id: "synthetic-search-price", source_url: "https://example.com/search",
         effective_from: "2026-01-01", effective_to: null, region: "global", catalog_version: "synthetic", catalog_hash: "synthetic" };
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ results: [{ status: "priced", contract_version: 2, model_id: "example/model", currency: "USD", price,
+      const result = { status: "priced", contract_version: 2, assumptions: [], model_id: "example/model", currency: "USD", price,
         effective_at: "2026-10-20T00:00:00Z", missing_dimensions: [], uncaptured_fees: false, cost: "0.05000000",
-        components: { input: "0", output: "0", cache_read: "0", cache_write: "0", request: "0", search: "0.05000000" }, fees: [fee] }] }));
+        components: { input: "0", output: "0", cache_read: "0", cache_write: "0", request: "0", search: "0.05000000" }, fees: [fee] };
+      lookupResult = { status: result.status, model_id: result.model_id, currency: result.currency, price,
+        effective_at: result.effective_at, missing_dimensions: [], fees: [null] };
+      if (responseMode === "missing") { result.fees = []; result.components.search = result.cost = "0"; }
+      if (responseMode === "mismatch") { fee.quantity = 4; fee.cost = result.components.search = result.cost = "0.04000000"; }
+      if (responseMode === "duplicate") { result.fees.push(structuredClone(fee)); result.components.search = result.cost = "0.10000000"; }
+      res.end(JSON.stringify({ results: [result] }));
     },
   });
   try {
@@ -498,5 +509,16 @@ test("installed package negotiates and verifies search-fee totals", async () => 
     const result = parseJsonLine(got.stdout).data.result;
     assert.equal(result.cost, "0.05000000");
     assert.equal(result.fees[0].quantity, 5);
+    for (responseMode of ["missing", "mismatch", "duplicate"]) {
+      const rejected = await run(process.execPath, [bin, "pricing", "calculate", "--model", "example/model", "--provider", "anthropic",
+        "--at", "2026-10-20", "--input-tokens", "0", "--output-tokens", "0", "--web-search-requests", "5", "--url", server.origin, "--json"], { cwd: projectDir });
+      assert.equal(rejected.code, 11);
+      assert.equal(parseJsonLine(rejected.stdout).error.reason, "pricing_contract_mismatch");
+    }
+    const lookup = await run(process.execPath, [bin, "pricing", "lookup", "--model", "example/model", "--provider", "anthropic",
+      "--at", "2026-10-20", "--url", server.origin], { cwd: projectDir });
+    assert.equal(lookup.code, 11);
+    assert.equal(lookup.stderr, "");
+    assert.match(lookup.stdout, /pricing_contract_mismatch/);
   } finally { await server.close(); }
 });
