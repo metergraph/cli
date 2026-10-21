@@ -16,6 +16,8 @@ import { parseJsonObject } from "./http.js";
 import {
   readQuery,
   groupedRequest,
+  workspaceLabel,
+  workspacePinned,
   READ_ENVIRONMENTS,
   CAPABILITY_NAMES,
   capabilitySummary,
@@ -73,6 +75,8 @@ export async function runRead(options) {
     // The credential's access ("metadata" or "debug") and scopes, once verified.
     access: null,
     scopes: [],
+    // The verified workspace's slug and name, for output. Never its ID.
+    workspaceLabel: { slug: null, name: null },
     verifiedWorkspace: null,
     capabilities: null,
   };
@@ -94,6 +98,8 @@ export async function runRead(options) {
     if (holdsKnown(data, known)) {
       notices.clear();
       ctx.reason = "credential_in_metadata_response";
+      // The workspace's name or slug may be what echoed the credential.
+      ctx.workspaceLabel = { slug: null, name: null };
       return {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
@@ -200,6 +206,11 @@ export async function runRead(options) {
     ctx.profile = session.session.profile;
     ctx.access = session.session.access;
     ctx.scopes = session.session.scopes;
+    ctx.workspaceLabel = workspaceLabel(session.documents.workspace?.workspace);
+    // A workspace named by slug or name is checked against the verified one.
+    if (target.workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, target.workspaceText)) {
+      return end("verification_failed", "workspace_context_mismatch");
+    }
     if (ctx.workspaceId === null) {
       ctx.workspaceId = session.session.workspaceId;
       notices.add("workspace_not_pinned");
@@ -427,7 +438,7 @@ async function fetchRead(session, path, query, signal) {
 function readData(ctx, report, notices, outcome, options, extra = {}) {
   return {
     origin: ctx.origin,
-    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
+    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId, ...ctx.workspaceLabel },
     deployment_profile: ctx.profile,
     environment: ctx.environment.kind,
     credential: ctx.credential,
@@ -470,6 +481,9 @@ function statusData(ctx, notices, outcome, options) {
         ctx.verifiedWorkspace === null || ctx.intendedWorkspace === null
           ? null
           : ctx.verifiedWorkspace === ctx.intendedWorkspace,
+      // The verified workspace's slug and name, which output shows instead
+      // of either ID.
+      ...ctx.workspaceLabel,
     },
     scopes: ctx.authenticated ? ctx.scopes : [],
     capabilities:

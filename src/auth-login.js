@@ -16,6 +16,7 @@ import {
   exchangeCode,
   newPkce,
   revoke,
+  sameScopes,
   verifyContext,
 } from "./auth-oauth.js";
 import { LOCK_WAIT_MS, sessionFor } from "./auth-session.js";
@@ -30,21 +31,29 @@ import {
   withSlotLock,
   writeCredential,
 } from "./auth-store.js";
-import { AUTH_HTTP_TIMEOUT_MS, METADATA_SCOPE } from "./constants.js";
+import { AUTH_HTTP_TIMEOUT_MS, WORKFLOW_PERMISSIONS, loginScope } from "./constants.js";
 import { runDoctor } from "./doctor.js";
 import { agentKeyAction, classifyEnvironment } from "./environment.js";
+import { workspaceLabel, workspaceNamed } from "./read-contract.js";
 import { deadline, trapSignals } from "./transport.js";
 
 // login and logout. Each returns { outcome, reason, data }; every string in
-// data is a fixed token, the validated origin, a supported profile or a
-// server-verified workspace UUID. Token values, the authorization code, the
-// PKCE verifier, absolute paths and server text never leave this module.
+// data is a fixed token, the validated origin, a supported profile, a
+// server-verified workspace UUID, or that workspace's slug and name as the
+// service reported them, checked as safe to print and dropped if they contain
+// a credential this run holds. Token values, the authorization code, the PKCE
+// verifier, absolute paths and other server text never leave this module.
 // progress(text) prints human progress lines; it is a no-op with --json.
 // options.announce(data), given only with --json --no-browser, receives the
 // login data with an open_url next action as soon as the authorization URL
 // exists, while the listener keeps waiting. The caller prints it as the one
 // JSON line, so an agent can hand the URL to a person; approval-handoff.js
 // lets the agent's command exit then while this process keeps waiting.
+// options.role is "metadata" (the default) or "debug", and options.permissions
+// the workflow permission scopes --allow-* added to Debug, which a workspace
+// owner approves on the consent page. options.workspaceText is a workspace named by
+// slug or name: sent to a consent page that can match it, and checked against
+// the workspace the service reports.
 // options.ingestSetup, given only by setup, is { familyId, supported(origin,
 // profile, signal) }. When the service supports it, the sign-in consent also
 // approves the first ingest key for that family, and an ok result carries the
@@ -61,8 +70,12 @@ export async function runLogin(options, progress) {
     status: null,
     previousGrant: null,
     environment: null,
+    role: options.role === "debug" ? "debug" : "metadata",
+    scope: loginScope(options.role, options.permissions ?? []),
+    workspaceLabel: { slug: null, name: null },
   };
   const end = (outcome, reason, next = null) => ({ outcome, reason, data: loginData(ctx, next) });
+  const workspaceText = options.workspaceText ?? null;
 
   // Handoffs come first: no listener, request or file write happens for a
   // session that cannot finish sign in. The next action tells the agent how
@@ -94,18 +107,25 @@ export async function runLogin(options, progress) {
     }
     const store = openStore(configDir, { create: true });
 
-    // A rerun with a working grant changes nothing and opens no browser.
-    if (bound !== null && !options.reconnect) {
+    // A rerun with a working grant for the same role and permissions changes
+    // nothing and opens no browser. Asking for others signs in again, for the
+    // same workspace.
+    const saved = bound === null ? null : readOrNull(store, bound.credential_slot);
+    if (bound !== null && !options.reconnect && saved?.scope === ctx.scope) {
       const session = await sessionFor(bound, store, trap.signal);
       if (session.ok) {
+        if (workspaceText !== null && !workspaceNamed(session.documents.workspace?.workspace, workspaceText)) {
+          return end("conflict", "bound_to_other_workspace", RECONNECT);
+        }
         Object.assign(ctx, {
           profile: bound.deployment_profile,
           workspaceId: bound.workspace_id,
+          workspaceLabel: labelWithout(workspaceLabel(session.documents.workspace?.workspace), session.knownCredentials),
           authenticated: true,
           configured: true,
           status: "reused",
         });
-        return end("ok", null, CONNECTED);
+        return end("ok", null, connected(ctx));
       }
       if (session.outcome !== "login_required") return end(session.outcome, session.reason);
     }
@@ -134,7 +154,7 @@ export async function runLogin(options, progress) {
         deployment_profile: ctx.profile,
         workspace_id: grant.tenant,
         client_id: clientId,
-        scope: METADATA_SCOPE,
+        scope: ctx.scope,
         access_token: grant.accessToken,
         refresh_token: grant.refreshToken,
         expires_at: grant.expiresAt,
@@ -164,7 +184,7 @@ export async function runLogin(options, progress) {
     if (bound !== null && bound.credential_slot !== slot) {
       ctx.previousGrant = await retireSlot(store, bound);
     }
-    return { ...end("ok", null, CONNECTED), ingestSetup: flow.ingestSetup };
+    return { ...end("ok", null, connected(ctx)), ingestSetup: flow.ingestSetup };
   } catch (error) {
     if (error instanceof Stop) return end(error.outcome, error.reason);
     throw error;
@@ -192,6 +212,15 @@ async function authorize(options, ctx, cancel, progress, announce) {
   const discovered = await discover(ctx.origin, limit.signal);
   if (!discovered.ok) return httpFailure(discovered, cancel);
   const { endpoints, requireIss, offeredClientId } = discovered;
+  const scopes = ctx.scope.split(" ");
+  // The consent page can match a slug or name only where the service says
+  // so. Without that, a slug is still checked after sign in, but a name,
+  // which may be ambiguous, is refused before the browser opens.
+  const workspaceText = options.workspaceText ?? null;
+  if (workspaceText !== null && !discovered.workspaceHint && !SLUG.test(workspaceText)) {
+    return fail("unsupported", "workspace_name_unsupported", USE_SLUG);
+  }
+  const workspaceHint = discovered.workspaceHint ? workspaceText ?? options.workspace ?? null : null;
 
   // Setup asks this consent to approve the first ingest key too, but only
   // when the service says it can. Otherwise sign in is unchanged and setup
@@ -209,7 +238,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
   let verifier;
   try {
     limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
-    const client = await clientFor(endpoints, offeredClientId, listener.redirectUri, limit.signal);
+    const client = await clientFor(endpoints, offeredClientId, listener.redirectUri, limit.signal, scopes);
     if (!client.ok) return httpFailure(client, cancel);
     clientId = client.clientId;
 
@@ -234,9 +263,12 @@ async function authorize(options, ctx, cancel, progress, announce) {
       challenge: pkce.challenge,
       signup: options.signup,
       ingestSetup: setupPkce === null ? null : { familyId: options.ingestSetup.familyId, challenge: setupPkce.challenge },
+      scopes,
+      workspaceHint,
     });
-    const purpose = setupPkce === null ? "sign in with Metadata access"
-      : "sign in with Metadata access and approve an ingest-only key for this project";
+    const access = accessText(ctx) + (ctx.scope.includes(" ") ? ", which a workspace owner approves" : "");
+    const purpose = setupPkce === null ? `sign in with ${access}`
+      : `sign in with ${access} and approve an ingest-only key for this project`;
     const seconds = Math.round(options.timeoutMs / 1000);
     // A wait armed after Ctrl+C has already settled; do not show the URL.
     if (cancel.aborted) return fail("authorization_failed", "cancelled");
@@ -272,6 +304,8 @@ async function authorize(options, ctx, cancel, progress, announce) {
   }
 
   if (callback.kind === "code" && setupPkce !== null && callback.setupCode) options.ingestSetup.onApproved?.();
+  // The consent page refused the workspace the CLI named.
+  if (callback.kind === "denied" && callback.hint) return fail("invalid_input", callback.hint, USE_SLUG);
   if (callback.kind === "denied") return fail("authorization_failed", "access_denied");
   if (callback.kind === "timeout") return fail("authorization_failed", "timeout");
   if (callback.kind === "cancelled") return fail("authorization_failed", "cancelled");
@@ -280,7 +314,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
   limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
   const exchanged = await exchangeCode(
     endpoints,
-    { clientId, redirectUri: listener.redirectUri, code: callback.code, verifier },
+    { clientId, redirectUri: listener.redirectUri, code: callback.code, verifier, scopes },
     limit.signal,
   );
   if (!exchanged.ok) return httpFailure(exchanged, cancel);
@@ -297,14 +331,22 @@ async function authorize(options, ctx, cancel, progress, announce) {
   const verified = await verifyContext(
     ctx.origin,
     grant.accessToken,
-    { profile: ctx.profile, workspaceId: grant.tenant },
+    { profile: ctx.profile, workspaceId: grant.tenant, access: ctx.role === "debug" ? "read" : "metadata" },
     limit.signal,
   );
   if (!verified.ok) {
     if (cancel.aborted) return rejectGrant("authorization_failed", "cancelled");
     return rejectGrant(verified.outcome, verified.reason);
   }
+  if (ctx.role === "debug" && !sameScopes(ctx.scope, verified.scopes)) return rejectGrant("verification_failed", "scope_mismatch");
+  const workspace = verified.documents.workspace?.workspace;
+  if (workspaceText !== null && !workspaceNamed(workspace, workspaceText)) {
+    return rejectGrant("verification_failed", "workspace_mismatch");
+  }
   ctx.workspaceId = grant.tenant;
+  ctx.workspaceLabel = labelWithout(workspaceLabel(workspace), [
+    grant.accessToken, grant.refreshToken, callback.code, verifier, callback.setupCode, setupPkce?.verifier,
+  ]);
   // The receipt is a separate credential: setup redeems it with its own
   // verifier, for the family it named, after binding this sign in. A service
   // that showed only the sign in returns no receipt, and setup falls back to
@@ -436,10 +478,38 @@ const RECONNECT = {
   kind: "reconnect",
   message: "Run login again with --reconnect to switch this project, or run logout first.",
 };
-const CONNECTED = {
-  kind: "connected",
-  message: 'This project is signed in with Metadata access. Run "metergraph logout" to sign out.',
+const USE_SLUG = {
+  kind: "use_workspace_slug",
+  message:
+    "Run login again with --workspace and the workspace's slug, which its Settings page and " +
+    "\"metergraph context\" show.",
 };
+const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
+
+// A workspace label is service text. If it holds a credential this run knows,
+// it is not printed; sign in itself is unaffected.
+function labelWithout(label, secrets) {
+  const values = [label.slug, label.name].filter((value) => value !== null);
+  const echoes = secrets.some((secret) => typeof secret === "string" && secret.length > 0 &&
+    values.some((value) => value.includes(secret)));
+  return echoes ? { slug: null, name: null } : label;
+}
+
+// The role and permissions a sign in asks for, by the Keys page's labels.
+function accessText(ctx) {
+  if (ctx.role !== "debug") return "the Metadata role";
+  const labels = WORKFLOW_PERMISSIONS.filter(({ scope }) => ctx.scope.split(" ").includes(scope)).map(({ label }) => label);
+  if (labels.length === 0) return "the Debug role";
+  const list = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+  return `the Debug role with ${list}`;
+}
+
+function connected(ctx) {
+  return {
+    kind: "connected",
+    message: `This project is signed in with ${accessText(ctx)}. Run "metergraph logout" to sign out.`,
+  };
+}
 
 function loginData(ctx, next) {
   return {
@@ -447,8 +517,12 @@ function loginData(ctx, next) {
     runtime: ctx.runtime,
     environment: ctx.environment,
     deployment_profile: ctx.profile,
-    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
-    scopes: ctx.authenticated ? [METADATA_SCOPE] : [],
+    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId, ...ctx.workspaceLabel },
+    access: {
+      role: ctx.role,
+      permissions: Object.fromEntries(WORKFLOW_PERMISSIONS.map(({ field, scope }) => [field, ctx.scope.split(" ").includes(scope)])),
+    },
+    scopes: ctx.authenticated ? ctx.scope.split(" ").sort() : [],
     authenticated: ctx.authenticated,
     configured: ctx.configured,
     status: ctx.status,

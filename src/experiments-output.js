@@ -1,6 +1,6 @@
 import { STATISTICS } from "./experiments-contract.js";
 import { readMessage } from "./read-output.js";
-import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor, workspaceShown } from "./style.js";
 
 // Fixed text for experiments results. Nothing here contains a value from a
 // service response other than validated metadata; the service's own refusal
@@ -166,7 +166,7 @@ export function experimentsText(result, message, style = PLAIN, action) {
       style.dim(action === "start" ? "Replays captured prompts within the server's budget" : "Metadata only")}`,
     "",
   ];
-  const rows = [["Origin", data.origin], ["Workspace", data.workspace?.id ?? null]];
+  const rows = [["Origin", data.origin], ["Workspace", workspaceShown(data.workspace)]];
   if (result.ok) {
     const [more, body] = resultLines(action, data.result);
     lines.push(...fields(style, [...rows, ...more]));

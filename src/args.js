@@ -39,6 +39,7 @@ import {
   USAGE_DIMENSIONS,
   USAGE_MAX_FILTER_VALUES,
   USAGE_SORTS,
+  WORKFLOW_PERMISSIONS,
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
 import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
@@ -48,6 +49,14 @@ export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities",
 const COMMANDS = new Set(["pricing", "doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", "tools", ...READ_COMMANDS]);
 const HELP_TOPICS = new Set(["pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", "tools", ...READ_COMMANDS]);
 export const TOOLS_ACTIONS = Object.freeze(["list", "call"]);
+// The roles login asks for: Metadata, or Debug, to which --allow-* adds the
+// workflow permissions a workspace owner approves. Replay is never asked for.
+export const LOGIN_ROLES = Object.freeze(["metadata", "debug"]);
+// Each --allow-* switch and the scope it asks for, by the names bin/agent-key
+// and the Keys page use.
+const LOGIN_PERMISSIONS = Object.freeze(
+  WORKFLOW_PERMISSIONS.map(({ field, scope }) => [`--${field.replaceAll("_", "-")}`, scope]),
+);
 export const EXPERIMENT_ACTIONS = Object.freeze(["list", "estimate", "start", "get"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
@@ -61,7 +70,7 @@ const OPTIONS = {
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   skills: new Set(["--client", "--runtime", "--project"]),
-  login: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--timeout-ms"]),
+  login: new Set(["--runtime", "--url", "--workspace", "--role", "--project", "--config-dir", "--timeout-ms"]),
   setup: new Set(["--runtime", "--url", "--workspace", "--project", "--config-dir", "--env-file", "--client", "--timeout-ms", "--deployment", "--agent-token-file", "--repository"]),
   logout: new Set(["--project", "--config-dir"]),
   status: new Set([...READ_BASE, ...READ_KEY]),
@@ -132,7 +141,7 @@ const USAGE_GROUPED = [
 // Options that take no value.
 const FLAGS = {
   pricing: new Set(["--batch"]),
-  login: new Set(["--signup", "--no-browser", "--reconnect"]),
+  login: new Set(["--signup", "--no-browser", "--reconnect", ...LOGIN_PERMISSIONS.map(([flag]) => flag)]),
   setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites", "--no-repository"]),
   verify: new Set(["--open", "--no-browser"]),
   usage: new Set(["--today"]),
@@ -339,16 +348,29 @@ export function parseArgs(argv) {
 
 // --url, --workspace and --agent-token-file, shared by the read commands and
 // experiments: { ok: true, origin, workspace, agentTokenFile } or a failure.
+// --workspace names a workspace by its slug (on its Settings page, and in
+// "metergraph context"), by its name, or by its ID. Returns { workspace,
+// workspaceText }: workspace is an ID, workspaceText a slug or name, which is
+// matched against the workspace the service reports. null for a bad value.
+function workspaceOption(raw) {
+  if (raw === undefined) return { workspace: null, workspaceText: null };
+  if (UUID.test(raw)) return { workspace: raw.toLowerCase(), workspaceText: null };
+  const text = raw.trim();
+  if (text.length === 0 || text.length > MAX_WORKSPACE_TEXT || hasUnsafeText(text)) return null;
+  return { workspace: null, workspaceText: text };
+}
+const MAX_WORKSPACE_TEXT = 200;
+const INVALID_WORKSPACE =
+  "--workspace takes the workspace's slug, shown on its Settings page and by \"metergraph context\", or its name.";
+
 function parseKeyTarget(values, fail) {
   let origin = null;
   if (values["--url"] !== undefined) {
     origin = parseOrigin(values["--url"]);
     if (origin === null) return fail("invalid_url", INVALID_URL);
   }
-  const rawWorkspace = values["--workspace"];
-  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
-    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
-  }
+  const named = workspaceOption(values["--workspace"]);
+  if (named === null) return fail("invalid_workspace", INVALID_WORKSPACE);
   const agentTokenFile = values["--agent-token-file"] ?? null;
   if (agentTokenFile !== null && (agentTokenFile === "" || agentTokenFile.includes("\0"))) {
     return fail("invalid_agent_token_file", "--agent-token-file must name a private absolute file.");
@@ -356,7 +378,7 @@ function parseKeyTarget(values, fail) {
   return {
     ok: true,
     origin,
-    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    ...named,
     agentTokenFile,
   };
 }
@@ -663,9 +685,16 @@ function parseLogin(values, flags, json, fail) {
   }
   const origin = parseUrlOption(values);
   if (origin === null) return fail("invalid_url", INVALID_URL);
-  const rawWorkspace = values["--workspace"];
-  if (rawWorkspace !== undefined && !UUID.test(rawWorkspace)) {
-    return fail("invalid_workspace", "--workspace must be a workspace ID in UUID form.");
+  const named = workspaceOption(values["--workspace"]);
+  if (named === null) return fail("invalid_workspace", INVALID_WORKSPACE);
+  const role = values["--role"] ?? "metadata";
+  if (!LOGIN_ROLES.includes(role)) return fail("invalid_role", "--role must be metadata or debug.");
+  const permissions = LOGIN_PERMISSIONS.filter(([flag]) => flags.has(flag)).map(([, scope]) => scope);
+  if (permissions.length > 0 && role !== "debug") {
+    return fail(
+      "permission_needs_debug",
+      "--allow-evaluation-writes, --allow-evaluation-previews and --allow-analysis-starts need --role debug.",
+    );
   }
   const paths = parsePaths(values, fail);
   if (!paths.ok) return paths;
@@ -685,7 +714,9 @@ function parseLogin(values, flags, json, fail) {
     command: "login",
     runtime,
     origin,
-    workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
+    ...named,
+    role,
+    permissions,
     project: paths.project,
     configDir: paths.configDir,
     timeoutMs,
