@@ -52,6 +52,7 @@ test("help works offline in text and JSON form", async () => {
   assert.deepEqual(
     result.data.commands.map((command) => command.name),
     [
+      "pricing",
       "doctor",
       "skill install",
       "skill update",
