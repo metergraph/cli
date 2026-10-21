@@ -135,6 +135,8 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
 | Command | What it does | Network |
 | --- | --- | --- |
+| `pricing models`, `pricing lookup`, `pricing calculate` (`cost` alias) | Discover models, look up rates and calculate costs through the public API without sign in | Yes |
+| `pricing market`, `pricing history` | Current public market board; historical terminal/HTML charts require the local reference adapter ([guide](docs/pricing.md)) | Yes |
 | `setup` | Sign in, choose a workspace, write the ingest key to `.env`, record the repository, install the skill | Yes |
 | `verify` | Confirm that one exact trace, by trace ID or request ID, reached the workspace | Yes |
 | `usage` | Daily calls, errors, cost, tokens and latency per route, or cost grouped by provider, model, route or UTC day with exact filters, rankings and a prior-period comparison; filtered by exact metadata or grouped by one metadata key | Yes |
@@ -152,6 +154,33 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 `metergraph help COMMAND` lists a command's options. The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and
 writes, and full JSON examples.
+
+## Public pricing preview
+
+```sh
+metergraph pricing models --limit 10
+metergraph pricing lookup --model gpt-5 --provider openai --region global --json
+metergraph pricing calculate --model claude-sonnet-5 --provider anthropic \
+  --input-tokens 1000 --cache-read-tokens 800 --output-tokens 200
+metergraph pricing market --channel openai-api --limit 5
+```
+
+These commands use the public Pricing API without an account or workspace.
+`cost` is an alias for `calculate`. Inspect status and missing dimensions: an HTTP
+success may still be partial or unpriced. The current market board uses discovery
+plus bounded lookups; it does not invent historical prices or returns.
+
+The stock-style history visualization is preserved in explicit local reference mode:
+
+```sh
+metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api \
+  --api reference --url http://127.0.0.1:8765 --format html > history.html
+```
+
+See [the pricing guide](docs/pricing.md) for the API contract, input semantics and
+local adapter. The public service does not document a history endpoint. This is
+an exploratory preview; supplier pricing coverage and storage claims are not
+independently verified by these command tests.
 
 ## Exit codes
 
@@ -201,8 +230,11 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 - **Files it writes in your project:** `.env` (from `setup`), the skill file, and
   secret-free state under `.metergraph/` that is safe to commit. The skill installer
   never replaces a file it did not write and has no force option.
-- **Network.** Only `GET` requests to fixed paths for reads (`experiments estimate`
-  and `start` send their request as a `POST` body), no redirects followed,
+- **Public pricing.** Pricing reads send no credentials and return public catalog data.
+  `--format html` emits a standalone document; it does not launch a browser.
+- **Network.** Workspace reads use `GET`; experiments estimate and start use `POST`.
+  Public pricing lookup/calculation use unauthenticated `POST` with metadata-only
+  inputs. Fixed paths, no redirects followed,
   bounded response sizes and fixed timeouts. Mistyped arguments are never echoed, since
   they may hold a secret. `--help`, `--version` and `skill` make no network requests.
 

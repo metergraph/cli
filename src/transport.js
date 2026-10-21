@@ -52,11 +52,13 @@ function requestUrl(origin, pathname, query) {
 // other status are read up to maxBytes; a larger body sets tooLarge and is
 // discarded. The only credential ever sent is the bearer argument, and only
 // to this origin. Nothing is taken from the environment, and no cookies are
-// sent or kept. query is null or a URLSearchParams accepted by requestUrl.
+// sent or kept. useGlobalAgent is opt-in for public pricing so Node can use its
+// configured environment proxy (Node 24+ with --use-env-proxy). Other callers
+// retain their existing isolated-agent behavior. query is null or a URLSearchParams accepted by requestUrl.
 export function send(
   origin,
   pathname,
-  { method = "GET", signal, maxBytes, bearer = null, form = null, json = null, query = null },
+  { method = "GET", signal, maxBytes, bearer = null, form = null, json = null, query = null, useGlobalAgent = false },
 ) {
   const url = requestUrl(origin, pathname, query);
 
@@ -91,7 +93,7 @@ export function send(
     const transport = url.protocol === "https:" ? https : http;
     let request;
     try {
-      request = transport.request(url, { method, agent: false, signal, headers });
+      request = transport.request(url, { method, agent: useGlobalAgent ? undefined : false, signal, headers });
     } catch (error) {
       fail(error);
       return;

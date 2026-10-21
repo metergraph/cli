@@ -1,3 +1,4 @@
+import { parsePricing, PRICING_ACTIONS, PRICING_OPTIONS } from "./pricing-args.js";
 import { parseRepository } from "./repository-identity.js";
 import {
   DEFAULT_ORIGIN,
@@ -43,8 +44,8 @@ import { parseOrigin } from "./origin.js";
 import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+const COMMANDS = new Set(["pricing", "doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
 export const EXPERIMENT_ACTIONS = Object.freeze(["list", "estimate", "start", "get"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
@@ -54,6 +55,7 @@ const READ_BASE = ["--project", "--config-dir", "--timeout-ms"];
 // never an argument.
 const READ_KEY = ["--url", "--workspace", "--agent-token-file"];
 const OPTIONS = {
+  pricing: new Set(PRICING_OPTIONS),
   doctor: new Set(["--url", "--timeout-ms"]),
   skill: new Set(["--client", "--runtime", "--project"]),
   skills: new Set(["--client", "--runtime", "--project"]),
@@ -126,6 +128,7 @@ const USAGE_GROUPED = [
 ];
 // Options that take no value.
 const FLAGS = {
+  pricing: new Set(["--batch"]),
   login: new Set(["--signup", "--no-browser", "--reconnect"]),
   setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites", "--no-repository"]),
   verify: new Set(["--open", "--no-browser"]),
@@ -192,6 +195,10 @@ export function parseArgs(argv) {
     }
     if (command === "help" && topic === null && HELP_TOPICS.has(arg)) {
       topic = arg;
+      continue;
+    }
+    if (command === "pricing" && action === null && PRICING_ACTIONS.includes(arg)) {
+      action = arg;
       continue;
     }
     if (command === "skill" && action === null && SKILL_ACTIONS.has(arg)) {
@@ -283,6 +290,7 @@ export function parseArgs(argv) {
   if (command === null || command === "help") {
     return { ok: true, command: "help", topic, json };
   }
+  if (command === "pricing") return parsePricing(action, values, flags, json, fail);
   if (command === "skill") return parseSkill(action, values, json, fail);
   if (command === "skills") return parseSkills(action, values, json, fail);
   if (command === "login") return parseLogin(values, flags, json, fail);

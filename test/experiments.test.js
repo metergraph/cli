@@ -214,6 +214,8 @@ test("a start the service may have recorded is unconfirmed, never a plain failur
     (response) => { response.writeHead(500, { "content-type": "application/json" }); response.end("{}"); },
     // Accepted, but the answer does not match the contract.
     (response) => { response.writeHead(202, { "content-type": "application/json" }); response.end(JSON.stringify({ ok: true })); },
+    ...[200, 201, 202, 204].flatMap((status) => ["", "{invalid"].map((body) =>
+      (response) => { response.writeHead(status, { "content-type": "application/json" }); response.end(body); })),
     // The connection closes after the request was sent.
     (response) => response.socket.destroy(),
   ];
@@ -325,4 +327,49 @@ test("an experiment whose treatment set extra request fields still lists and rea
       { web_search_options: { search_context_size: "low" } });
     const text = await run(server, ["experiments", "get", "--id", EXPERIMENT_ID], { json: false });
     assert.match(text.run.stdout, /web_search_options\.search_context_size=low/);
+  }));
+
+
+test("capability discovery includes experiment reads and unavailable sensitive entries", () =>
+  withServer({}, async (server) => {
+    const { result } = await run(server, ["capabilities"]);
+    assert.equal(result.outcome, "ok");
+    const agent = result.data.result.agent;
+    for (const name of ["experiments", "experiment_estimate", "experiment"]) assert.equal(agent[name].available, true);
+    assert.equal(agent.experiment_cases.available, false);
+    assert.equal(agent.experiment_start.available, false);
+    assert.equal(agent.experiment_start.required_scope, "agent:analysis-run");
+  }));
+
+test("estimates reject arm identity mismatches and contradictory budget flags", async () => {
+  const changes = [
+    (doc) => { doc.estimate.arms.reverse(); },
+    (doc) => { doc.estimate.arms[0].gateway_model = "openai/other"; },
+    (doc) => { doc.estimate.arms[0].label = "Other"; },
+    (doc) => { doc.estimate.over_budget = true; },
+    (doc) => { doc.estimate.daily_budget_exhausted = true; },
+    (doc) => { doc.blocking_reasons = ["over_budget"]; },
+    (doc) => { doc.blocking_reasons = ["daily_budget_exhausted"]; },
+  ];
+  for (const change of changes) {
+    await withServer({ experiments: (doc, kind) => {
+      if (kind === "estimate") change(doc);
+      return doc;
+    } }, async (server) => {
+      const { result } = await run(server, ESTIMATE);
+      assert.equal(result.outcome, "verification_failed");
+      assert.equal(result.error.reason, "experiment_estimate_invalid");
+      assert.notEqual(result.data.next_action?.kind, "start_experiment");
+    });
+  }
+});
+
+test("a truncated list at the maximum does not suggest an invalid limit", () =>
+  withServer({ experiments: (doc, kind) => {
+    if (kind === "list") doc.page.truncated = true;
+    return doc;
+  } }, async (server) => {
+    const { run: output } = await run(server, ["experiments", "list", "--limit", "50"], { json: false });
+    assert.match(output.stdout, /only the newest results are shown/);
+    assert.doesNotMatch(output.stdout, /raise --limit/);
   }));

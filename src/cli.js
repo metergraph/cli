@@ -1,3 +1,5 @@
+import { runPricing } from "./pricing.js";
+import { pricingText, pricingHtml } from "./pricing-output.js";
 import { READ_COMMANDS, parseArgs } from "./args.js";
 import { runLogin, runLogout } from "./auth-login.js";
 import { runDoctor } from "./doctor.js";
@@ -72,6 +74,14 @@ async function run(argv, { stdout, stderr }) {
   if (parsed.command === "version") {
     const result = envelope({ command: "version", outcome: "ok", data: versionData() });
     stdout.write(parsed.json ? toJsonLine(result) : `${VERSION}\n`);
+    return result;
+  }
+
+  if (parsed.command === "pricing") {
+    const response = await runPricing(parsed);
+    const result = envelope({ command: `pricing ${parsed.action}`, ...response });
+    stdout.write(parsed.json ? toJsonLine(result) :
+      parsed.format === "html" && result.ok ? pricingHtml(result.data) : pricingText(result, parsed.format, style));
     return result;
   }
 

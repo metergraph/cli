@@ -112,7 +112,7 @@ function resultLines(action, report) {
   const lines = [];
   if (action === "list") {
     if (report.experiments.length === 0) return [[["Experiments", "none"]], []];
-    const rows = [["Experiments", `${report.experiments.length}${report.page.truncated ? " (more exist; raise --limit)" : ""}`]];
+    const rows = [["Experiments", `${report.experiments.length}${report.page.truncated ? " (more exist; only the newest results are shown)" : ""}`]];
     const body = report.experiments.map((item) =>
       `${item.id}  ${item.status.padEnd(7)}  ${item.workload_id ?? "(name omitted)"}  ${item.arms.map((arm) => arm.label).join(", ")}  spent ${usd(item.spent_usd)}`);
     return [rows, body];

@@ -291,10 +291,12 @@ function echoedRequest(value, sent, notices, reason) {
   };
 }
 
-function armEstimates(value, count, notices, reason) {
-  if (!Array.isArray(value) || value.length !== count) fail(reason);
-  return value.map((entry) => {
+function armEstimates(value, treatments, notices, reason) {
+  if (!Array.isArray(value) || value.length !== treatments.length) fail(reason);
+  return value.map((entry, index) => {
     const arm = rowObject(entry, reason);
+    const treatment = treatments[index];
+    if (arm.label !== treatment.label || arm.gateway_model !== `${treatment.provider}/${treatment.model}`) fail(reason);
     return {
       label: displayText(arm.label, notices, reason),
       gateway_model: displayText(arm.gateway_model, notices, reason),
@@ -320,6 +322,9 @@ export function experimentEstimate(body, ctx, request, notices) {
       if (typeof estimate[flag] !== "boolean") fail(reason);
     }
     if (!Array.isArray(body.blocking_reasons) || !body.blocking_reasons.every((entry) => BLOCKING.includes(entry))) fail(reason);
+    for (const flag of BLOCKING) {
+      if (body.blocking_reasons.includes(flag) !== estimate[flag]) fail(reason);
+    }
     const start = body.start;
     if (!isObject(start) || start.tool !== "metergraph_start_experiment" || typeof start.granted !== "boolean") fail(reason);
     const links = isObject(body.metergraph_links) ? body.metergraph_links : {};
@@ -334,7 +339,7 @@ export function experimentEstimate(body, ctx, request, notices) {
         spent_24h_usd: amount(estimate.spent_24h_usd, reason),
         daily_budget_exhausted: estimate.daily_budget_exhausted,
         sample: estimatedSample(estimate.sample, notices, reason),
-        arms: armEstimates(estimate.arms, request.treatments.length, notices, reason),
+        arms: armEstimates(estimate.arms, echoed.treatments, notices, reason),
       },
       blocking_reasons: [...body.blocking_reasons],
       start_granted: start.granted,
@@ -367,7 +372,7 @@ export function experimentStarted(body, ctx, request, notices) {
         estimate_usd: amount(experiment.estimate_usd, reason),
         budget_usd: amount(experiment.budget_usd, reason),
         sample: estimatedSample(experiment.sample, notices, reason),
-        arms: armEstimates(experiment.arms, request.treatments.length, notices, reason),
+        arms: armEstimates(experiment.arms, echoed.treatments, notices, reason),
       },
       app_url: experimentLink(body.app_url, ctx, { workload: request.workload_id, id: experiment.id }, notices),
     };

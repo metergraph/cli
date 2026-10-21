@@ -1,3 +1,4 @@
+import { PRICING_OPTIONS } from "./pricing-args.js";
 import {
   CONNECTION_GUIDE_URL,
   DEFAULT_ORIGIN,
@@ -455,6 +456,7 @@ export function helpData(topic) {
       "metergraph --help [--json]",
       "metergraph --version [--json]",
       "metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
+      "metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]",
       ...SKILL_USAGE,
       ...SKILLS_USAGE,
       LOGIN_USAGE,
@@ -465,6 +467,9 @@ export function helpData(topic) {
       ...EXPERIMENTS_USAGE,
     ],
     commands: [
+      { name: "pricing", summary: "Public model discovery, lookup and calculation. Current market board; historical charts in local reference mode.",
+        options: [...PRICING_OPTIONS.map(name => ({ name, value: "VALUE", summary: "See metergraph help pricing and docs/pricing.md." })),
+          { name: "--batch", value: null, summary: "Use batch pricing for cost." }, JSON_OPTION] },
       {
         name: "doctor",
         summary:
@@ -575,6 +580,43 @@ export function helpData(topic) {
 
 export function helpText(topic, style = PLAIN) {
   const lines = [];
+  if (topic === "pricing") {
+    return `Usage: metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]
+
+Public catalog prices. No account, project or token is required.
+models  [--model ID] [--provider ID | --channel ID] [--region ID] [--limit 1..100]
+lookup  --model ID [--provider ID | --channel ID] [--region ID] [--at YYYY-MM-DD]
+calculate (or cost) Same selectors; --input-tokens N --output-tokens N [--batch]
+        --cache-read-tokens N; --trace-format anthropic.messages|openai.responses|
+        openai.chat_completions|otel.gen_ai. Native format inferred for direct
+        Anthropic/OpenAI; otherwise otel.gen_ai. Only supplied counts are sent.
+        Anthropic also accepts --cache-write-tokens N or
+        --cache-write-5m-tokens N / --cache-write-1h-tokens N.
+market  --channel ID [--region ID] [--limit 1..100] (current rates, no history)
+history --model ID --channel ID [--region ID] [--format table|chart|html]
+        Requires --api reference --url LOOPBACK_ORIGIN; no public history API.
+
+All actions: --url ORIGIN --timeout-ms 100..30000 --json --api public|reference
+Default API: public; default origin: https://app.metergraph.dev.
+--at selects UTC midnight; without it public lookup/calculation use server time.
+Models and public market discovery are current-only. Filters on models run locally.
+History/market region defaults to global. Omitted input/output counts stay unknown;
+partial costs are known subtotals, not complete costs. OpenAI cache counts must
+not exceed total input. --json cannot be combined with --format.
+
+Examples:
+  metergraph pricing models --limit 10
+  metergraph pricing lookup --model gpt-5 --provider openai --region global --json
+  metergraph pricing calculate --model claude-sonnet-5 --provider anthropic --input-tokens 1000 --cache-read-tokens 800 --output-tokens 200
+  metergraph pricing market --channel openai-api --limit 5
+  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --api reference --url http://127.0.0.1:8765 --format html > history.html
+
+Public API: GET /v1/pricing/models; POST /v1/pricing/lookup and /calculate.
+No credentials, traces, prompts or responses are loaded from project files.
+The CLI constructs metadata-only provider-format traces from the supplied counts.
+See docs/pricing.md for the supported contract, limitations and reference previews.
+`;
+  }
   if (topic === "doctor") {
     lines.push(
       "Usage: metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
@@ -764,6 +806,7 @@ export function helpText(topic, style = PLAIN) {
       "  metergraph routes [options]      Routes and evaluation contract versions",
       "  metergraph traces [options]      One page of trace metadata",
       "  metergraph experiments list|estimate|start|get  Replay a workload on other models",
+      "  metergraph pricing <action>      Public lookup, cost, history and market board",
       "",
       'Run "metergraph help doctor" for doctor options.',
       'Run "metergraph help skill" for skill options.',

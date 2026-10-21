@@ -322,6 +322,7 @@ export async function runExperimentStart(options) {
 // the service answered with a server error, may have been recorded.
 function unconfirmed(response, failure) {
   if (response.kind === "error") return response.sent === true;
+  if (response.status >= 200 && response.status < 300) return true;
   if (failure.outcome === "unhealthy" && failure.reason === "server_error") return true;
   if (response.status === 503) {
     const body = parseJsonObject(response);

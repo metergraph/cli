@@ -30,11 +30,16 @@ export const CAPABILITY_NAMES = Object.freeze([
   "reports",
   "report_detail",
   "report_evidence",
+  "experiments",
+  "experiment_estimate",
+  "experiment",
+  "experiment_cases",
+  "experiment_start",
   "trace_content",
   "trace_replay",
 ]);
 const PRIVACY_CLASSES = Object.freeze(["metadata", "content", "replay"]);
-const SCOPES = Object.freeze(["agent:metadata", "agent:read", "agent:replay"]);
+const SCOPES = Object.freeze(["agent:metadata", "agent:read", "agent:replay", "agent:analysis-run"]);
 
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$/;
 const IDENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
