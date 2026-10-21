@@ -28,6 +28,7 @@ import {
 import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 import { experimentNextAction, experimentRead } from "./experiments.js";
+import { toolsNextAction, toolsRead } from "./tools.js";
 import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
@@ -225,6 +226,14 @@ export async function runRead(options) {
       return end("ok", null, context.value);
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
+    if (options.command === "tools") {
+      const tools = await toolsRead(session.session, options, limit.signal);
+      if (!tools.ok) {
+        const settled = ["refused", "unconfirmed", "action_required"].includes(tools.outcome) ? tools : settle(tools);
+        return end(settled.outcome, settled.reason, tools.report);
+      }
+      return end("ok", null, tools.value);
+    }
     if (options.command === "experiments") {
       const read = await experimentRead(session.session, options, ctx, documents, limit.signal, notices);
       if (!read.ok) {
@@ -428,6 +437,8 @@ function readData(ctx, report, notices, outcome, options, extra = {}) {
     retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
       ? report?.retry_after_seconds ?? null : null,
     ...(options.command === "experiments" ? { refusal: outcome === "refused" ? report?.refusal ?? null : null } : {}),
+    // A tool's own error document, as the service returned it.
+    ...(options.command === "tools" ? { tool_error: outcome === "refused" ? report?.tool_error ?? null : null } : {}),
     notices: [...notices].sort(),
     next_action: nextAction(outcome, ctx, options, extra),
   };
@@ -505,6 +516,8 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
   const experiment = experimentNextAction(outcome, ctx, options, report);
   if (experiment !== undefined) return experiment;
+  const tool = toolsNextAction(ctx, options);
+  if (tool !== undefined) return tool;
   if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
     // Offer the route-by-day read only when this grant actually has it.
     if (capabilities?.agent?.usage?.available !== true) return null;

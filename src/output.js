@@ -269,6 +269,24 @@ const EXPERIMENTS_OPTIONS = [
   },
   JSON_OPTION,
 ];
+const TOOLS_USAGE = [
+  "metergraph tools list [--name TOOL] [read options] [--json]",
+  "metergraph tools call TOOL [--args JSON | --args-file PATH] [--yes] [read options] [--json]",
+];
+const TOOLS_OPTIONS = [
+  { name: "--name", value: "TOOL", summary: "list only: show one tool, with its input schema under --json." },
+  { name: "--args", value: "JSON", summary: "call only: the tool's arguments as one JSON object. Default {}." },
+  { name: "--args-file", value: "PATH", summary: "call only: a file holding the arguments as one JSON object, up to 1 MiB." },
+  {
+    name: "--yes",
+    value: null,
+    summary:
+      "call only: run a tool that writes, starts work or calls a model provider. Pass it only after the person " +
+      "has approved this exact call.",
+  },
+  ...READ_BASE_OPTIONS,
+  JSON_OPTION,
+];
 const DAYS_OPTION = {
   name: "--days",
   value: "N",
@@ -472,6 +490,7 @@ export function helpData(topic) {
       VERIFY_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
       ...EXPERIMENTS_USAGE,
+      ...TOOLS_USAGE,
     ],
     commands: [
       { name: "pricing", summary: "Public model discovery, lookup and calculation. Current market board; historical charts in local reference mode.",
@@ -565,6 +584,13 @@ export function helpData(topic) {
           "treatments, with built-in statistics per arm next to production. list, estimate and get are Metadata " +
           "reads; start needs a key with Debug access and Allow analysis starts and spends within the server's budget.",
         options: EXPERIMENTS_OPTIONS,
+      },
+      {
+        name: "tools",
+        summary:
+          "List the Agent Access tools this credential can use and call one, as an MCP client would. A tool that " +
+          "writes, starts work or calls a model provider runs only with --yes.",
+        options: TOOLS_OPTIONS,
       },
       ...READ_HELP.map(({ name, summary, options, examples }) => ({
         name,
@@ -688,6 +714,28 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
     lines.push(...optionLines(VERIFY_OPTIONS, 22));
+  } else if (topic === "tools") {
+    lines.push(
+      "Usage:",
+      ...TOOLS_USAGE.map((usage) => `  ${usage}`),
+      "",
+      "Every Agent Access tool the service offers this credential, through its MCP endpoint, with the same",
+      "saved sign in or coding-agent key as the read commands and the same checks first. The service decides",
+      "which tools a credential sees: a Metadata credential gets the Metadata tools; the Debug role adds trace",
+      "content and evaluation reads, and Allow evaluation writes, Allow evaluation previews and Allow analysis",
+      "starts add the tools they name. Replay keys are refused.",
+      "",
+      "list prints the tools with whether each only reads. Under --json each carries its title, description",
+      "and input schema. call sends one tools/call with --args or --args-file and prints the tool's structured",
+      "result in data.result. A tool the service does not mark read-only, or marks as calling a model provider,",
+      "needs --yes: without it the command exits 18 (action_required, confirmation_required) and sends",
+      "nothing. Pass --yes only after the person has approved that exact call. A refusal by the tool exits 19",
+      "(refused) with the service's error in data.tool_error; a write whose answer was lost exits 20",
+      "(unconfirmed).",
+      "",
+      "Options:",
+    );
+    lines.push(...optionLines(TOOLS_OPTIONS, 22));
   } else if (topic === "experiments") {
     lines.push(
       "Usage:",
@@ -813,6 +861,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "  metergraph routes [options]      Routes and evaluation contract versions",
       "  metergraph traces [options]      One page of trace metadata",
       "  metergraph experiments list|estimate|start|get  Replay a workload on other models",
+      "  metergraph tools list|call       Any Agent Access tool this credential can use",
       "  metergraph pricing <action>      Public lookup, cost, history and market board",
       "",
       'Run "metergraph help doctor" for doctor options.',
@@ -822,6 +871,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
       'Run "metergraph help experiments" for experiment options.',
+      'Run "metergraph help tools" for tool options.',
       "",
       ...AGENT_PATH_HELP,
     );

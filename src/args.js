@@ -42,10 +42,12 @@ import {
 } from "./constants.js";
 import { parseOrigin } from "./origin.js";
 import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from "./read-contract.js";
+import { TOOL_ARGS_MAX_BYTES, TOOL_NAME } from "./tools.js";
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
-const COMMANDS = new Set(["pricing", "doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+const COMMANDS = new Set(["pricing", "doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", "tools", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", "tools", ...READ_COMMANDS]);
+export const TOOLS_ACTIONS = Object.freeze(["list", "call"]);
 export const EXPERIMENT_ACTIONS = Object.freeze(["list", "estimate", "start", "get"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
@@ -77,6 +79,7 @@ const OPTIONS = {
   experiments: new Set([
     ...READ_BASE, ...READ_KEY, "--workload", "--limit", "--treatment", "--last-n", "--sample-model", "--track", "--id",
   ]),
+  tools: new Set([...READ_BASE, ...READ_KEY, "--name", "--args", "--args-file"]),
 };
 // Which experiments options each action takes, beyond READ_BASE and READ_KEY.
 const EXPERIMENT_OPTIONS = {
@@ -133,6 +136,7 @@ const FLAGS = {
   setup: new Set(["--no-browser", "--repair", "--signup", "--reconnect", "--skip-skill", "--confirm-prerequisites", "--no-repository"]),
   verify: new Set(["--open", "--no-browser"]),
   usage: new Set(["--today"]),
+  tools: new Set(["--yes"]),
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -163,6 +167,7 @@ export function parseArgs(argv) {
 
   let command = null;
   let action = null;
+  let toolName = null;
   let topic = null;
   let version = false;
   const values = {};
@@ -170,7 +175,7 @@ export function parseArgs(argv) {
 
   const fail = (code, message, outcome = "invalid_input") => ({
     ok: false,
-    command: (command === "skill" || command === "skills" || command === "experiments") && action !== null
+    command: (command === "skill" || command === "skills" || command === "experiments" || command === "tools") && action !== null
       ? `${command} ${action}`
       : command ?? (version ? "version" : null),
     json,
@@ -211,6 +216,14 @@ export function parseArgs(argv) {
     }
     if (command === "experiments" && action === null && EXPERIMENT_ACTIONS.includes(arg)) {
       action = arg;
+      continue;
+    }
+    if (command === "tools" && action === null && TOOLS_ACTIONS.includes(arg)) {
+      action = arg;
+      continue;
+    }
+    if (command === "tools" && action === "call" && toolName === null && !arg.startsWith("-")) {
+      toolName = arg;
       continue;
     }
 
@@ -280,6 +293,9 @@ export function parseArgs(argv) {
         `Unknown experiments subcommand at argument ${position}. Use list, estimate, start or get.`,
       );
     }
+    if (command === "tools" && action === null && !arg.startsWith("-")) {
+      return fail("unknown_subcommand", `Unknown tools subcommand at argument ${position}. Use list or call.`);
+    }
     return fail(
       "unknown_argument",
       `Unrecognized argument at position ${position}. Run "metergraph --help" for usage.`,
@@ -297,6 +313,7 @@ export function parseArgs(argv) {
   if (command === "setup") return parseSetup(values, flags, json, fail);
   if (command === "verify") return parseVerify(values, flags, json, fail);
   if (command === "experiments") return parseExperiments(action, values, json, fail);
+  if (command === "tools") return parseTools(action, toolName, values, flags, json, fail);
   if (READ_COMMANDS.includes(command)) return parseRead(command, values, flags, json, fail);
   if (command === "logout") {
     const paths = parsePaths(values, fail);
@@ -341,6 +358,56 @@ function parseKeyTarget(values, fail) {
     origin,
     workspace: rawWorkspace === undefined ? null : rawWorkspace.toLowerCase(),
     agentTokenFile,
+  };
+}
+
+// tools list [--name TOOL] | call TOOL [--args JSON | --args-file PATH] [--yes].
+// The credential options are the read commands'. Arguments are checked for
+// shape only; the service validates them against the tool's schema.
+function parseTools(action, toolName, values, flags, json, fail) {
+  if (action === null) {
+    return fail("missing_subcommand", 'tools requires a subcommand: list or call. Run "metergraph help tools" for usage.');
+  }
+  const allowed = action === "list" ? ["--name"] : ["--args", "--args-file"];
+  for (const name of Object.keys(values)) {
+    if (!READ_BASE.includes(name) && !READ_KEY.includes(name) && !allowed.includes(name)) {
+      return fail("unknown_argument", `tools ${action} does not take ${name}. Run "metergraph help tools" for usage.`);
+    }
+  }
+  if (action === "list" && flags.has("--yes")) {
+    return fail("unknown_argument", 'tools list does not take --yes. Run "metergraph help tools" for usage.');
+  }
+  const name = action === "list" ? values["--name"] ?? null : toolName;
+  if (action === "call" && name === null) {
+    return fail("missing_tool", 'tools call needs a tool name, such as metergraph_list_classified_workloads. Run "metergraph tools list" to see them.');
+  }
+  if (name !== null && !TOOL_NAME.test(name)) {
+    return fail("invalid_tool", "A tool name is metergraph_ followed by lower case letters, digits and underscores.");
+  }
+  if (values["--args"] !== undefined && values["--args-file"] !== undefined) {
+    return fail("conflicting_options", "Give --args or --args-file, not both.");
+  }
+  if (values["--args"] !== undefined && Buffer.byteLength(values["--args"]) > TOOL_ARGS_MAX_BYTES) {
+    return fail("args_too_large", "--args is larger than 1 MiB. Use --args-file.");
+  }
+  if (values["--args-file"] !== undefined && (values["--args-file"] === "" || values["--args-file"].includes("\0"))) {
+    return fail("invalid_args_file", "--args-file must name a file.");
+  }
+  const paths = parsePaths(values, fail);
+  if (!paths.ok) return paths;
+  const rawTimeout = values["--timeout-ms"];
+  const timeoutMs = rawTimeout === undefined
+    ? READ_DEFAULT_TIMEOUT_MS
+    : parseTimeout(rawTimeout, READ_MIN_TIMEOUT_MS, READ_MAX_TIMEOUT_MS);
+  if (timeoutMs === null) {
+    return fail("invalid_timeout", `--timeout-ms must be a whole number from ${READ_MIN_TIMEOUT_MS} to ${READ_MAX_TIMEOUT_MS}.`);
+  }
+  const target = parseKeyTarget(values, fail);
+  if (!target.ok) return target;
+  delete target.ok;
+  return {
+    ok: true, command: "tools", action, ...target, project: paths.project, configDir: paths.configDir, timeoutMs, json,
+    tool: { name, args: values["--args"] ?? null, argsFile: values["--args-file"] ?? null, yes: flags.has("--yes") },
   };
 }
 
