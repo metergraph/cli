@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Loopback reference adapter for the proposed public pricing HTTP contract.
+"""Loopback reference adapter for historical pricing visualization previews.
 
+Distinct from the public GET models / POST lookup and calculate API.
 Development only. No auth, storage, source fetching, or production deployment.
 Install metergraph-core==0.5.0 in an isolated environment before running.
 """

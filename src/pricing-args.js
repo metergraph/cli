@@ -1,6 +1,6 @@
 import { DEFAULT_ORIGIN } from "./constants.js";
 import { parseOrigin } from "./origin.js";
-export const PRICING_ACTIONS = ["lookup", "cost", "history", "market"];
+export const PRICING_ACTIONS = ["models", "lookup", "calculate", "cost", "history", "market"];
 const SELECTORS = ["model", "provider", "channel", "region"];
 export const TOKEN_KEYS = [
   "input_tokens",
@@ -12,6 +12,8 @@ export const TOKEN_KEYS = [
 ];
 export const PRICING_OPTIONS = [
   "--url",
+  "--api",
+  "--trace-format",
   "--timeout-ms",
   "--format",
   "--at",
@@ -29,9 +31,24 @@ export function validDate(v) {
   );
 }
 export function parsePricing(action, values, flags, json, fail) {
-  if (!action) return fail("missing_subcommand", "pricing requires lookup, cost, history or market.");
+  if (!action)
+    return fail("missing_subcommand", "pricing requires models, lookup, calculate, cost, history or market.");
   const origin = parseOrigin(values["--url"] ?? DEFAULT_ORIGIN);
   if (!origin) return fail("invalid_url", "--url requires a bare HTTPS origin, or HTTP on loopback.");
+  const api = values["--api"] ?? "public";
+  if (!["public", "reference"].includes(api)) return fail("invalid_pricing_api", "--api must be public or reference.");
+  if (api === "reference" && !["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname))
+    return fail(
+      "reference_requires_loopback",
+      "The reference pricing API is local development tooling; use a loopback --url.",
+    );
+  const cost = action === "cost" || action === "calculate";
+  if (api === "reference" && ["models", "calculate"].includes(action))
+    return fail(
+      "reference_action_unsupported",
+      "The reference adapter supports lookup, cost, history and market.",
+      "unsupported",
+    );
   const format = values["--format"] ?? (action === "history" ? "chart" : "table");
   if (
     !["table", "chart", "html"].includes(format) ||
@@ -49,7 +66,7 @@ export function parsePricing(action, values, flags, json, fail) {
       query[k] = k === "model" ? v : v.toLowerCase();
     }
   }
-  if (action !== "market" && !query.model) return fail("missing_model", "--model is required.");
+  if (!["market", "models"].includes(action) && !query.model) return fail("missing_model", "--model is required.");
   if (query.provider && query.channel)
     return fail("conflicting_selector", "Choose --provider or --channel; channel selects the exact billing route.");
   if (action === "market" && (query.model || query.provider || !query.channel))
@@ -59,12 +76,14 @@ export function parsePricing(action, values, flags, json, fail) {
     );
   if (action === "history" && !query.channel)
     return fail("missing_channel", "history requires --channel to keep one billing route per chart.");
-  query.at = values["--at"] ?? new Date().toISOString().slice(0, 10);
-  if (!validDate(query.at)) return fail("invalid_date", "--at must be a real UTC date, YYYY-MM-DD.");
+  if (values["--at"] !== undefined || api === "reference")
+    query.at = values["--at"] ?? new Date().toISOString().slice(0, 10);
+  if (query.at !== undefined && !validDate(query.at))
+    return fail("invalid_date", "--at must be a real UTC date, YYYY-MM-DD.");
   if (["history", "market"].includes(action)) query.region ??= "global";
-  if (values["--limit"] !== undefined && action !== "market")
-    return fail("unexpected_limit", "--limit is supported only by market.");
-  if (action === "market") {
+  if (values["--limit"] !== undefined && !["models", "market"].includes(action))
+    return fail("unexpected_limit", "--limit is supported only by models and market.");
+  if (["market", "models"].includes(action)) {
     const v = values["--limit"] ?? "20";
     if (!/^[1-9]\d?$|^100$/.test(v)) return fail("invalid_limit", "--limit must be 1 to 100.");
     query.limit = Number(v);
@@ -72,7 +91,7 @@ export function parsePricing(action, values, flags, json, fail) {
   for (const k of TOKEN_KEYS) {
     const v = values[`--${k.replaceAll("_", "-")}`];
     if (v !== undefined) {
-      if (action !== "cost" || !/^(0|[1-9]\d{0,11})$/.test(v))
+      if (!cost || !/^(0|[1-9]\d{0,11})$/.test(v))
         return fail(
           "invalid_usage",
           "Token counts are supported only by cost and must be whole numbers from 0 to 999999999999.",
@@ -81,7 +100,7 @@ export function parsePricing(action, values, flags, json, fail) {
     }
   }
   if (flags.has("--batch")) {
-    if (action !== "cost") return fail("invalid_usage", "--batch is supported only by cost.");
+    if (!cost) return fail("invalid_usage", "--batch is supported only by cost.");
     query.batch = true;
   }
   if (
@@ -89,8 +108,56 @@ export function parsePricing(action, values, flags, json, fail) {
     (query.cache_write_5m_tokens !== undefined || query.cache_write_1h_tokens !== undefined)
   )
     return fail("conflicting_usage", "Use an aggregate cache-write count or duration-specific counts, not both.");
+  if (action === "models" && query.at !== undefined)
+    return fail(
+      "models_date_unsupported",
+      "models returns current discovery data; --at is not supported.",
+      "unsupported",
+    );
+  const traceFormat =
+    values["--trace-format"] ??
+    (query.provider === "anthropic" || query.channel === "anthropic-api"
+      ? "anthropic.messages"
+      : query.provider === "openai" || query.channel === "openai-api"
+        ? "openai.responses"
+        : "otel.gen_ai");
+  if (values["--trace-format"] !== undefined && (!cost || api !== "public"))
+    return fail("unexpected_trace_format", "--trace-format is supported only by public calculate/cost.");
+  if (!["openai.responses", "openai.chat_completions", "anthropic.messages", "otel.gen_ai"].includes(traceFormat))
+    return fail(
+      "invalid_trace_format",
+      "Use openai.responses, openai.chat_completions, anthropic.messages or otel.gen_ai.",
+    );
+  if (api === "public" && cost) {
+    if (
+      (traceFormat.startsWith("openai.") || query.provider === "openai" || query.channel === "openai-api") &&
+      query.cache_read_tokens !== undefined &&
+      (query.input_tokens === undefined || query.cache_read_tokens > query.input_tokens)
+    )
+      return fail("invalid_cached_input", "OpenAI cached input must not exceed the supplied total input tokens.");
+    if (
+      traceFormat !== "anthropic.messages" &&
+      TOKEN_KEYS.filter((k) => k.startsWith("cache_write")).some((k) => query[k] !== undefined)
+    )
+      return fail(
+        "cache_write_format_unsupported",
+        "Use --trace-format anthropic.messages for cache-write counts; other mappings are not verified.",
+        "unsupported",
+      );
+  }
   const raw = values["--timeout-ms"] ?? "10000";
   if (!/^\d+$/.test(raw) || Number(raw) < 100 || Number(raw) > 30000)
     return fail("invalid_timeout", "--timeout-ms must be 100 to 30000.");
-  return { ok: true, command: "pricing", action, origin, query, format, timeoutMs: Number(raw), json };
+  return {
+    ok: true,
+    command: "pricing",
+    action,
+    origin,
+    query,
+    format,
+    api,
+    traceFormat,
+    timeoutMs: Number(raw),
+    json,
+  };
 }

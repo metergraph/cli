@@ -15,7 +15,7 @@ server.stderr.on("data", (chunk) => (errors += chunk));
 async function cli(args, json = true) {
   const child = spawn(
     process.execPath,
-    [bin, "pricing", ...args, "--at", "2026-10-20", "--url", origin, ...(json ? ["--json"] : [])],
+    [bin, "pricing", ...args, "--api", "reference", "--at", "2026-10-20", "--url", origin, ...(json ? ["--json"] : [])],
     { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } },
   );
   let out = "",

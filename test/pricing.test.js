@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArgs } from "../src/args.js";
-import { PRICING_SCHEMA, validatePricing } from "../src/pricing.js";
+import { PRICING_SCHEMA, validatePricing } from "../src/pricing-reference.js";
 import { pricingHtml } from "../src/pricing-output.js";
 import { parseJsonLine, runCli, startServer } from "./helpers.js";
 
+const runReferenceCli = (args, options) => runCli([...args, "--api", "reference"], options);
 const query = { model: "example/model", channel: "example-api", at: "2026-10-20" };
 const row = {
   id: "example/model:example-api:global:2026-01-01",
@@ -175,7 +176,7 @@ test("lookup runs without login and sends no credentials even if an agent token 
     },
   });
   try {
-    const got = await runCli(
+    const got = await runReferenceCli(
       [
         "pricing",
         "lookup",
@@ -223,11 +224,11 @@ test("history chart and HTML run through the CLI and retain provenance", async (
       "--url",
       server.origin,
     ];
-    const chart = await runCli(args);
+    const chart = await runReferenceCli(args);
     assert.equal(chart.code, 0);
     assert.match(chart.stdout, /linear UTC time/);
     assert.match(chart.stdout, /-50.0%/);
-    const html = await runCli([...args, "--format", "html"]);
+    const html = await runReferenceCli([...args, "--format", "html"]);
     assert.equal(html.code, 0);
     assert.match(html.stdout, /<!doctype html>/);
     assert.match(html.stdout, /Catalog 2026-10-20/);
@@ -254,7 +255,7 @@ test("public pricing reports redirects, unavailable endpoints, throttling, malfo
       },
     });
     try {
-      const got = await runCli([
+      const got = await runReferenceCli([
         "pricing",
         "lookup",
         "--model",
@@ -281,7 +282,7 @@ test("a stalled pricing response times out with one JSON failure", async () => {
     "/v1/pricing/lookup?model=example%2Fmodel&channel=example-api&at=2026-10-20": () => {},
   });
   try {
-    const got = await runCli(["pricing", "lookup", "--model", "example/model", "--channel", "example-api",
+    const got = await runReferenceCli(["pricing", "lookup", "--model", "example/model", "--channel", "example-api",
       "--at", "2026-10-20", "--url", server.origin, "--timeout-ms", "100", "--json"]);
     assert.equal(got.code, 4);
     assert.equal(parseJsonLine(got.stdout).error.reason, "timeout");

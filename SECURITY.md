@@ -194,3 +194,21 @@ records about a request.
 
 If you find a way to make the CLI print or send something outside these boundaries,
 please report it.
+
+### Public pricing preview
+
+Public pricing is separate from authenticated workspace reads. It uses GET model
+discovery and POST lookup/calculation on fixed paths of a validated origin, with
+no bearer token, cookies or project credential reads. Calculation payloads are
+constructed from explicit model/context/token-count arguments; the CLI does not
+load original prompts, provider responses or retained traces. Redirects are never
+followed, bodies are bounded and POST calculations are not retried. Public pricing
+opts into Node's configured global agent so supported runtime proxy settings can
+be honored; TLS verification remains enabled.
+
+The market board performs bounded current lookups and does not imply historical
+coverage. The older reference adapter and HTML history renderer require explicit
+loopback mode. Public response schemas carry no workspace provenance or request
+echo, and the CLI does not claim they do. API status, missing dimensions and
+region fallback are retained. Valid command responses do not establish supplier
+pricing correctness or the service's storage/privacy behavior.

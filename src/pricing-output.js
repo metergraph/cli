@@ -28,14 +28,51 @@ function spark(points) {
     .join("");
 }
 function provenance(d) {
+  if (d.api === "public")
+    return d.catalog
+      ? `Catalog ${d.catalog.version} · verified ${d.catalog.pricing_verified_at} · discovery as of ${d.as_of}\n${d.action === "market" ? "Rates were obtained through separate lookups; public history is unavailable." : "Discovery lists supported dimensions, not numeric rates. Use pricing lookup."}\n`
+      : "Public pricing result. The API does not report catalog version or verification time on this response.\nCatalog list rates, not your invoice.\n";
   return `Catalog ${d.catalog.version} · verified ${d.catalog.pricing_verified_at} · served ${d.catalog.served_at}\nCatalog list rates, not your invoice. Base rates exclude conditional rules; use pricing cost.\n`;
 }
 export function pricingText(e, format, style) {
   if (!e.ok) return `Pricing unavailable\n${e.error.message}\nReason: ${e.error.reason}\n`;
   const d = e.data,
     r = d.result;
-  let lines = [style.bold(`METERGRAPH / PRICING ${d.action.toUpperCase()}`), `As of ${d.request.at} UTC`, ""];
-  if (d.action === "market") {
+  let lines = [
+    style.bold(`METERGRAPH / PRICING ${d.action.toUpperCase()}`),
+    d.request.at ? `As of ${d.request.at} UTC` : `Effective time: ${r.effective_at ?? d.as_of}`,
+    "",
+  ];
+  if (d.action === "models") {
+    lines.push(
+      `Canonical models: ${r.total_models}; matching: ${r.matched}; showing: ${r.models.length}${r.truncated ? " (raise --limit for more)" : ""}`,
+      `Formats: ${d.formats.join(", ")}`,
+      "",
+      "MODEL                                  PUBLISHER       CHANNELS",
+    );
+    for (const m of r.models)
+      lines.push(
+        `${m.model_id.padEnd(38)} ${m.publisher.padEnd(15)} ${[...new Set(m.prices.map((p) => p.channel))].join(", ")}`,
+      );
+    lines.push("", "Filters are applied locally to current discovery metadata. Numeric rates require pricing lookup.");
+  } else if (d.action === "market" && d.api === "public") {
+    lines.push("MODEL                                  STATUS    CCY      INPUT     OUTPUT");
+    for (const item of r.items) {
+      const p = item.price;
+      lines.push(
+        `${(item.model_id ?? item.requested_model).padEnd(38)} ${item.status.padEnd(9)} ${(item.currency ?? "---").padEnd(3)} ${money(p?.input_per_mtok ?? null).padStart(10)} ${money(p?.output_per_mtok ?? null).padStart(10)}`,
+      );
+      if (item.missing_dimensions.length) lines.push(`  Missing: ${item.missing_dimensions.join(", ")}`);
+      if (p && d.request.region !== p.region)
+        lines.push(`  Requested region: ${d.request.region} · resolved region: ${p.region} (fallback)`);
+    }
+    lines.push(
+      "",
+      `${d.request.channel} / ${d.request.region} · base rates per million tokens`,
+      `Showing ${r.items.length} of ${r.matched} matching current models${r.truncated ? " · raise --limit for more" : ""}`,
+      "Current discovery plus bounded lookups, not an atomic price snapshot. History, returns and sparklines are unavailable from the public API.",
+    );
+  } else if (d.action === "market") {
     lines.push("MODEL                                  CCY     INPUT     OUTPUT    LAST INPUT CHANGE   HISTORY");
     for (const s of r.series) {
       const p = s.points.at(-1);
@@ -71,12 +108,15 @@ export function pricingText(e, format, style) {
         `${r.model_id} · ${r.price.channel} / ${r.price.region}`,
         `Input ${money(r.price.input_per_mtok)} · Output ${money(r.price.output_per_mtok)} ${r.price.currency}/million tokens`,
         `Source: ${r.price.source_url}`,
+        ...(d.request.region && d.request.region !== r.price.region
+          ? [`Requested region: ${d.request.region} · resolved price region: ${r.price.region} (fallback)`]
+          : []),
       );
-    if (d.action === "cost")
+    if (["cost", "calculate"].includes(d.action))
       lines.push(
         `Cost: ${r.cost ?? "unknown"} ${r.currency ?? ""}${r.status === "partial" ? " (known subtotal)" : ""}`,
         ...(r.components ? Object.entries(r.components).map(([k, v]) => `  ${k}: ${v}`) : []),
-        `Reasons: ${r.reasons.join(", ") || "none"}`,
+        `Reasons: ${r.reasons?.join(", ") || (d.api === "public" ? "not reported" : "none")}`,
       );
   }
   return `${lines.join("\n")}\n\n${provenance(d)}`;

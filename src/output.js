@@ -425,7 +425,7 @@ export function helpData(topic) {
       "metergraph --help [--json]",
       "metergraph --version [--json]",
       "metergraph doctor [--url ORIGIN] [--timeout-ms N] [--json]",
-      "metergraph pricing lookup|cost|history|market [options] [--json]",
+      "metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]",
       ...SKILL_USAGE,
       ...SKILLS_USAGE,
       LOGIN_USAGE,
@@ -435,7 +435,7 @@ export function helpData(topic) {
       ...READ_HELP.map((entry) => entry.usage),
     ],
     commands: [
-      { name: "pricing", summary: "Public catalog lookup, cost, history and market board. No sign in. Hosted contract is pending verification.",
+      { name: "pricing", summary: "Public model discovery, lookup and calculation. Current market board; historical charts in local reference mode.",
         options: [...PRICING_OPTIONS.map(name => ({ name, value: "VALUE", summary: "See metergraph help pricing and docs/pricing.md." })),
           { name: "--batch", value: null, summary: "Use batch pricing for cost." }, JSON_OPTION] },
       {
@@ -541,31 +541,40 @@ export function helpData(topic) {
 export function helpText(topic, style = PLAIN) {
   const lines = [];
   if (topic === "pricing") {
-    return `Usage: metergraph pricing lookup|cost|history|market [options] [--json]
+    return `Usage: metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]
 
 Public catalog prices. No account, project or token is required.
+models  [--model ID] [--provider ID | --channel ID] [--region ID] [--limit 1..100]
 lookup  --model ID [--provider ID | --channel ID] [--region ID] [--at YYYY-MM-DD]
-cost    Same selectors; --input-tokens N --output-tokens N [--batch]
-        Optional --cache-read-tokens N, --cache-write-tokens N, or
+calculate (or cost) Same selectors; --input-tokens N --output-tokens N [--batch]
+        --cache-read-tokens N; --trace-format anthropic.messages|openai.responses|
+        openai.chat_completions|otel.gen_ai. Native format inferred for direct
+        Anthropic/OpenAI; otherwise otel.gen_ai. Only supplied counts are sent.
+        Anthropic also accepts --cache-write-tokens N or
         --cache-write-5m-tokens N / --cache-write-1h-tokens N.
+market  --channel ID [--region ID] [--limit 1..100] (current rates, no history)
 history --model ID --channel ID [--region ID] [--format table|chart|html]
-market  --channel ID [--region ID] [--limit 1..100]
+        Requires --api reference --url LOOPBACK_ORIGIN; no public history API.
 
-All actions: --url ORIGIN --at YYYY-MM-DD --timeout-ms 100..30000 --json
-Default origin: https://app.metergraph.dev (hosted pricing not yet verified).
-Date defaults to today's UTC date at midnight. History/market region defaults
-to global. Cost counts left out stay unknown; partial costs are known subtotals.
---json prints one stable JSON envelope; do not combine it with --format.
+All actions: --url ORIGIN --timeout-ms 100..30000 --json --api public|reference
+Default API: public; default origin: https://app.metergraph.dev.
+--at selects UTC midnight; without it public lookup/calculation use server time.
+Models and public market discovery are current-only. Filters on models run locally.
+History/market region defaults to global. Omitted input/output counts stay unknown;
+partial costs are known subtotals, not complete costs. OpenAI cache counts must
+not exceed total input. --json cannot be combined with --format.
 
 Examples:
-  metergraph pricing lookup --model openai/gpt-6-sol --channel openai-api --json
-  metergraph pricing cost --model openai/gpt-6-sol --provider openai --input-tokens 1000 --output-tokens 200
-  metergraph pricing market --channel openai-api
-  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api
-  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --format html > history.html
+  metergraph pricing models --limit 10
+  metergraph pricing lookup --model gpt-5 --provider openai --region global --json
+  metergraph pricing calculate --model claude-sonnet-5 --provider anthropic --input-tokens 1000 --cache-read-tokens 800 --output-tokens 200
+  metergraph pricing market --channel openai-api --limit 5
+  metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --api reference --url http://127.0.0.1:8765 --format html > history.html
 
-Charts show effective-dated base list rates, not invoices or daily observations.
-See docs/pricing.md for the proposed HTTP contract and local core-backed adapter.
+Public API: GET /v1/pricing/models; POST /v1/pricing/lookup and /calculate.
+No credentials, traces, prompts or responses are loaded from project files.
+The CLI constructs metadata-only provider-format traces from the supplied counts.
+See docs/pricing.md for the supported contract, limitations and reference previews.
 `;
   }
   if (topic === "doctor") {

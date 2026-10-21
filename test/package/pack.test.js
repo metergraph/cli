@@ -55,6 +55,7 @@ const EXPECTED_FILES = [
   "src/output.js",
   "src/pricing-args.js",
   "src/pricing-output.js",
+  "src/pricing-reference.js",
   "src/pricing.js",
   "src/read-contract.js",
   "src/read-output.js",
@@ -455,7 +456,7 @@ test("the installed CLI exposes public pricing actions without requiring login",
   const offline = ["--import", pathToFileURL(NO_NETWORK).href, bin];
   const help = await run(process.execPath, [...offline, "pricing", "--help"], { cwd: workDir });
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /lookup\|cost\|history\|market/);
+  assert.match(help.stdout, /models\|lookup\|calculate\|cost\|history\|market/);
   assert.match(help.stdout, /No account, project or token/);
   assert.match(help.stdout, /--format table\|chart\|html/);
   const bad = await run(process.execPath, [...offline, "pricing", "history", "--model", "example/model", "--json"], { cwd: workDir });

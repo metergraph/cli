@@ -115,7 +115,7 @@ jobs:
           done
 
   pricing:
-    name: Public pricing with real core
+    name: Pricing reference with real core
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

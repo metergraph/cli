@@ -1,200 +1,223 @@
-# Public pricing commands (proposed service contract)
+# Public pricing CLI preview
 
-`metergraph pricing` reads public model catalog prices without a workspace,
-login, project files or credentials. It does not call a model provider.
+The default `--api public` uses the deployed Pricing API at
+`https://app.metergraph.dev` without a workspace, account or credential:
 
-**Release status:** the CLI and loopback reference adapter are implemented.
-The hosted `metergraph.pricing/v1` HTTP endpoints below are a proposed integration
-contract, not a verified deployed service. The default origin is
-`https://app.metergraph.dev`; a deployment without this contract exits 6
-`public_pricing_unavailable`. Do not advertise hosted readiness until a packed
-CLI has passed against that deployment. This document is not evidence of service
-availability. The Python package's public API is distinct from HTTP availability.
+| CLI | HTTP |
+| --- | --- |
+| `pricing models` | `GET /v1/pricing/models` |
+| `pricing lookup` | `POST /v1/pricing/lookup` |
+| `pricing calculate` (`cost` alias) | `POST /v1/pricing/calculate` |
+| `pricing market` | Current discovery plus at most `--limit` lookup requests |
+| `pricing history` | Unsupported publicly; no HTTP request |
 
-## Commands
+The public contract is different from the earlier reference adapter's proposed
+GET endpoints. The CLI does not call public `/cost`, `/market` or `/history`
+endpoints. The historical charts and HTML export are preserved behind explicit
+local reference mode, described below.
+
+## Public commands
 
 ```sh
-metergraph pricing lookup --model openai/gpt-6-sol --channel openai-api --json
-metergraph pricing cost --model openai/gpt-6-sol --provider openai \
-  --input-tokens 1000 --output-tokens 200
-metergraph pricing market --channel openai-api --limit 20
-metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api
-metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api \
-  --format html > history.html
+metergraph pricing models --limit 10
+metergraph pricing models --provider anthropic --region global --json
+metergraph pricing lookup --model gpt-5 --provider openai --region global --json
+metergraph pricing calculate --model claude-sonnet-5 --provider anthropic \
+  --region global --input-tokens 1000 --cache-read-tokens 800 --output-tokens 200
+metergraph pricing cost --model gpt-5 --provider openai --input-tokens 1000 \
+  --cache-read-tokens 800 --output-tokens 200 --trace-format openai.chat_completions
+metergraph pricing market --channel openai-api --limit 5
 ```
 
-All four take `--url ORIGIN`, `--at YYYY-MM-DD`, `--timeout-ms N` and `--json`.
-The date defaults to today's UTC date **at midnight**, and may be a historical or
-future date. No local-time interpretation is used. A future query reads only
-already recorded catalog windows; it is not a forecast. Timeout defaults to
-10 seconds and accepts 100–30000 ms. HTTPS origins and HTTP loopback origins
-follow the CLI's existing origin validation.
+All commands accept `--url ORIGIN`, `--timeout-ms N` and `--json`. Origins are
+bare HTTPS or HTTP on loopback. Timeout defaults to 10 seconds (100–30000 ms).
+The CLI sends no authorization or cookies, follows no redirects and retries no
+requests. Its response budget is 1 MiB per request, with strict UTF-8 and JSON
+content-type checks. No provider API is called and no local cache is written.
 
-- **lookup**: `--model` is required. Choose `--channel` for an exact billing route,
-  or `--provider` for core's direct-provider mapping. They are mutually exclusive.
-  `--region` is optional; omitting it preserves core's missing-region semantics.
-  Missing channel information and unknown models remain `unpriced`.
-- **cost**: lookup selectors plus `--input-tokens`, `--output-tokens`,
-  `--cache-read-tokens`, `--cache-write-tokens`, `--cache-write-5m-tokens`,
-  `--cache-write-1h-tokens` and `--batch`. Counts are integers 0–999999999999.
-  Do not combine aggregate and duration-specific cache writes. Omitted input or
-  output counts remain unknown; a `partial` cost is the known subtotal. Cache
-  inclusion, long-context, batch and request-fee arithmetic stay in core.
-  Token counts follow the selected provider's usage shape (for example OpenAI
-  prompt totals include cached reads). This estimates one call, not an invoice;
-  usage discounts and unrepresented tool fees are not assumed.
-- **history**: requires `--model` and `--channel`; region defaults to `global`.
-  One exact model/channel/region series, through `--at`. Aliases resolve at that
-  date; canonical IDs can retrieve an ended model's history. A region fallback
-  used by lookup is not silently applied to a history series. `--format chart`
-  (default), `table` or `html`. HTML prints a self-contained, script-free document
-  to stdout; the shell redirection writes the file. No browser is launched.
-- **market**: requires `--channel`; accepts `--region` (default `global`) and
-  `--limit` (default 20, 1–100). The reference adapter lists active models ordered
-  by most recent effective start, then descending model ID. The response names
-  matched models and truncation. This is a recent-change board, not an exhaustive
-  ranking of cheapest or highest-quality models.
+### Models
 
-`--json` cannot be combined with `--format`. Success uses the existing CLI JSON
-envelope with `command: "pricing ACTION"`; `data` is the validated service
-document. A successful query may contain `priced`, `partial` or `unpriced`: inspect
-`data.result.status` and `missing_dimensions` before using a cost.
+`models` returns current discovery metadata: catalog version, currency and
+verification date; supported formats, providers, channels, regions and service
+tiers; canonical model IDs, aliases and price dimensions. Price entries in this
+response do **not** contain numeric rates. Use `lookup` for prices.
 
-## Two visualization directions
+`--model`, `--provider` or `--channel`, and `--region` filter this data locally;
+`--limit` defaults to 20 (1–100). Output reports total canonical models, matching
+models, displayed models and truncation. Alias/provider combinations and price
+entries are not additional canonical models. `models --at` is unsupported:
+current discovery cannot establish a historical catalog's completeness.
 
-The market board is designed for a quick terminal scan. It shows currency,
-base input/output rates, the last input-price change between **contiguous**
-recorded windows, and an event sparkline. The sparkline's horizontal spacing is
-by event, not elapsed time. `n/a` means insufficient comparable history (including
-a zero prior rate), not an unchanged price. Request a larger limit when truncated.
+### Lookup
 
-The history card is designed for sharing. It plots base input and output rates
-on a linear UTC axis, with one horizontal segment per effective window. Gaps are
-unknown; missing rates are not plotted. Exact windows and source links accompany
-the plot. Terminal and HTML views use the same validated data. Rates exclude
-conditional rules; use `cost` for a concrete usage estimate. HTML has an accessible
-SVG description and a source-linked data table. No external assets, tracking or
-signup wall are included. A footer links to Metergraph's actual usage analysis.
+`--model` is required. Choose `--provider` for the API's provider mapping or
+`--channel` for an exact billing route; they are mutually exclusive. `--region`
+is optional. When provided, `--at YYYY-MM-DD` becomes `context.at` at UTC midnight;
+otherwise the API chooses the effective time, which is printed in the result.
+Provider/channel/region selectors are lowercased; model identifiers are preserved.
 
-Catalog history may record corrections rather than observed market events.
-Effective dates are not observation timestamps. The last change is not a daily
-return. The catalog-wide verification stamp does not prove each rate was checked
-on that date. These views are not stock prices, financial returns or a forecast.
+The POST body is nested as the service expects:
 
-## Run end to end locally
+```json
+{"model":"gpt-5","context":{"provider":"openai","region":"global"}}
+```
 
-The reference adapter is development tooling in this checkout, not part of the
-npm package or a production server. It binds only `127.0.0.1`, loads core once at
-startup, and has no auth, storage, refresh scheduler, TLS, or production rate
-limiting. Restart it to load a new catalog/package. It never fetches provider pages.
+The service returns `{ "results": [ ... ] }`. This CLI sends one lookup and
+requires exactly one result. It preserves the resolved model ID, price row,
+currency, effective timestamp, status and missing dimensions. Date-only effective
+windows and decimal-string rates are accepted. A price must be active at the
+returned effective time and on the requested explicit channel. The CLI allows
+and discloses a regional fallback to `global` or `*`; it does not claim the
+requested region was priced exactly when the returned row says otherwise.
+
+Lookup has no cost or component breakdown. It does not return catalog version,
+hash, verification stamp or request echo; the CLI does not invent those fields.
+
+### Calculate and cost
+
+`calculate` and `cost` call the same `/calculate` endpoint. They accept lookup
+selectors plus `--input-tokens`, `--output-tokens`, `--cache-read-tokens`,
+`--cache-write-tokens`, `--cache-write-5m-tokens`, `--cache-write-1h-tokens` and
+`--batch`. Counts are whole numbers 0–999999999999. Omitted input/output counts
+stay unknown rather than becoming zero. Aggregate and duration-specific cache
+writes cannot be combined. Batch becomes `context.service_tier: "batch"`.
+
+The CLI constructs a metadata-only trace from these explicit flags. It does not
+load original responses, retained traces, prompts or content from project files.
+It never computes prices locally. The API performs normalization and pricing.
+
+`--trace-format` selects the usage shape sent to the API:
+
+| Format | CLI token mapping |
+| --- | --- |
+| `anthropic.messages` | `usage.input_tokens`, `output_tokens`, additive `cache_read_input_tokens`; aggregate `cache_creation_input_tokens` or duration-specific `cache_creation` |
+| `openai.responses` | `usage.input_tokens`, `output_tokens`, `input_tokens_details.cached_tokens` (cached is part of total input) |
+| `openai.chat_completions` | `usage.prompt_tokens`, `completion_tokens`, `prompt_tokens_details.cached_tokens` (cached is part of total prompt) |
+| `otel.gen_ai` | `attributes.gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens` |
+
+Direct Anthropic/OpenAI selectors infer their native format; other selectors
+default to `otel.gen_ai`. Explicit formats are useful for gateway-routed calls.
+Discovery lists all API-supported formats, including formats this flag-based CLI
+does not construct. It is not a generic original-response uploader.
+
+OpenAI cached input must not exceed the supplied total input. That check runs
+before networking, including with an explicit OpenAI trace format. Anthropic
+cached counts are additive and may exceed uncached input. Cache-write flags are
+accepted publicly only with `anthropic.messages`; other write mappings are
+unverified and explicitly refused instead of silently discarded. Reference mode
+retains its existing core-specific flags.
+
+For example, 1000 input, 800 cached and 200 output mean different things:
+
+- Anthropic: 1000 **uncached** input + 800 cache reads + 200 output.
+- OpenAI: 1000 **total** input includes 800 cached, leaving 200 uncached.
+
+The API returns decimal strings for `cost` and components; JSON preserves those
+strings. Components must sum exactly to the cost, checked with integer decimal
+arithmetic. The API may return null cost/components for an unpriced result.
+It does not report a `reasons` list on this contract; human output says so rather
+than manufacturing reasons.
+
+## Status, completeness and provenance
+
+HTTP 200 and CLI exit 0 mean a supported response was read, **not** that the model
+was priced or the figure was complete. Read `data.result.status` and
+`missing_dimensions`:
+
+- `priced`: an applied price and no missing dimensions.
+- `partial`: a known subtotal; missing dimensions remain visible. Missing usage
+  can produce `0.00000000` with input/output missing. This is not labelled free
+  or complete.
+- `unpriced`: no resolved price/currency, and calculation may have null cost and
+  components. Missing channel and unknown models remain unpriced.
+
+Public JSON uses the existing CLI envelope. `data` contains `api: "public"`,
+`action`, the validated client `request`, and the API result as `result`.
+`request` is what the client sent, not a server echo. Lookup/calculation set
+`catalog: null` because those responses do not carry catalog metadata. Models
+and market include discovery's catalog and `as_of`. No content hash or core
+version is claimed for a public result.
+
+This is a bounded exploratory preview with valid inputs. Command checks do not
+independently verify every supplier rate, all formats/provider combinations,
+historical completeness, privacy/storage claims or production rate limits.
+The API has accepted cached counts exceeding total input as priced in an OpenAI
+edge case; the CLI rejects that malformed input before sending it.
+
+## Market board and preserved history visualizations
+
+The public market board reads current discovery, selects matching exact
+channel/region metadata and performs at most `--limit` individual lookups. It
+uses at most three concurrent lookups under one total command deadline. It
+stops scheduling on a failure, makes no retries, and does not return an incomplete
+board as complete. Empty discovery matches make no lookup requests.
+
+Rows retain each lookup's status, missing dimensions, decimal rates and resolved
+region. Discovery and lookups are separate reads, so this is not an atomic
+snapshot. There is no cheapest-model ranking or historical coverage claim.
+`--at` is unsupported on the public board; use `lookup --at` for one historical
+price. No public historical returns, change percentages or sparklines are
+fabricated from current metadata.
+
+The existing event-sparkline market board, stock-style history chart, source
+links and self-contained script-free HTML export remain available locally:
 
 ```sh
 python3 -m venv /tmp/pricing-venv
 /tmp/pricing-venv/bin/pip install metergraph-core==0.5.0
 /tmp/pricing-venv/bin/python scripts/pricing-server.py --port 8765
 # In another terminal:
-node bin/metergraph.js pricing market --channel openai-api --url http://127.0.0.1:8765
-node bin/metergraph.js pricing cost --model openai/gpt-6-sol --provider openai \
-  --input-tokens 1000 --output-tokens 200 --url http://127.0.0.1:8765 --json
+node bin/metergraph.js pricing market --channel openai-api \
+  --api reference --url http://127.0.0.1:8765
+node bin/metergraph.js pricing history --model openai/gpt-5.6-terra \
+  --channel openai-api --api reference --url http://127.0.0.1:8765
+node bin/metergraph.js pricing history --model openai/gpt-5.6-terra \
+  --channel openai-api --api reference --url http://127.0.0.1:8765 \
+  --format html > history.html
+```
+
+Reference mode is restricted to loopback origins. Its adapter is development
+checkout tooling, not part of the npm runtime or a public endpoint. It loads core
+once and never fetches providers; restart it after updating core/catalog. It
+retains the earlier `metergraph.pricing/v1` reference document format and GET
+lookup/cost/history/market contract. That format is not asserted to be the
+public API schema. `models` and `calculate` are public-only action names; use
+`cost` with the reference adapter.
+
+Reference charts show effective-dated base catalog windows, with gaps left
+unknown. Event sparklines space by event, not time; the last contiguous window
+change is not a daily return. The HTML view has a source-linked table and optional
+Metergraph link. Exporting it does not publish a site or collect leads. This
+work does not restart or replace any separate website, digest or growth project.
+
+## Validation and networking
+
+```sh
+node --test test/pricing-public.test.js test/pricing.test.js
+npm run test:package
+# Opt-in real public service checks (no credentials/provider requests):
+PRICING_PUBLIC_ORIGIN=https://app.metergraph.dev node scripts/pricing-public-smoke.mjs
+# Isolated reference checks against actual core:
 PRICING_PYTHON=/tmp/pricing-venv/bin/python node scripts/pricing-smoke.mjs
 ```
 
-If that package version is not yet published, install `./core` from a checkout
-of the public `PioneerSquareLabs/metergraph` repository at a reviewed commit
-containing core 0.5.0, and record that commit with validation. Do not silently
-substitute a different core release. The smoke test starts its own adapter on
-an ephemeral port and shuts it down. `PRICING_BIN` can point to the installed
-CLI bin to repeat all checks against an npm-packed artifact. No paid calls occur.
-`--catalog PATH` on the adapter selects a local core-validated catalog for testing.
+`PRICING_BIN` can select an installed packed CLI for either smoke script. The
+public script is opt-in and not a live-service dependency of CI. Reference CI
+uses immutable public core commit `62fb9fcee7e49280f924d7c1ccfbc37f442555a4`
+(0.5.0). If the package version is unavailable on PyPI, install that checkout's
+`./core` into the isolated environment. No different release is substituted.
 
-## HTTP contract to implement
+Public pricing opts into Node's global HTTP agent to honor configured Node
+proxy support. In a proxy-only Node 24+ environment, preserve its proxy/CA
+settings and enable `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`). Existing
+workspace/auth transports retain their prior isolated-agent behavior. Older
+Node runtimes still work with direct service connectivity; a proxy-only runtime
+without Node proxy support needs a supported environment. TLS verification stays
+on and credentials are never read from project files or sent by pricing.
 
-Four unauthenticated, read-only GET endpoints:
-
-| Path | Query |
-| --- | --- |
-| `/v1/pricing/lookup` | `model`, `at`, optional `provider` or `channel`, `region` |
-| `/v1/pricing/cost` | lookup keys plus optional `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `batch=true` |
-| `/v1/pricing/history` | `model`, `channel`, `region`, `at` |
-| `/v1/pricing/market` | `channel`, `region`, `at`, `limit` |
-
-Every query key appears once. Unknown keys and invalid values return 400. The
-CLI supplies `at`, history/market `region`, and market `limit` explicitly. No
-credential or cookie is read or sent. The client makes one request, with no
-redirects, automatic retries or credential fallback. The total response budget
-is 1 MiB, including headers-reported size enforcement; encoding must be identity,
-content type application/json, and text valid UTF-8. No local cache is used. CI runs both source and packed CLI smoke checks against
-public core commit `62fb9fcee7e49280f924d7c1ccfbc37f442555a4` (0.5.0).
-
-Every 200 document has:
-
-```json
-{
-  "schema_version": "metergraph.pricing/v1",
-  "action": "lookup",
-  "request": {"model":"example/model","channel":"example-api","at":"2026-10-20"},
-  "catalog": {
-    "version":"2026-10-20",
-    "content_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "pricing_verified_at":"2026-10-20",
-    "served_at":"2026-10-20T12:00:00Z",
-    "core_version":"0.5.0"
-  },
-  "result": {
-    "status":"unpriced", "model_id":null, "price":null,
-    "effective_at":"2026-10-20T00:00:00Z", "missing_dimensions":[]
-  }
-}
-```
-
-`request` echoes the validated request (channel, provider and region are lowercased by the CLI): token counts/limit as JSON integers,
-batch as boolean, selectors/date as strings. It is checked for exact keys and
-values. Catalog version is independent of core version. The hash describes the
-loaded catalog bytes (or canonical JSON for a document-loaded catalog).
-
-A price row has `id`, `model_id`, `channel`, `region`, three-letter `currency`,
-UTC `effective_from`, nullable exclusive `effective_to`, HTTPS `source_url`,
-`rules` object, and these nullable **non-negative fixed-decimal strings**:
-`input_per_mtok`, `output_per_mtok`, `cache_read_per_mtok`,
-`cache_write_5m_per_mtok`, `cache_write_1h_per_mtok`, `batch_input_per_mtok`,
-`batch_output_per_mtok`, `request_fee_per_1k`. Exponent notation is not accepted.
-Precision limit: 15 integer and 16 fractional digits. Rates are per million
-tokens except the request fee, which is per thousand requests. `null` is unknown.
-
-Lookup result fields are shown above. Priced/partial results include the resolved
-model ID and row, which must be active at `effective_at`. Priced results have no
-missing dimensions. Core can report `region`, `channel`, `input_tokens` and
-`output_tokens` as missing. Cost adds `cost` (decimal string/null), `currency`
-(string/null), `reasons` (fixed identifiers) and `components` (null or decimal
-strings keyed `input`, `output`, `cache_read`, `cache_write`, `request`).
-Components must sum exactly to the returned subtotal; the CLI checks with integer
-decimal arithmetic. Unpriced results have no applied price, cost or components.
-
-History/market result is `{series: [...], matched: N, truncated: boolean}`.
-Each series is `{model_id, channel, region, currency, points: [price rows]}`.
-Points are strictly ascending by start, non-overlapping, no later than `at`,
-with at most 1000 windows per series. Currency/channel/region stay constant.
-History has zero or one complete series; no truncation is accepted. Market has
-at most `limit` distinct series; `matched` counts all matching active models and
-`truncated` must agree. `global` and specific regional series are never mixed.
-
-## Errors and release gate
-
-| Condition | Exit / reason |
-| --- | --- |
-| Invalid input | 2, no request |
-| Network failure/timeout | 4, fixed transport reason |
-| 5xx | 5 `pricing_service_unhealthy` |
-| 401/403/404/405 | 6 `public_pricing_unavailable` |
-| Unsupported status | 6 `pricing_response_unsupported` |
-| Oversized response | 6 `pricing_response_too_large` |
-| Redirect | 7 `pricing_redirect_rejected` |
-| Invalid document or request mismatch | 11 `pricing_contract_mismatch` |
-| 429 | 16 `pricing_rate_limited`, no automatic retry |
-
-Before release, agree the contract with the hosted implementation, test the
-packed CLI against the unauthenticated deployed origin, verify history coverage,
-and define freshness and rate-limit policy. Local reference checks do not prove
-production availability. Broader funnel experiments (watchlists, a hosted page,
-change digests, opt-in conversion measurement) can follow these two previews;
-this PR does not publish a website or collect leads.
+Invalid arguments exit 2 without a request. API 400/422 returns
+`pricing_request_rejected` (2); network/timeout 4; 5xx 5; unsupported endpoint or
+oversize body 6; redirects 7; malformed/inconsistent documents 11; rate limiting
+16. Responses and headers are not echoed on failure. The CLI does not retry
+POST calculations. No merge, package publication or deployment is performed by
+these tests.

@@ -45,8 +45,12 @@ public issue. Releases are covered in [RELEASING.md](RELEASING.md).
 
 ## Public pricing integration
 
-`node --test test/pricing.test.js` checks the HTTP contract and CLI presentation
-against synthetic loopback responses. For actual pricing arithmetic and catalog
-history, run the isolated core-backed smoke checks in [docs/pricing.md](docs/pricing.md#run-end-to-end-locally).
-Set `PRICING_BIN` to an installed packed CLI to check the distributed artifact.
-The Python reference adapter is development tooling and is not an npm dependency.
+`node --test test/pricing-public.test.js test/pricing.test.js` checks the public
+GET/POST contract and the preserved local reference protocol using synthetic
+loopback responses. Run `npm run test:package` for the installed CLI.
+
+Public service checks are opt-in: set `PRICING_PUBLIC_ORIGIN` and run
+`scripts/pricing-public-smoke.mjs`. Reference core checks use `PRICING_PYTHON`
+and `scripts/pricing-smoke.mjs`. Either accepts `PRICING_BIN` for a packed CLI.
+See [docs/pricing.md](docs/pricing.md#validation-and-networking) for limitations.
+Public history is not supported; reference previews require explicit loopback mode.

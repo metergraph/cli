@@ -135,8 +135,8 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
 | Command | What it does | Network |
 | --- | --- | --- |
-| `pricing lookup`, `pricing cost` | Public catalog rates and a core-calculated token-cost estimate; no sign in (hosted contract pending verification) | Yes |
-| `pricing history`, `pricing market` | Effective-dated price charts, an HTML export and a terminal market board ([local preview and contract](docs/pricing.md)) | Yes |
+| `pricing models`, `pricing lookup`, `pricing calculate` (`cost` alias) | Discover models, look up rates and calculate costs through the public API without sign in | Yes |
+| `pricing market`, `pricing history` | Current public market board; historical terminal/HTML charts require the local reference adapter ([guide](docs/pricing.md)) | Yes |
 | `setup` | Sign in, choose a workspace, write the ingest key to `.env`, record the repository, install the skill | Yes |
 | `verify` | Confirm that one exact trace, by trace ID or request ID, reached the workspace | Yes |
 | `usage` | Daily calls, errors, cost, tokens and latency per route, or cost grouped by provider, model, route or UTC day with exact filters, rankings and a prior-period comparison; filtered by exact metadata or grouped by one metadata key | Yes |
@@ -157,16 +157,29 @@ writes, and full JSON examples.
 ## Public pricing preview
 
 ```sh
-metergraph pricing market --channel openai-api
-metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api
-metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api --format html > history.html
+metergraph pricing models --limit 10
+metergraph pricing lookup --model gpt-5 --provider openai --region global --json
+metergraph pricing calculate --model claude-sonnet-5 --provider anthropic \
+  --input-tokens 1000 --cache-read-tokens 800 --output-tokens 200
+metergraph pricing market --channel openai-api --limit 5
 ```
 
-These commands require no account or workspace. The proposed hosted HTTP contract
-is **not yet verified**; use the [core-backed local adapter](docs/pricing.md#run-end-to-end-locally)
-to try them today with `--url http://127.0.0.1:8765`. The market board shows the last
-recorded price change; the shareable history card plots actual catalog windows,
-with sources and gaps. Use `pricing cost` for conditional/batch/cache calculations.
+These commands use the public Pricing API without an account or workspace.
+`cost` is an alias for `calculate`. Inspect status and missing dimensions: an HTTP
+success may still be partial or unpriced. The current market board uses discovery
+plus bounded lookups; it does not invent historical prices or returns.
+
+The stock-style history visualization is preserved in explicit local reference mode:
+
+```sh
+metergraph pricing history --model openai/gpt-5.6-terra --channel openai-api \
+  --api reference --url http://127.0.0.1:8765 --format html > history.html
+```
+
+See [the pricing guide](docs/pricing.md) for the API contract, input semantics and
+local adapter. The public service does not document a history endpoint. This is
+an exploratory preview; supplier pricing coverage and storage claims are not
+independently verified by these command tests.
 
 ## Exit codes
 
@@ -212,7 +225,8 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
   never replaces a file it did not write and has no force option.
 - **Public pricing.** Pricing reads send no credentials and return public catalog data.
   `--format html` emits a standalone document; it does not launch a browser.
-- **Network.** Only `GET` requests to fixed paths for reads, no redirects followed,
+- **Network.** Workspace reads use `GET`; public pricing lookup/calculation use
+  unauthenticated `POST` with metadata-only inputs. Fixed paths, no redirects followed,
   bounded response sizes and fixed timeouts. Mistyped arguments are never echoed, since
   they may hold a secret. `--help`, `--version` and `skill` make no network requests.
 
