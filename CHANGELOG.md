@@ -1,17 +1,15 @@
 # Changelog
 
-## Unreleased
+`metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
+`latest` stays on the last stable version, currently `0.2.2`.
+
+## 0.2.3 (prepared; not yet published)
 
 - Add public `pricing models`, `lookup`, `calculate` (`cost` alias), and a current
   market board using the documented GET/POST Pricing API. Preserve decimal strings,
   partial/unpriced results and regional fallback. Historical terminal charts and
   HTML exports remain available through an explicit loopback reference adapter;
   public history is unsupported.
-
-`metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.2`.
-
-## Unreleased
 
 - `experiments list`, `estimate`, `start` and `get` replay a workload's last 10 to 40
   production calls on 1 to 3 treatments (a provider, model and settings) and report
