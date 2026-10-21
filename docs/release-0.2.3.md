@@ -16,7 +16,8 @@ and `next: 0.2.1`; the registry returned 404 for version 0.2.3.
   once it parses, and exits 17 on Ctrl-C or Ctrl-D. With `--json`, a pipe or `CI`
   nothing is asked, and a remote session sends no request before its handoff (#69).
 - A successful customer-local setup returns `data.agent_access`, the fixed
-  `bin/agent-key` command for granting the agent more than Metadata. At a terminal
+  `bin/agent-key` command for giving the agent a Debug key (which reads captured
+  prompts and responses) with evaluation and analysis permissions. At a terminal
   setup offers to run the bundle's `bin/agent-key` after the person types the bundle
   directory and confirms the program's full path (#69).
 

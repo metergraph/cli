@@ -10,15 +10,17 @@
   `http://localhost:8080`), a non-hosted installation's address and workspace, whether
   its prerequisites are done, and which client gets the skill. The answers become
   ordinary flags, and the full command is printed before it runs, only once it parses. A
-  project's saved route resumes without questions, and Ctrl-C or Ctrl-D exits 17
-  `cancelled` with nothing changed. Only a person at a terminal is asked: with `--json`,
+  project's saved route resumes without the deployment questions (setup still asks for
+  the client when none is given), and Ctrl-C or Ctrl-D exits 17 `cancelled` with
+  nothing changed. Only a person at a terminal is asked: with `--json`,
   a pipe or `CI`, setup keeps its flag errors and handoffs, and a remote session sends
   no request before its handoff.
 
 - A successful customer-local setup returns `data.agent_access`. Setup grants the agent
-  Metadata access only; a bundle that ships `bin/agent-key` can grant evaluation and
-  analysis access without a sign in, writing the key to a private file without printing
-  it. The command text is fixed in the CLI, never taken from the service. At a terminal,
+  Metadata access only; a bundle that ships `bin/agent-key` can issue a key with the
+  Debug role, which reads captured prompts and responses, and permission to write
+  evaluations and start analyses, without a sign in, writing the key to a private file
+  without printing it. The command text is fixed in the CLI, never taken from the service. At a terminal,
   setup offers to run that bundle's `bin/agent-key` once the person types the bundle
   directory and confirms the program's full path, then prints how to connect Claude Code
   or Codex. On Windows it prints the command to run inside WSL instead.
