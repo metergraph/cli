@@ -16,8 +16,8 @@ import { traceLink } from "./trace-contract.js";
 //   { ok: true, value } or { ok: false, outcome, reason }
 // with fixed tokens. notices is a Set that collects fixed notice tokens.
 
-// Every capability name the contract defines, in its order. The last three
-// read content or replay and are never available to a Metadata grant.
+// Every capability name the contract defines. Content, replay and start
+// entries are never available to a Metadata grant.
 export const CAPABILITY_NAMES = Object.freeze([
   "workspace_context",
   "capability_discovery",
