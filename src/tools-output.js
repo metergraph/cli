@@ -1,9 +1,10 @@
+import { jsonText } from "./output.js";
 import { readMessage } from "./read-output.js";
 import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 
 // Fixed text for tools results. A tool's result and error are the service's
-// own JSON, printed with JSON.stringify so no control character reaches the
-// terminal; tool titles are printed with control characters removed.
+// own JSON, printed with jsonText so no control or bidirectional character
+// reaches the terminal; tool titles are printed with them removed.
 
 const MESSAGES = {
   tool_unavailable:
@@ -53,12 +54,12 @@ export function toolsText(result, message, style = PLAIN, action) {
     return render(lines);
   }
   if (result.ok) {
-    lines.push(...JSON.stringify(data.result.result, null, 2).split("\n").map((line) => `  ${line}`));
+    lines.push(...jsonText(data.result.result, 2).split("\n").map((line) => `  ${line}`));
     return render(lines);
   }
   lines.push(...paragraph(style, message));
   if (data.tool_error) {
-    lines.push("", ...JSON.stringify(data.tool_error, null, 2).split("\n").map((line) => `  ${line}`));
+    lines.push("", ...jsonText(data.tool_error, 2).split("\n").map((line) => `  ${line}`));
   }
   if (data.next_action?.message) {
     lines.push("", ...steps(style, [["", data.next_action.message], ["Run", data.next_action.command ?? null]]));

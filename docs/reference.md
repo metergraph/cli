@@ -1084,6 +1084,47 @@ and sends nothing to the experiments endpoints. A refusal by the service, for ex
 `no_replayable_calls`, exits 19 (`refused`) with the code, reason and any budget figures
 in `data.refusal`.
 
+### tools
+
+```sh
+metergraph tools list [--name TOOL] [read options] [--json]
+metergraph tools call TOOL [--args JSON | --args-file PATH] [--yes] [read options] [--json]
+```
+
+Every Agent Access tool the service offers this credential, through its MCP endpoint
+(`POST /v1/agent/mcp`, JSON-RPC `tools/list` and `tools/call`), as an MCP client calls
+it. The credential, origin and workspace are chosen and verified exactly as for the read
+commands (a saved sign in or a coding-agent key with the Metadata or Debug role; Replay is
+refused). The service decides which tools the credential sees: a Metadata credential gets
+the Metadata tools, the Debug role adds trace content and evaluation reads, and Allow
+evaluation writes, Allow evaluation previews and Allow analysis starts add the tools they
+name.
+
+- `list` sends `tools/list`. Each tool has `name`, `title`, `description`,
+  `input_schema` (the service's JSON schema), `read_only`, `open_world` and
+  `needs_confirmation`. `--name` shows one tool.
+- `call` sends `tools/list`, then one `tools/call` with the arguments from `--args` or the
+  file `--args-file` names: one JSON object, up to 1 MiB, never stdin. The tool's
+  structured result is in `data.result.result`.
+- A tool the service does not annotate `readOnlyHint: true`, or annotates
+  `openWorldHint: true` (it calls a model provider), has `needs_confirmation: true` and
+  runs only with `--yes`. Without it the command exits 18 (`action_required`,
+  `confirmation_required`) and calls nothing. A tool listed without annotations, as by an
+  older service, needs `--yes`. Pass `--yes` only after the person has approved that exact
+  call.
+
+| Result | Exit | `next_action.kind` |
+| --- | --- | --- |
+| The tool is not offered to this credential | 14 `tool_unavailable` | `list_tools` |
+| `--yes` missing for a tool that needs it | 18 `confirmation_required` | `confirm_tool_call` |
+| The tool refused the call (`isError`), or rejected its arguments | 19 `tool_error` or `tool_rejected`, with `data.tool_error` | `fix_tool_arguments` |
+| A call that needs `--yes` reached the service but its answer was lost | 20 `tool_call_unconfirmed` | `check_before_retry` |
+| `--args` or the file is not one JSON object | 2 `args_invalid` | none |
+
+The result and `data.tool_error` are the service's JSON. Before printing, the output is
+checked for the credential, as for every command, and C1 control and bidirectional
+characters are escaped as `\uXXXX`.
+
 ## JSON output
 
 With `--json`, every command prints one line with the same top-level keys:

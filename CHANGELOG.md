@@ -11,6 +11,12 @@
   Metadata key, and still send only their Metadata requests with it. `experiments start`
   accepts a Debug key with all three permissions. A key with Replay access is still
   refused.
+- `tools list` and `tools call TOOL --args JSON` reach every Agent Access tool the
+  credential can use, through the service's MCP endpoint, with the same sign in or key
+  and checks as the read commands: classified workloads, readiness, evaluations, analysis
+  runs and reports. A tool that writes, starts work or calls a model provider runs only
+  with `--yes`; without it the command exits 18 and calls nothing.
+- JSON output escapes C1 control and bidirectional characters as `\uXXXX`.
 - `status` reports the credential's role and each permission in `data.access`
   (`role`, `permissions` with one boolean per permission, and `permissions_offered`,
   false where the deployment offers no managed evaluations) and, in text, how to grant

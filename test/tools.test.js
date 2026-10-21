@@ -202,3 +202,13 @@ test("tools arguments are checked before anything is sent", async () => {
     assert.equal(JSON.parse(run.stdout).error.reason, reason, args.join(" "));
   }
 });
+
+test("control and bidirectional characters in a result never reach the terminal raw", () =>
+  withServer({ toolCall: () => ({ note: "a\u009b31mred‮b\u0007c" }) }, async (server) => {
+    for (const json of [true, false]) {
+      const { run } = await tools(server, ["call", "metergraph_list_classified_workloads"], { json });
+      assert.equal(run.code, 0, run.stdout);
+      assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮]/.test(run.stdout), "a raw control character was printed");
+      assert.ok(run.stdout.includes("\\u009b31mred\\u202eb\\u0007c"));
+    }
+  }));

@@ -154,6 +154,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `context` | Workspace details and retention | Yes |
 | `capabilities` | What the workspace makes available to this project | Yes |
 | `experiments list`, `estimate`, `start`, `get` | Replay a workload's recent production calls on 1 to 3 other models or settings: price it, start it, poll it and read cost, latency and output statistics per treatment next to production | Yes |
+| `tools list`, `tools call` | Any Agent Access tool the credential can use, as an MCP client calls it: classified workloads, readiness, evaluations, analysis runs and reports. A tool that writes, starts work or calls a model provider runs only with `--yes` | Yes |
 | `login`, `logout` | Sign a project in or out without the rest of `setup` | Yes |
 | `doctor` | Check that a service is reachable, healthy and supported, without credentials | Yes |
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |

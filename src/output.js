@@ -49,7 +49,20 @@ export function envelope({ command, outcome, data = null, reason = null, message
 }
 
 export function toJsonLine(result) {
-  return `${JSON.stringify(result)}\n`;
+  return `${jsonText(result)}\n`;
+}
+
+// JSON.stringify escapes C0 controls but leaves C1 controls (a terminal may
+// read U+009B as an escape sequence) and bidirectional overrides as they are.
+// Inside a JSON string \uXXXX means the same character, so escaping them
+// changes nothing a parser sees and keeps them away from the terminal.
+const TERMINAL_UNSAFE = /[\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+export function jsonText(value, indent = undefined) {
+  return JSON.stringify(value, null, indent).replace(
+    TERMINAL_UNSAFE,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 const DOCTOR_OPTIONS = [
