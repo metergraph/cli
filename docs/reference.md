@@ -459,10 +459,13 @@ terminal it needs `--yes`), and writes the key only to the named private file,
 never printing it. The command text is fixed in this CLI, never taken from the
 service. An agent relays the offer and runs the command only after the person
 agrees to that access; a bundle without `bin/agent-key` uses `keys_page_url`
-instead. At a terminal, setup asks instead: if the person agrees and names the
-bundle directory, it runs that bundle's `bin/agent-key`, which asks for its own
-confirmation, then prints how to load the key and add the MCP server for the
-chosen client. A hosted setup has no `agent_access`.
+instead. At a terminal, setup asks instead. The person types the bundle directory
+(nothing in the current project is offered as a default), which must hold
+`bin/start`, `docker-compose.yml` and the release manifest. Setup runs that
+bundle's `bin/agent-key` only if the person owns it and nobody else can change
+it, and only after naming its full path and asking. `bin/agent-key` then asks
+for its own confirmation, and setup prints how to load the key and add the MCP
+server for the chosen client. A hosted setup has no `agent_access`.
 
 A rerun of customer-local or BYOC setup can omit `--deployment`, `--url`,
 `--workspace` and `--confirm-prerequisites`, as a hosted rerun does. Setup then

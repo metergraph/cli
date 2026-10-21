@@ -242,9 +242,14 @@ export function agentAccessOffer(origin) {
 }
 
 // After a customer-local setup at a terminal: offer to run bin/agent-key
-// now. It shows what it grants and asks for its own confirmation, so this
-// only finds it and hands over the terminal.
-export async function offerAgentAccess({ client, origin, cwd = process.cwd(), prompter, say, run = runInherited }) {
+// now. It shows what it grants and asks for its own confirmation. Setup runs
+// in the person's project, which may be a repository they did not write, so
+// nothing there is ever a default: the person types the bundle directory, it
+// must look like a started bundle, and setup names the exact program and asks
+// before running it.
+const BUNDLE_MARKERS = [["bin", "start"], ["docker-compose.yml"], ["metergraph-byoc-release.json"]];
+
+export async function offerAgentAccess({ client, origin, prompter, say, run = runInherited }) {
   say("", "Your coding agent has Metadata access. It can also write evaluations and start analyses.",
     "That reads captured prompts and responses, and an analysis sends captured content to your model",
     "provider and spends money on your account.");
@@ -253,18 +258,26 @@ export async function offerAgentAccess({ client, origin, cwd = process.cwd(), pr
     say(`Later, run this in the bundle directory: ${AGENT_KEY_COMMAND}`);
     return;
   }
-  const fallback = fs.existsSync(path.join(cwd, "bin", "agent-key")) ? cwd : null;
-  const answer = await askFor(prompter.ask, say, "Bundle directory (the one with bin/start)", {
-    fallback,
-    valid: (value) => fs.existsSync(path.join(expandHome(value), "bin", "start")),
-    retry: "That directory has no bin/start. Enter the bundle directory.",
+  const answer = await askFor(prompter.ask, say, "Bundle directory (the one you ran bin/start in)", {
+    valid: (value) => BUNDLE_MARKERS.every((parts) => fs.existsSync(path.join(expandHome(value), ...parts))),
+    retry: "That is not a started bundle (it needs bin/start, docker-compose.yml and the release manifest).",
   });
   if (answer === null) return;
-  const bundle = path.resolve(expandHome(answer));
+  const bundle = fs.realpathSync(expandHome(answer));
   const command = path.join(bundle, "bin", "agent-key");
   if (!fs.existsSync(command)) {
     say("This bundle has no bin/agent-key. Create the key on the Keys page instead:",
       `  ${handoffPages(origin).keys_url}`);
+    return;
+  }
+  const problem = untrustedProgram(command);
+  if (problem !== null) {
+    say(`Not running ${command}: ${problem}.`);
+    return;
+  }
+  const confirmed = await yesNo(prompter.ask, `Run ${command}? [y/N] `);
+  if (!confirmed) {
+    say(`Later, run this in the bundle directory: ${AGENT_KEY_COMMAND}`);
     return;
   }
   prompter.close();
@@ -275,6 +288,15 @@ export async function offerAgentAccess({ client, origin, cwd = process.cwd(), pr
     return;
   }
   say("", ...connectSteps(client, origin, file));
+}
+
+// Only a regular file the person owns and nobody else can change is run.
+function untrustedProgram(command) {
+  const info = fs.lstatSync(command);
+  if (!info.isFile()) return "it is not a regular file";
+  if (typeof process.getuid === "function" && info.uid !== process.getuid()) return "it is owned by another user";
+  if (info.mode & 0o022) return "other users can change it";
+  return null;
 }
 
 // How the person connects their agent to the key: load the file where the

@@ -144,12 +144,17 @@ test("the offer's command is fixed by the CLI, never by the service", () => {
   assert.match(offer.message, /spend money/);
 });
 
-function bundle({ agentKey = true } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph bundle "));
+function bundle({ agentKey = true, mode = 0o755 } = {}) {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "metergraph bundle ")));
   dirs.push(dir);
   fs.mkdirSync(path.join(dir, "bin"));
   fs.writeFileSync(path.join(dir, "bin", "start"), "#!/bin/sh\n", { mode: 0o755 });
-  if (agentKey) fs.writeFileSync(path.join(dir, "bin", "agent-key"), "#!/bin/sh\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, "docker-compose.yml"), "services: {}\n");
+  fs.writeFileSync(path.join(dir, "metergraph-byoc-release.json"), "{}\n");
+  if (agentKey) {
+    fs.writeFileSync(path.join(dir, "bin", "agent-key"), "#!/bin/sh\n");
+    fs.chmodSync(path.join(dir, "bin", "agent-key"), mode);
+  }
   return dir;
 }
 
@@ -175,21 +180,45 @@ test("declining the offer runs nothing and says how to do it later", async () =>
 
 test("accepting runs the bundle's bin/agent-key, which asks for its own confirmation", async () => {
   const dir = bundle();
-  const { runs, said } = await offer(["y", "/nowhere", dir]);
+  const { runs, said, asked } = await offer(["y", "/nowhere", dir, "y"]);
+  // Setup names the exact program before running it.
+  assert.ok(asked.includes(`Run ${path.join(dir, "bin", "agent-key")}? [y/N] `));
   assert.equal(runs.length, 1);
   assert.equal(runs[0].command, path.join(dir, "bin", "agent-key"));
   assert.equal(runs[0].cwd, dir);
   assert.deepEqual(runs[0].args, ["create", "--write-to", path.join(os.homedir(), ".config", "metergraph", "agent.env"),
     "--role", "debug", "--allow-evaluation-writes", "--allow-evaluation-previews", "--allow-analysis-starts"]);
   assert.ok(!runs[0].args.includes("--yes"), "the person confirms in bin/agent-key itself");
-  assert.ok(said.some((line) => line.startsWith("That directory has no bin/start")));
+  assert.ok(said.some((line) => line.startsWith("That is not a started bundle")));
   assert.ok(said.some((line) => line.includes("claude mcp add-json")));
 });
 
-test("the current directory is offered when it is the bundle", async () => {
-  const dir = bundle();
-  const { runs } = await offer(["y", ""], { cwd: dir });
-  assert.equal(runs[0].cwd, dir);
+test("nothing in the current project is a default or runs without a typed path", async () => {
+  // A project directory that imitates a bundle, as a cloned repository could.
+  const planted = bundle();
+  const previous = process.cwd();
+  process.chdir(planted);
+  try {
+    const { runs, asked } = await offer(["y", ""]);
+    assert.equal(runs.length, 0);
+    // The directory question offers no default, so an empty answer is asked again.
+    assert.deepEqual(asked.filter((question) => question.startsWith("Bundle directory")),
+      ["Bundle directory (the one you ran bin/start in): ", "Bundle directory (the one you ran bin/start in): "]);
+  } finally {
+    process.chdir(previous);
+  }
+});
+
+test("declining to run the named program runs nothing", async () => {
+  const { runs } = await offer(["y", bundle(), "n"]);
+  assert.equal(runs.length, 0);
+});
+
+test("a bin/agent-key other users can change is never run", async () => {
+  const dir = bundle({ mode: 0o777 });
+  const { runs, said } = await offer(["y", dir, "y"]);
+  assert.equal(runs.length, 0);
+  assert.ok(said.some((line) => line.includes("other users can change it")));
 });
 
 test("an older bundle without bin/agent-key is sent to the Keys page", async () => {
@@ -200,7 +229,7 @@ test("an older bundle without bin/agent-key is sent to the Keys page", async () 
 });
 
 test("a failed bin/agent-key run says how to rerun it, with no connect steps", async () => {
-  const { said } = await offer(["y", bundle()], { exitCode: 1 });
+  const { said } = await offer(["y", bundle(), "y"], { exitCode: 1 });
   assert.ok(said.some((line) => line.startsWith("bin/agent-key did not finish")));
   assert.ok(!said.some((line) => line.includes("mcp add")));
 });
