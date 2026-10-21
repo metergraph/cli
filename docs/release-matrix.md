@@ -17,7 +17,7 @@ Evidence is labelled by class and the classes are never merged:
 |---|---|
 | `synthetic_fixture` | Source tests against the loopback test service in `test/`. |
 | `real_deployment` | The installed artifact against a real deployment with real sign-in and consent. No application traffic. |
-| `synthetic_application_traffic` | The public Python SDK sends a trace through the key setup wrote, but the model provider is a local mock. No provider call. |
+| `synthetic_application_traffic` | A public SDK sends traces through a configured ingest key, but the model provider is a local mock; installed-artifact reads of those traces belong to this class too. No provider call. |
 | `real_application_traffic` | A real, approved, provider-billed application call. |
 | `client_discovery` | The coding agent itself found and followed the installed skill. |
 
@@ -176,7 +176,7 @@ saved sign-in grant.
 | A local container without remote markers | Reported as `local_container`, not as a remote session | `real_deployment` | Pass (0.2.2): `status` in a `node:22-slim` Docker container reports `environment: local_container` with a `login` next action |
 | Key supplied privately through `METERGRAPH_AGENT_TOKEN` or `--agent-token-file`, never as an argument | The CLI checks origin, workspace, exactly the Metadata scope and no content access before any read, then `status`, `context`, `capabilities`, `usage`, `routes` and `traces` return Metadata only, with `credential` and `environment` in the output | `real_deployment` | Pass (0.2.2): with SSH markers and no grant, `--agent-token-file` (0600) and `METERGRAPH_AGENT_TOKEN` both verify origin, profile and `agent:metadata` with `content_access: false`; `status`, `context`, `capabilities`, `usage` (grouped and route by day), `routes` and `traces` exit 0 with `credential: agent_key` and `environment: ssh_session`. Without `--workspace`, `workspace.match` is null with `workspace_not_pinned`; with it, true |
 | Key never disclosed | No key value in argv, stdout, stderr, JSON output, logs or project files | `real_deployment` | Pass (0.2.2): the key was never an argument (an unknown `--token` option exits 2); a scan of every stdout, stderr and JSON output, the project, the config directory and the npm logs found no key value |
-| Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Partial (0.2.2): `--workspace` for another workspace exits 11 `workspace_context_mismatch` (`use_workspace_key`); an unknown key and a key revoked on the Keys page exit 12 `agent_key_rejected` (`replace_agent_key`); no data read. A second workspace's own key, an expired key and a key with broader scopes were not run |
+| Key for another workspace, expired, revoked or missing a scope | Refused with its own reason before any data is read. No fallback to retained content or replay | `real_deployment` | Partial (0.2.2): `--workspace` for another workspace exits 11 `workspace_context_mismatch` (`use_workspace_key`); an unknown key and a key revoked on the Keys page exit 12 `agent_key_rejected` (`replace_agent_key`); no data read. A second workspace's own key, an expired key, a key missing Metadata scope and a key with broader scopes were not run; missing scope (`agent_key_insufficient_scope`) and broader scopes (`scope_mismatch`) remain separate outstanding checks |
 | Signup, invitation and workspace choice | Each human step returns a `next_action`; rerunning after it shows the verified workspace and the next step, with no duplicate key | `real_deployment` | Pending |
 | A coding agent in a remote session follows the skill | It uses the official CLI with the key path and does not write its own API client | `client_discovery` | Pending |
 
@@ -186,20 +186,21 @@ steps and the verified outcome.
 ### Usage cost questions
 
 Each question is answered by one documented `usage` command against an approved
-test workspace, and its totals are compared with the same server read through
-the agent API.
+test workspace. CLI behavior and agent API parity are separate checks: the run
+below compared route, model and `metadata.prompt_id` reads only. Provider-filtered,
+route-by-day, metadata-filtered and prior-period API comparisons remain Pending.
 
 | Question | Expected result | Evidence class | Status |
 |---|---|---|---|
-| Most expensive route today | Routes ranked by cost over an explicit UTC window | `real_deployment` | Pass (0.2.2): `usage --group-by route --today` ranks 3 routes by cost over the UTC day so far, marked partial |
-| Spend with one provider | A provider filter over a bounded window | `real_deployment` | Pass (0.2.2): `usage --group-by provider --provider openai --days 7` |
-| Spend by model | Grouped by model | `real_deployment` | Pass (0.2.2): `usage --group-by model --days 7` |
-| One route's daily trend | Grouped by UTC day for one route | `real_deployment` | Pass (0.2.2): `usage --route NAME --group-by day --days 14` |
-| Cost ranked by a metadata key | Grouped by an eligible metadata key, kept distinct from route | `real_deployment` | Pass (0.2.2): `usage --group-by metadata.prompt_id --days 7` (groups sum to the totals) and `--metadata workflow_name=VALUE` as a filter |
-| Comparison with the prior period | Both windows shown in UTC, with a warning when a partial current day is compared with a full prior day | `real_deployment` | Pass (0.2.2): `usage --group-by route --today --compare previous` shows both UTC windows, says "Not like for like" and returns a `compare_like_for_like` next action naming `--compare previous-same-time` |
-| Coverage and cost attribution | Shown in text and JSON for every answer above | `real_deployment` | Pass (0.2.2): coverage, pricing (a lower bound with partially priced calls) and per-call attribution in text and JSON for every row above |
+| Most expensive route today | Routes ranked by cost over an explicit UTC window | `synthetic_application_traffic` | Pass (0.2.2): `usage --group-by route --today` ranks 3 routes by cost over the UTC day so far, marked partial |
+| Spend with one provider | A provider filter over a bounded window | `synthetic_application_traffic` | Pass (0.2.2): `usage --group-by provider --provider openai --days 7` |
+| Spend by model | Grouped by model | `synthetic_application_traffic` | Pass (0.2.2): `usage --group-by model --days 7` |
+| One route's daily trend | Grouped by UTC day for one route | `synthetic_application_traffic` | Pass (0.2.2): `usage --route NAME --group-by day --days 14` |
+| Cost ranked by a metadata key | Grouped by an eligible metadata key, kept distinct from route | `synthetic_application_traffic` | Pass (0.2.2): `usage --group-by metadata.prompt_id --days 7` (groups sum to the totals) and `--metadata workflow_name=VALUE` as a filter |
+| Comparison with the prior period | Both windows shown in UTC, with a warning when a partial current day is compared with a full prior day | `synthetic_application_traffic` | Pass (0.2.2): `usage --group-by route --today --compare previous` shows both UTC windows, says "Not like for like" and returns a `compare_like_for_like` next action naming `--compare previous-same-time` |
+| Coverage and cost attribution | Shown in text and JSON for every answer above | `synthetic_application_traffic` | Pass (0.2.2): coverage, pricing (a lower bound with partially priced calls) and per-call attribution in text and JSON for every row above |
 | A capability the deployment lacks | Exit 14 `capability_unavailable` or a documented `next_action`, with nothing read | `real_deployment` | Pending |
-| Parity with the agent API | Same totals, groups and window as the server read | `real_deployment` | Pass (0.2.2): `metergraph_get_usage_aggregates` with the same key returns the same totals, groups and UTC window for route, model and `metadata.prompt_id`. The CLI names a metadata group `metadata_key`/`metadata_value` where the tool uses `metadata.<key>` |
+| Parity with the agent API | Same totals, groups and window as the server read | `synthetic_application_traffic` | Partial (0.2.2): `metergraph_get_usage_aggregates` with the same key returns the same totals, groups and UTC window for route, model and `metadata.prompt_id`. The CLI names a metadata group `metadata_key`/`metadata_value` where the tool uses `metadata.<key>`. Provider-filtered, route-by-day, metadata-filtered and prior-period comparisons were not recorded and remain Pending |
 | A coding agent answers a cost question from the skill | It runs the smallest bounded `usage` read that answers it, and does not attribute a cost change to a commit from a diff alone | `client_discovery` | Pending |
 
 These runs read Metadata only and make no provider call.
