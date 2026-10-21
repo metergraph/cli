@@ -145,6 +145,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `status` | Whether the project is signed in, and to which workspace | Yes |
 | `context` | Workspace details and retention | Yes |
 | `capabilities` | What the workspace makes available to this project | Yes |
+| `experiments list`, `estimate`, `start`, `get` | Replay a workload's recent production calls on 1 to 3 other models or settings: price it, start it, poll it and read cost, latency and output statistics per treatment next to production | Yes |
 | `login`, `logout` | Sign a project in or out without the rest of `setup` | Yes |
 | `doctor` | Check that a service is reachable, healthy and supported, without credentials | Yes |
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |
@@ -184,7 +185,7 @@ independently verified by these command tests.
 ## Exit codes
 
 Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not in
-`0.1.0`.
+`0.1.0`, and codes 19 and 20 are not in `0.2.2` or earlier.
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
@@ -207,6 +208,8 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 | 16 | `rate_limited` | The service asked the CLI to slow down. Try again later. Only setup retries, after a short Retry-After, to keep its approval. |
 | 17 | `cancelled` | A read command was interrupted before it finished. Read commands never change workspace configuration or telemetry. |
 | 18 | `action_required` | A person must act before the command can finish; `data.next_action` says what to do. `login` and `setup` with `--json --no-browser` exit with this as soon as an approval URL exists (`next_action.kind: "open_url"`), while a background process waits for the approval until `--timeout-ms`. After approval, run the same command again to continue. |
+| 19 | `refused` | The service refused an experiment for a stated reason, such as its budget, the daily cap, experiments already running or a model it cannot price; `data.refusal` says which. Nothing was started. |
+| 20 | `unconfirmed` | An `experiments start` request reached the service but its result was not confirmed (a timeout, a dropped connection, a server error or an answer that does not match the contract), so an experiment may exist and may run. List experiments before starting again; each start creates one. |
 
 ## Security and privacy
 
@@ -214,7 +217,11 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
   only to the Metergraph origin you point it at.
 - **Least access.** Sign in grants only the Metadata scope, `agent:metadata`. The CLI
   never requests Debug or Replay access, never falls back to broader access, and never
-  reads retained prompts, responses or other content. It calls no model provider.
+  reads retained prompts, responses or other content. It calls no model provider. The one
+  exception is `experiments start`: it uses a coding-agent key a workspace owner created
+  with exactly Debug access and Allow analysis starts, refuses a key with any other scope,
+  and sends it only with that one start request. The service then replays the sampled calls on the
+  chosen providers within its own budget. Every other command refuses such a key.
 - **Credentials.** The sign in grant is stored per user in `~/.config/metergraph`
   (`AppData\Roaming\Metergraph` on Windows), as owner-only files on Linux and macOS and
   encrypted with DPAPI on Windows. The ingest key goes only into the project's private
@@ -225,8 +232,9 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
   never replaces a file it did not write and has no force option.
 - **Public pricing.** Pricing reads send no credentials and return public catalog data.
   `--format html` emits a standalone document; it does not launch a browser.
-- **Network.** Workspace reads use `GET`; public pricing lookup/calculation use
-  unauthenticated `POST` with metadata-only inputs. Fixed paths, no redirects followed,
+- **Network.** Workspace reads use `GET`; experiments estimate and start use `POST`.
+  Public pricing lookup/calculation use unauthenticated `POST` with metadata-only
+  inputs. Fixed paths, no redirects followed,
   bounded response sizes and fixed timeouts. Mistyped arguments are never echoed, since
   they may hold a secret. `--help`, `--version` and `skill` make no network requests.
 

@@ -204,3 +204,19 @@ route-by-day, metadata-filtered and prior-period API comparisons remain Pending.
 | A coding agent answers a cost question from the skill | It runs the smallest bounded `usage` read that answers it, and does not attribute a cost change to a commit from a diff alone | `client_discovery` | Pending |
 
 These runs read Metadata only and make no provider call.
+
+### Experiments
+
+Unreleased. Needs a service with the experiments feature on for the test workspace and
+a workspace owner's key with Debug access and Allow analysis starts. A start spends
+provider money within the service's budget, so each start row needs the owner's
+approval of that spend before it is run.
+
+| Check | Expected result | Evidence class | Status |
+|---|---|---|---|
+| Estimate with a Metadata key | Sample size, production models and the estimate per treatment against the budget, with nothing written | `real_deployment` | Pending |
+| Start with the Metadata key | Exit 15 `experiment_start_not_granted`, no experiment request sent | `real_deployment` | Pending |
+| Start with the owner's start key | Exit 0 with the experiment ID and a `poll_experiment` next action; one experiment recorded | `real_deployment` | Pending |
+| Poll until finished | `get` reports the status, then statistics per treatment and production, with no input, output or tracked field value | `real_deployment` | Pending |
+| A refusal (over budget, daily cap, two running) | Exit 19 `refused` with the reason in `data.refusal` and nothing started | `real_deployment` | Pending |
+| Feature off for the deployment | Exit 14 `capability_unavailable`, nothing read or started | `real_deployment` | Pending |

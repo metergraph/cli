@@ -16,8 +16,8 @@ import { traceLink } from "./trace-contract.js";
 //   { ok: true, value } or { ok: false, outcome, reason }
 // with fixed tokens. notices is a Set that collects fixed notice tokens.
 
-// Every capability name the contract defines, in its order. The last three
-// read content or replay and are never available to a Metadata grant.
+// Every capability name the contract defines. Content, replay and start
+// entries are never available to a Metadata grant.
 export const CAPABILITY_NAMES = Object.freeze([
   "workspace_context",
   "capability_discovery",
@@ -30,11 +30,16 @@ export const CAPABILITY_NAMES = Object.freeze([
   "reports",
   "report_detail",
   "report_evidence",
+  "experiments",
+  "experiment_estimate",
+  "experiment",
+  "experiment_cases",
+  "experiment_start",
   "trace_content",
   "trace_replay",
 ]);
 const PRIVACY_CLASSES = Object.freeze(["metadata", "content", "replay"]);
-const SCOPES = Object.freeze(["agent:metadata", "agent:read", "agent:replay"]);
+const SCOPES = Object.freeze(["agent:metadata", "agent:read", "agent:replay", "agent:analysis-run"]);
 
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$/;
 const IDENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -1547,3 +1552,18 @@ function checkFilters(body, rows, request) {
     }
   }
 }
+
+// Shared with the experiments validators (experiments-contract.js), which
+// hold their documents to the same rules.
+export {
+  Invalid,
+  displayText,
+  isAmount,
+  isCount,
+  isObject,
+  isTimestamp,
+  isToken,
+  provenance,
+  rowObject,
+  run,
+};

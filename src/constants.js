@@ -107,6 +107,7 @@ export const READ_QUERY_KEYS = Object.freeze({
   "/v1/pricing/history": PRICING_QUERY_KEYS,
   "/v1/pricing/market": PRICING_QUERY_KEYS,
   "/v1/agent/usage": Object.freeze(["days", "limit", "metadata"]),
+  "/v1/agent/experiments": Object.freeze(["workload_id", "limit"]),
   "/v1/agent/usage/aggregates": Object.freeze([
     "group_by", "days", "since", "until", "limit", "route", "provider", "model", "environment", "metadata",
   ]),
@@ -129,6 +130,32 @@ export const USAGE_DEFAULT_GROUP_BY = Object.freeze(["provider", "model"]);
 export const USAGE_MAX_FILTER_VALUES = 20;
 export const USAGE_SORTS = Object.freeze(["cost", "cost-per-call", "calls", "errors", "avg-latency", "p95-latency", "day"]);
 export const USAGE_COMPARISONS = Object.freeze(["previous", "previous-same-time"]);
+
+// Experiments: replay a workload's recent production calls on 1 to 3
+// treatments and compare them with production. The list, estimate and
+// summary are Metadata reads at these fixed paths (one experiment is
+// EXPERIMENT_PATHS.list plus "/" and its UUID). Starting one is the only
+// write this CLI makes to a workspace: it needs a separate coding-agent key
+// with Debug access and the EXPERIMENT_START_SCOPE grant, used for that one
+// request and nothing else. The limits match the service's own.
+export const EXPERIMENT_PATHS = Object.freeze({
+  list: "/v1/agent/experiments",
+  estimate: "/v1/agent/experiments/estimate",
+  start: "/v1/agent/experiments",
+});
+export const EXPERIMENT_START_SCOPE = "agent:analysis-run";
+// Exactly the scopes a start key carries: Debug and the start grant. A key
+// with any other scope (Replay, other workflow grants, Metadata, ingest) is
+// refused, so the key in an agent's environment can do no more than this.
+export const EXPERIMENT_START_KEY_SCOPES = Object.freeze(["agent:read", EXPERIMENT_START_SCOPE]);
+export const EXPERIMENT_LAST_N = Object.freeze({ min: 10, max: 40, default: 20 });
+export const EXPERIMENT_MAX_TREATMENTS = 3;
+export const EXPERIMENT_MAX_TRACKED_FIELDS = 10;
+export const EXPERIMENT_LIST_DEFAULT_LIMIT = 20;
+export const EXPERIMENT_LIST_MAX_LIMIT = 50;
+export const EXPERIMENT_TEXT_LIMITS = Object.freeze({ workload: 500, provider: 60, model: 200, label: 40, path: 200 });
+export const EXPERIMENT_MAX_TOKENS = 32000;
+export const EXPERIMENT_REASONING_EFFORTS = Object.freeze(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 // Read commands share one total deadline for every request they make,
 // including a token refresh. It is never reset per request or page.
@@ -177,6 +204,8 @@ export const EXIT_CODES = Object.freeze({
   rate_limited: 16,
   cancelled: 17,
   action_required: 18,
+  refused: 19,
+  unconfirmed: 20,
 });
 
 export const EXIT_CODE_MEANINGS = Object.freeze({
@@ -217,4 +246,10 @@ export const EXIT_CODE_MEANINGS = Object.freeze({
     "A person must act before this command can finish; data.next_action says what to do. " +
     "With --json --no-browser the command exits as soon as the approval URL exists, and a background " +
     "process waits for approval until --timeout-ms. After approval, run the same command again to continue.",
+  refused:
+    "The service refused the experiment for a stated reason, such as its budget, the daily cap, experiments " +
+    "already running or a request it cannot price; data.refusal says which. Nothing was started.",
+  unconfirmed:
+    "An experiment start reached the service but its result was not confirmed, so an experiment may have " +
+    "been recorded and may run. List the workload's experiments before starting again: each start creates one.",
 });

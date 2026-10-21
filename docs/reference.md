@@ -49,6 +49,10 @@ metergraph usage [--days N | --today | --since TIME [--until TIME]] [--group-by 
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
+metergraph experiments list [--workload ID] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--url ORIGIN] [--workspace UUID] [--agent-token-file PATH] [--json]
+metergraph experiments estimate --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] [--sample-model MODEL] [--track PATH]... [read options] [--json]
+metergraph experiments start --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] [--sample-model MODEL] [--track PATH]... [--agent-token-file PATH] [read options] [--json]
+metergraph experiments get --id UUID [read options] [--json]
 ```
 
 `--help`, `--version` and the `skill` commands work offline and make no network
@@ -1006,6 +1010,76 @@ no key, reads exit 12 `not_signed_in` with `use_agent_key` in SSH sessions, clou
 workspaces and CI, and with `login` (and the key handoff as its `alternative`)
 elsewhere.
 
+### experiments
+
+An experiment replays a workload's last 10 to 40 replayable production calls (default
+20) on 1 to 3 treatments, each a provider, a model and optional settings, and compares
+each treatment with what production returned on the same calls. The service samples the
+calls, prices the replays from its model catalog, refuses an experiment above its budget
+(per experiment and per workspace per day, at most two running at once) and runs it.
+The experiments feature may be off for a deployment; then every action exits 14
+(`capability_unavailable`) and nothing is sent.
+
+```sh
+metergraph experiments estimate --workload summarizeTicket \
+  --treatment openai/gpt-6-luna,label=Luna,max_tokens=400 \
+  --treatment anthropic/claude-haiku-4-5,temperature=0.2 --track '$.priority' --json
+metergraph experiments start --workload summarizeTicket \
+  --treatment openai/gpt-6-luna,label=Luna,max_tokens=400 \
+  --treatment anthropic/claude-haiku-4-5,temperature=0.2 --track '$.priority' \
+  --agent-token-file ~/.config/metergraph/start-key --json
+metergraph experiments get --id 3f2b8c1d-4e5f-4a6b-8c7d-9e0f1a2b3c4d --json
+```
+
+- `--treatment PROVIDER/MODEL[,label=NAME][,temperature=0..2][,max_tokens=1..32000][,reasoning_effort=EFFORT]`
+  names one treatment. The model may itself contain `/`. Settings left out follow
+  production. Labels are unique and never `control`.
+- `estimate` (`POST /v1/agent/experiments/estimate`) writes and spends nothing. Its
+  result echoes the request the service read, with default labels filled in, the sample
+  size and production models seen, the estimate per treatment against the budget and
+  the daily cap, `blocking_reasons`, and whether this credential holds the start grant.
+  `next_action.kind` is `start_experiment`, or `change_experiment` when a start would be
+  refused.
+- `start` (`POST /v1/agent/experiments`, 202) takes the same arguments, so it starts
+  exactly what was priced. Each call creates a new experiment, so a start that succeeded
+  is never retried. Its `next_action` is `poll_experiment` with the `get` command, which
+  reads with a Metadata key or the project's sign in. The start request has its own
+  `--timeout-ms` deadline after the key checks. When it may have reached the service but
+  its result was not confirmed (a timeout or dropped connection after it was sent, a
+  server error, or a 202 whose answer does not match the contract), the command exits 20
+  (`unconfirmed`) with `next_action.kind: "check_before_retry"`: list experiments before
+  starting again. A start the service recorded but could not launch exits 5
+  (`unhealthy`, `experiment_launch_failed`) with the failed experiment in `data.result`.
+- `get` (`GET /v1/agent/experiments/UUID`) is the status and, once cases finish, the
+  built-in statistics: per treatment and for production, cases, errors, cost per call,
+  p50 latency, output tokens and output length, JSON parse rate, same top-level keys as
+  production, empty or refused rate and cut-off rate, plus production over exactly the
+  cases each treatment returned on. They show differences and never judge them. While
+  `terminal` is false, `next_action` is `poll_experiment` with `poll_after_seconds`;
+  then it is `open_experiment` with the dashboard link.
+- `list` (`GET /v1/agent/experiments?workload_id=&limit=`) is the newest experiments,
+  optionally for one workload.
+
+`list`, `estimate` and `get` are read commands: they use the project's saved Metadata
+grant or a Metadata key exactly as `usage` does, and the service's Metadata documents
+never carry an input, an output or a tracked field's value. Those are in the dashboard,
+and in the service's separate content tool for a Debug credential, which this CLI never
+calls. Every field printed is validated; the service's refusal messages are not printed.
+
+`start` needs a coding-agent key with Debug access (`agent:read`) and the Allow analysis
+starts grant (`agent:analysis-run`), which only a workspace owner can grant on the Keys
+page. It comes from `--agent-token-file` or `METERGRAPH_AGENT_TOKEN`, never a saved sign
+in. Before the start, the service's workspace document must show exactly the scopes
+`agent:read` and `agent:analysis-run` (a key that also holds Replay, another workflow
+grant, Metadata or ingest is refused) for the expected workspace and profile, and its
+capabilities document must offer `experiment_start`. Only then is the
+one `POST` sent with the key. Without such a key the command exits 15
+(`permission_denied`, `experiment_start_key_required` or `experiment_start_not_granted`)
+and sends nothing to the experiments endpoints. A refusal by the service, for example
+`over_budget`, `daily_budget_exhausted`, `experiments_in_progress`, `route_unpriced` or
+`no_replayable_calls`, exits 19 (`refused`) with the code, reason and any budget figures
+in `data.refusal`.
+
 ## JSON output
 
 With `--json`, every command prints one line with the same top-level keys:
@@ -1256,6 +1330,16 @@ CLI never assumes such a server is hosted.
   bounded responses within fixed time limits.
 - It accepts no credential on the command line, in the environment or on stdin.
 
+## What experiments start does and does not do
+
+- It is the only command that changes a workspace: it records one experiment, which the
+  service then runs by sending the sampled calls' captured prompts to each treatment's
+  provider through its AI gateway, within the budget the service owns.
+- It never uses a saved sign in, never requests a scope, and never uses its key for any
+  other request. Read commands, `experiments list`, `estimate` and `get` among them,
+  refuse a key that holds more than Metadata access.
+- It never retries a start, and never reads the experiment's inputs or outputs.
+
 ## What the read commands do not do
 
 - They never sign in, open a browser, create a grant or change the project binding.
@@ -1263,7 +1347,7 @@ CLI never assumes such a server is hosted.
 - They never request `agent:read` or `agent:replay`, never read retained content,
   evidence or replays, and never call a model provider.
 - They make only `GET` requests to the read endpoints (a grant refresh, when needed, is
-  the only `POST`). They send no ingest data and change no evaluations, provider
+  a `POST`, and `experiments estimate` sends its request as a `POST` that writes nothing). They send no ingest data and change no evaluations, provider
   settings, workspace configuration or telemetry. The service may still record the
   access, for example audit entries and the grant's last used time.
 - They never print a token the CLI holds, even inside an otherwise valid name.

@@ -84,7 +84,10 @@ export function keyTarget({ binding, options, env, originConfirmed = false }) {
 //   { ok: false, outcome, reason }
 // verifiedProfile is the profile the caller already read from GET
 // /v1/deployment under the same deadline, or null to read it here.
-export async function keySession({ target, source, env, signal, verifiedProfile = null }) {
+// access is "metadata" for the read commands, or "experiment_start" for
+// experiments start, which needs Debug access and the start grant instead
+// (verifyContext) and uses the key for that one request.
+export async function keySession({ target, source, env, signal, verifiedProfile = null, access = "metadata" }) {
   // A key already in the environment is checked for shape before any
   // request; a key file is opened only once the origin has proven itself.
   let key = source.kind === "env" ? readAgentKey(source, env) : null;
@@ -108,7 +111,7 @@ export async function keySession({ target, source, env, signal, verifiedProfile 
   const verified = await verifyContext(
     target.origin,
     token,
-    { profile, workspaceId: target.workspaceId, anyWorkspace: target.workspaceId === null },
+    { profile, workspaceId: target.workspaceId, anyWorkspace: target.workspaceId === null, access },
     signal,
   );
   if (!verified.ok) {
@@ -125,7 +128,7 @@ export async function keySession({ target, source, env, signal, verifiedProfile 
       origin: target.origin,
       workspaceId: verified.workspaceId,
       profile,
-      scopes: [METADATA_SCOPE],
+      scopes: access === "metadata" ? [METADATA_SCOPE] : verified.scopes,
       accessToken: token,
     },
     documents: verified.documents,
