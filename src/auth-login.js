@@ -34,7 +34,7 @@ import {
 import { AUTH_HTTP_TIMEOUT_MS, WORKFLOW_PERMISSIONS, loginScope } from "./constants.js";
 import { runDoctor } from "./doctor.js";
 import { agentKeyAction, classifyEnvironment } from "./environment.js";
-import { workspaceLabel, workspaceNamed } from "./read-contract.js";
+import { workspaceLabel, workspacePinned } from "./read-contract.js";
 import { deadline, trapSignals } from "./transport.js";
 
 // login and logout. Each returns { outcome, reason, data }; every string in
@@ -114,7 +114,7 @@ export async function runLogin(options, progress) {
     if (bound !== null && !options.reconnect && saved?.scope === ctx.scope) {
       const session = await sessionFor(bound, store, trap.signal);
       if (session.ok) {
-        if (workspaceText !== null && !workspaceNamed(session.documents.workspace?.workspace, workspaceText)) {
+        if (workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, workspaceText)) {
           return end("conflict", "bound_to_other_workspace", RECONNECT);
         }
         Object.assign(ctx, {
@@ -217,7 +217,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
   // so. Without that, a slug is still checked after sign in, but a name,
   // which may be ambiguous, is refused before the browser opens.
   const workspaceText = options.workspaceText ?? null;
-  if (workspaceText !== null && !discovered.workspaceHint && !SLUG.test(workspaceText)) {
+  if (workspaceText !== null && !discovered.workspaceHint && !SLUG.test(workspaceText.toLowerCase())) {
     return fail("unsupported", "workspace_name_unsupported", USE_SLUG);
   }
   const workspaceHint = discovered.workspaceHint ? workspaceText ?? options.workspace ?? null : null;
@@ -340,7 +340,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
   }
   if (ctx.role === "debug" && !sameScopes(ctx.scope, verified.scopes)) return rejectGrant("verification_failed", "scope_mismatch");
   const workspace = verified.documents.workspace?.workspace;
-  if (workspaceText !== null && !workspaceNamed(workspace, workspaceText)) {
+  if (workspaceText !== null && !workspacePinned(workspace, workspaceText)) {
     return rejectGrant("verification_failed", "workspace_mismatch");
   }
   ctx.workspaceId = grant.tenant;

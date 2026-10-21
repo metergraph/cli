@@ -1128,10 +1128,9 @@ export function workspaceLabel(workspace) {
 
 // Whether a workspace document is the one a person named with --workspace.
 // Slugs are unique, names are not, and anyone who owns a workspace chooses
-// its name. So a credential pin is strict (workspacePinned): text shaped like
-// a slug matches only the slug, and other text only the exact name, ignoring
-// case. Sign in also accepts a slug-shaped name (workspaceNamed), because the
-// consent page matched it among the person's own workspaces.
+// its name, including a workspace a person was invited to. So the match is
+// strict, for sign in and for every credential pin: text shaped like a slug
+// matches only the slug, and other text only the exact name, ignoring case.
 export function workspacePinned(workspace, text) {
   const { slug, name } = workspaceLabel(workspace);
   const wanted = text.trim().toLowerCase();
@@ -1139,12 +1138,6 @@ export function workspacePinned(workspace, text) {
   return name !== null && name.trim().toLowerCase() === wanted;
 }
 
-export function workspaceNamed(workspace, text) {
-  const { slug, name } = workspaceLabel(workspace);
-  const wanted = text.trim();
-  if (slug !== null && slug === wanted.toLowerCase()) return true;
-  return name !== null && name.trim().toLowerCase() === wanted.toLowerCase();
-}
 
 // GET /v1/agent/workspace, already checked by checkWorkspace during the
 // session. Returns the approved workspace fields only.

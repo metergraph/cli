@@ -211,8 +211,20 @@ test("a workspace name with control characters is never printed", () =>
     assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: "example-workspace", name: null });
   }));
 
-test("a credential pin is strict: a slug matches only the slug, other text only the exact name", async () => {
-  const { workspacePinned, workspaceNamed } = await import("../src/read-contract.js");
+test("sign in refuses a workspace whose name, not slug, matches a slug-shaped --workspace", () =>
+  withServer({
+    workspaceHint: "match",
+    workspace: (doc) => ({ ...doc, workspace: { ...doc.workspace, slug: "someone-else", name: "example-workspace" } }),
+  }, async (server) => {
+    const box = sandbox();
+    const { run, result } = await login(assert, box, server, ["--workspace", "example-workspace"]);
+    assert.equal(run.code, 11);
+    assert.equal(result.error.reason, "workspace_mismatch");
+    assert.ok(!fs.existsSync(path.join(box.project, ".metergraph", "project.json")));
+  }));
+
+test("the workspace match is strict: a slug matches only the slug, other text only the exact name", async () => {
+  const { workspacePinned } = await import("../src/read-contract.js");
   const workspace = { slug: "acme-prod", name: "acme" };
   // Names are chosen by whoever owns a workspace, so a slug-shaped pin never
   // matches one, and no compatibility folding makes look-alikes equal.
@@ -223,9 +235,6 @@ test("a credential pin is strict: a slug matches only the slug, other text only 
   assert.equal(workspacePinned(workspace, "ACME-PROD"), true);
   assert.equal(workspacePinned({ slug: "acme-prod", name: "Acme Prod" }, "ACME PROD"), true);
   assert.equal(workspacePinned({ slug: "acme-prod", name: "Acme Prod" }, "Ａｃｍｅ Prod"), false);
-  // Sign in matched among the person's own workspaces, so it accepts either.
-  assert.equal(workspaceNamed(workspace, "acme"), true);
-  assert.equal(workspaceNamed(workspace, "acme-prod"), true);
 });
 
 test("a workspace name that holds a credential is not printed by login", () =>
