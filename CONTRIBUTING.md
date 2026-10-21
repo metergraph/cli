@@ -18,8 +18,10 @@ runs only on the Windows CI runner.
 To try a packed artifact without publishing:
 
 ```sh
-npm pack --pack-destination "$(mktemp -d)"
-npx --yes --package=/path/to/metergraph-cli-0.2.2.tgz -- metergraph --version
+pack_dir="$(mktemp -d)"
+package_version="$(node -p "require('./package.json').version")"
+npm pack --ignore-scripts --pack-destination "$pack_dir"
+npx --yes --package="$pack_dir/metergraph-cli-$package_version.tgz" -- metergraph --version
 ```
 
 Do not commit tarballs or other generated files.
