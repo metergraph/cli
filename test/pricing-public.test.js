@@ -67,6 +67,9 @@ function cost(status = "priced") {
   const d = result();
   Object.assign(d.results[0], {
     status,
+    contract_version: 2,
+    fees: [],
+    uncaptured_fees: false,
     cost: "0.00416000",
     components: {
       input: "0.00200000",
@@ -74,6 +77,7 @@ function cost(status = "priced") {
       cache_read: "0.00016000",
       cache_write: "0.00000000",
       request: "0.00000000",
+      search: "0.00000000",
     },
   });
   return d;
@@ -169,6 +173,7 @@ test("calculate and cost alias post provider-specific usage, cache and batch con
         assert.equal(d.result.cost, "0.00416000");
         assert.equal(typeof d.result.cost, "string");
         assert.deepEqual(payload, {
+          contract_version: 2,
           format: "anthropic.messages",
           trace: {
             model: "example/model",
@@ -283,7 +288,7 @@ test("200 unpriced results remain unpriced, including missing channel and null c
       model_id: null,
       currency: null,
       missing_dimensions: ["channel"],
-      ...(action === "calculate" ? { cost: null, components: null } : {}),
+      ...(action === "calculate" ? { contract_version: 2, fees: [], uncaptured_fees: false, cost: null, components: null } : {}),
     });
     await api({ [`/v1/pricing/${action}`]: respond(d) }, async (s) => {
       const got = await runCli(args(action, s.origin));
@@ -460,4 +465,80 @@ test("market concurrency is bounded and throttling never returns a partial board
     assert.equal(parseJsonLine(got.stdout).data, null);
     assert.ok(count <= 3); assert.ok(maxActive <= 3);
   });
+});
+
+function withSearch() {
+  const d = cost();
+  Object.assign(d.results[0], {
+    cost: "0.05416000",
+    components: { ...d.results[0].components, search: "0.05000000" },
+    fees: [{ operation: "web_search", tool: "web_search", channel: "example-api", unit: "search", quantity: 5,
+      rate_per_1k: "10", currency: "USD", cost: "0.05000000", price_id: "search-price", source_url: "https://example.com/search-pricing",
+      effective_from: "2026-01-01", effective_to: null, region: "global", catalog_version: "2026-10-20", catalog_hash: "synthetic-hash" }],
+  });
+  return d;
+}
+
+test("v2 search fees reconcile exactly and preserve effective provenance", () => {
+  const q = { at: AT, channel: "example-api", input_tokens: 1000, output_tokens: 200, contract_version: 2 };
+  assert.equal(validatePublicResult(withSearch(), "calculate", q), true);
+  for (const mutate of [
+    d => d.results[0].fees[0].quantity = 1.5,
+    d => d.results[0].fees[0].quantity = -1,
+    d => d.results[0].fees[0].rate_per_1k = "11",
+    d => d.results[0].fees[0].cost = "0.04",
+    d => d.results[0].fees[0].source_url = "javascript:alert(1)",
+    d => d.results[0].fees[0].channel = "wrong-api",
+    d => d.results[0].fees[0].effective_to = "2026-01-02",
+    d => d.results[0].fees[0].effective_from = "2027-01-01",
+    d => d.results[0].uncaptured_fees = true,
+    d => d.results[0].fees = [],
+    d => delete d.results[0].contract_version,
+  ]) {
+    const d = withSearch(); mutate(d);
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+});
+
+test("search counts and legacy mode remain explicit with no silent downgrade", async () => {
+  const parsed = parseArgs(["pricing", "calculate", "--model", "example/model", "--provider", "anthropic", "--web-search-requests", "0"]);
+  assert.equal(parsed.ok, true);
+  assert.equal(pricingPayload(parsed).contract_version, 2);
+  assert.equal(pricingPayload(parsed).trace.usage.server_tool_use.web_search_requests, 0);
+  for (const value of ["-1", "1.5", "1e3", "true", "1000000000000"])
+    assert.equal(parseArgs(["pricing", "cost", "--model", "example/model", "--provider", "anthropic", "--web-search-requests", value]).ok, false);
+  assert.equal(parseArgs(["pricing", "cost", "--model", "example/model", "--provider", "openai", "--web-search-requests", "1"]).ok, false);
+  const old = cost();
+  delete old.results[0].contract_version;
+  delete old.results[0].components.search;
+  delete old.results[0].fees;
+  delete old.results[0].uncaptured_fees;
+  await api({ "/v1/pricing/calculate": respond(old) }, async s => {
+    const base = [...args("calculate", s.origin), "--input-tokens", "1000", "--output-tokens", "200", "--json"];
+    const rejected = await runCli(base);
+    assert.equal(rejected.code, 11);
+    const legacy = await runCli([...base, "--contract-version", "1"]);
+    assert.equal(legacy.code, 0);
+    assert.equal(parseJsonLine(legacy.stdout).data.result.cost, "0.00416000");
+  });
+});
+
+
+test("malformed unpriced fees and legacy hidden search fees are refused", () => {
+  const d = cost();
+  Object.assign(d.results[0], { status: "unpriced", cost: null, components: null, price: null, model_id: null, currency: null,
+    fees: [null], missing_dimensions: ["model"] });
+  assert.equal(validatePublicResult(d, "calculate", { at: AT, contract_version: 2 }), false);
+  const old = cost();
+  delete old.results[0].contract_version;
+  delete old.results[0].components.search;
+  delete old.results[0].fees;
+  delete old.results[0].uncaptured_fees;
+  const q = { at: AT, contract_version: 1, input_tokens: 1000, output_tokens: 200, web_search_requests: 5 };
+  assert.equal(validatePublicResult(old, "calculate", q), false);
+  old.results[0].status = "partial";
+  old.results[0].missing_dimensions = ["search.contract_version"];
+  assert.equal(validatePublicResult(old, "calculate", q), true);
+  old.results[0].fees = [null];
+  assert.equal(validatePublicResult(old, "calculate", q), false);
 });

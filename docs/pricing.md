@@ -221,3 +221,55 @@ oversize body 6; redirects 7; malformed/inconsistent documents 11; rate limiting
 16. Responses and headers are not echoed on failure. The CLI does not retry
 POST calculations. No merge, package publication or deployment is performed by
 these tests.
+
+## Search fee contract preview
+
+Public calculation now requests `contract_version: 2`. The server must acknowledge
+that version. This prevents a server that ignores the new request field from
+silently returning a token subtotal as a complete tool cost. With a server that
+only supports the original contract, explicitly use `--contract-version 1`.
+Lookup and discovery are unchanged.
+
+| Client | Original server | Updated server |
+| --- | --- | --- |
+| Original CLI (five components) | Supported | Supported in default v1; search omissions are partial |
+| Updated CLI, default v2 | Contract mismatch; select v1 explicitly | Supported, six components and itemized fees |
+| Updated CLI, `--contract-version 1` | Supported token subtotal | Supported token subtotal; search omissions are partial |
+
+Rollout order: review and land server support first, then release the updated CLI.
+These changes do not publish a package or deploy a server. No automatic retry or
+version downgrade is performed.
+
+For Anthropic, supply the provider's **billable** counter. Zero is a measured zero;
+omitting the flag leaves search usage unspecified. Failed searches excluded by
+the supplier must not be included in this counter.
+
+```sh
+metergraph pricing calculate --model claude-sonnet-5 --provider anthropic \
+  --input-tokens 0 --output-tokens 0 --web-search-requests 5 --json
+```
+
+The metadata-only request includes:
+
+```json
+{"contract_version":2,"format":"anthropic.messages","trace":{"model":"claude-sonnet-5","usage":{"input_tokens":0,"output_tokens":0,"server_tool_use":{"web_search_requests":5}}},"context":{"provider":"anthropic"}}
+```
+
+The CLI currently constructs search usage only for `anthropic.messages`.
+`--web-search-requests` requires an integer from 0 through 999999999999.
+It does not synthesize OpenAI tool actions or infer search counts from citations.
+
+V2 adds `components.search`, a `fees` array, and `uncaptured_fees`. Each fee carries
+operation, tool, billing channel, unit, integer quantity, decimal-string
+`rate_per_1k`, currency, decimal-string cost, price ID, source URL, effective
+window, region, catalog version and hash. The CLI validates active dates,
+channel, region fallback, fee arithmetic, the fee sum and the full component sum.
+For example five searches at $10 per thousand contribute exactly `0.05000000`.
+Search-content tokens remain in the provider's token accounting; they are not
+charged again by this flag.
+
+Read `status`, `missing_dimensions` and `uncaptured_fees` before treating a
+subtotal as complete. Unsupported billing channels, tool versions, rates and
+search-content token accounting remain explicitly partial. The independent
+`request` component retains flat fees per model request and is never relabelled
+as a fee per search. JSON output preserves all fee provenance returned by the API.

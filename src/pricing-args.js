@@ -14,6 +14,8 @@ export const PRICING_OPTIONS = [
   "--url",
   "--api",
   "--trace-format",
+  "--contract-version",
+  "--web-search-requests",
   "--timeout-ms",
   "--format",
   "--at",
@@ -145,6 +147,17 @@ export function parsePricing(action, values, flags, json, fail) {
         "unsupported",
       );
   }
+  if (values["--contract-version"] !== undefined && (!cost || api !== "public"))
+    return fail("unexpected_contract_version", "--contract-version is supported only by public calculate/cost.");
+  const contractVersion = Number(values["--contract-version"] ?? "2");
+  if (!["1", "2"].includes(values["--contract-version"] ?? "2"))
+    return fail("invalid_contract_version", "--contract-version must be 1 or 2.");
+  if (values["--web-search-requests"] !== undefined) {
+    const count = values["--web-search-requests"];
+    if (!cost || api !== "public" || traceFormat !== "anthropic.messages" || !/^(0|[1-9]\d{0,11})$/.test(count))
+      return fail("invalid_search_usage", "--web-search-requests requires public Anthropic calculate/cost and a whole count from 0 to 999999999999.");
+    query.web_search_requests = Number(count);
+  }
   const raw = values["--timeout-ms"] ?? "10000";
   if (!/^\d+$/.test(raw) || Number(raw) < 100 || Number(raw) > 30000)
     return fail("invalid_timeout", "--timeout-ms must be 100 to 30000.");
@@ -157,6 +170,7 @@ export function parsePricing(action, values, flags, json, fail) {
     format,
     api,
     traceFormat,
+    contractVersion,
     timeoutMs: Number(raw),
     json,
   };

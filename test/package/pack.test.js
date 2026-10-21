@@ -468,3 +468,35 @@ test("the installed CLI exposes public pricing actions without requiring login",
   assert.equal(parseJsonLine(bad.stdout).error.reason, "missing_channel");
   assert.equal(bad.stderr, "");
 });
+
+test("installed package negotiates and verifies search-fee totals", async () => {
+  const bin = path.join(projectDir, "node_modules", "metergraph-cli", "bin", "metergraph.js");
+  const server = await startServer({
+    "/v1/pricing/calculate": async (req, res) => {
+      let body = "";
+      for await (const part of req) body += part;
+      const payload = JSON.parse(body);
+      assert.equal(payload.contract_version, 2);
+      assert.equal(payload.trace.usage.server_tool_use.web_search_requests, 5);
+      const price = { id: "synthetic-token-price", model_id: "example/model", channel: "anthropic-api", region: "global", currency: "USD",
+        source_url: "https://example.com/tokens", effective_from: "2026-01-01", effective_to: null, rules: {},
+        input_per_mtok: "1", output_per_mtok: "1", cache_read_per_mtok: null, cache_write_5m_per_mtok: null,
+        cache_write_1h_per_mtok: null, batch_input_per_mtok: null, batch_output_per_mtok: null, request_fee_per_1k: null };
+      const fee = { operation: "web_search", tool: "web_search", channel: "anthropic-api", unit: "search", quantity: 5,
+        rate_per_1k: "10", currency: "USD", cost: "0.05000000", price_id: "synthetic-search-price", source_url: "https://example.com/search",
+        effective_from: "2026-01-01", effective_to: null, region: "global", catalog_version: "synthetic", catalog_hash: "synthetic" };
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ results: [{ status: "priced", contract_version: 2, model_id: "example/model", currency: "USD", price,
+        effective_at: "2026-10-20T00:00:00Z", missing_dimensions: [], uncaptured_fees: false, cost: "0.05000000",
+        components: { input: "0", output: "0", cache_read: "0", cache_write: "0", request: "0", search: "0.05000000" }, fees: [fee] }] }));
+    },
+  });
+  try {
+    const got = await run(process.execPath, [bin, "pricing", "calculate", "--model", "example/model", "--provider", "anthropic",
+      "--at", "2026-10-20", "--input-tokens", "0", "--output-tokens", "0", "--web-search-requests", "5", "--url", server.origin, "--json"], { cwd: projectDir });
+    assert.equal(got.code, 0, got.stdout + got.stderr);
+    const result = parseJsonLine(got.stdout).data.result;
+    assert.equal(result.cost, "0.05000000");
+    assert.equal(result.fees[0].quantity, 5);
+  } finally { await server.close(); }
+});
