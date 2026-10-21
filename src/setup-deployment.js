@@ -64,6 +64,13 @@ const ACTION_GUIDE = Object.freeze({
   retry: "Rerun the same command.",
 });
 
+// Each prerequisite a non-hosted route asserts, with its guidance, for a
+// person confirming them at a terminal.
+export function prerequisitesFor(deployment) {
+  const profile = EXPECTED_PROFILE[deployment];
+  return (PREREQUISITES[deployment] ?? []).map((name) => ({ name, guide: prerequisiteGuide(name, profile) }));
+}
+
 export function prerequisiteGuide(name, profile) {
   if (name === "metadata_agent_credential") return METADATA_CREDENTIAL_GUIDE[profile] ?? null;
   return PREREQUISITE_GUIDE[name] ?? null;
