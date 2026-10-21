@@ -247,6 +247,15 @@ test("customer-local setup verifies route before browser login and completes on 
     assert.equal(result.data.receipt.workspace_id, server.behavior.workspaceId);
     assert.equal(server.requestsTo("/v1/oauth/authorize").length, 1);
     assert.equal(server.requestsTo("/v1/cli/setup/authorize").length, 1);
+    // Setup grants Metadata only and says how the bundle grants more.
+    const access = result.data.agent_access;
+    assert.equal(access.role, "metadata");
+    assert.equal(access.offer.kind, "bundle_agent_key");
+    assert.equal(access.offer.run_in, "bundle_directory");
+    assert.equal(access.offer.requires_person_approval, true);
+    assert.equal(access.offer.command, "./bin/agent-key create --write-to ~/.config/metergraph/agent.env " +
+      "--role debug --allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts");
+    assert.equal(access.offer.keys_page_url, `${server.origin}/#api-keys`);
   } finally { await server.close(); }
 });
 
@@ -322,6 +331,7 @@ test("hosted signup goes through the existing browser login before ingest approv
     const result = await setup(box, server, ["--url", server.origin, "--signup"]);
     assert.equal(result.outcome, "ok");
     assert.equal(result.data.receipt.deployment_profile, "managed");
+    assert.equal(result.data.agent_access, undefined, "the hosted Keys page needs no bundle command");
     assert.equal(server.requestsTo("/v1/auth/signup").length, 1);
   } finally { await server.close(); }
 });
