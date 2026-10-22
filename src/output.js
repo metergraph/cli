@@ -28,7 +28,7 @@ import {
   SUPPORTED_PROFILES,
   VERSION,
 } from "./constants.js";
-import { PLAIN, fields, headline, paragraph, render, section, steps, toneFor } from "./style.js";
+import { PLAIN, fields, headline, paragraph, render, section, steps, toneFor, workspaceShown } from "./style.js";
 
 // Every JSON result, success or failure, has the same top-level keys:
 //   schema_version, command, ok, outcome, exit_code, data, error
@@ -49,7 +49,20 @@ export function envelope({ command, outcome, data = null, reason = null, message
 }
 
 export function toJsonLine(result) {
-  return `${JSON.stringify(result)}\n`;
+  return `${jsonText(result)}\n`;
+}
+
+// JSON.stringify escapes C0 controls but leaves C1 controls (a terminal may
+// read U+009B as an escape sequence) and bidirectional overrides as they are.
+// Inside a JSON string \uXXXX means the same character, so escaping them
+// changes nothing a parser sees and keeps them away from the terminal.
+const TERMINAL_UNSAFE = /[\u061c\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+export function jsonText(value, indent = undefined) {
+  return JSON.stringify(value, null, indent).replace(
+    TERMINAL_UNSAFE,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 const DOCTOR_OPTIONS = [
@@ -155,8 +168,28 @@ const LOGIN_OPTIONS = [
   { name: "--url", value: "ORIGIN", summary: `Origin to sign in to. Default ${DEFAULT_ORIGIN}.` },
   {
     name: "--workspace",
-    value: "UUID",
-    summary: "Expected workspace ID. Sign in fails unless the browser grants exactly this workspace.",
+    value: "SLUG",
+    summary:
+      "The workspace to sign in to, by its slug (on its Settings page) or its name. A service that can, offers " +
+      "approval for that workspace alone; sign in fails unless the browser grants it.",
+  },
+  {
+    name: "--role",
+    value: "ROLE",
+    summary:
+      "metadata (default): usage, cost and trace questions, no captured content. debug: also reads captured " +
+      "prompts and responses through Agent Access; the --allow-* options add workflow permissions to it.",
+  },
+  {
+    name: "--allow-evaluation-writes",
+    value: null,
+    summary: "With --role debug: Allow evaluation writes. Only a workspace owner approves the workflow permissions.",
+  },
+  { name: "--allow-evaluation-previews", value: null, summary: "With --role debug: Allow evaluation previews." },
+  {
+    name: "--allow-analysis-starts",
+    value: null,
+    summary: "With --role debug: Allow analysis starts, which replays captured prompts on model providers and spends money.",
   },
   { name: "--project", value: "DIR", summary: "Existing project directory to bind. Default: the current directory." },
   CONFIG_DIR_OPTION,
@@ -178,8 +211,9 @@ const LOGOUT_OPTIONS = [
 ];
 
 const LOGIN_USAGE =
-  "metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] " +
-  "[--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
+  "metergraph login --runtime local [--url ORIGIN] [--workspace SLUG] [--role metadata|debug] " +
+  "[--allow-evaluation-writes] [--allow-evaluation-previews] [--allow-analysis-starts] [--project DIR] " +
+  "[--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]";
 const LOGOUT_USAGE = "metergraph logout [--project DIR] [--config-dir DIR] [--json]";
 const SETUP_USAGE = "metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) " +
   "[--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--env-file .env] " +
@@ -227,8 +261,10 @@ const READ_BASE_OPTIONS = [
   },
   {
     name: "--workspace",
-    value: "UUID",
-    summary: "The workspace the credential must be for. Without it, an unbound key's own workspace is used.",
+    value: "SLUG",
+    summary:
+      "The workspace the credential must be for, by its slug or name (or ID). Without it, an unbound key's own " +
+      "workspace is used.",
   },
   {
     name: "--agent-token-file",
@@ -269,6 +305,24 @@ const EXPERIMENTS_OPTIONS = [
   },
   JSON_OPTION,
 ];
+const TOOLS_USAGE = [
+  "metergraph tools list [--name TOOL] [read options] [--json]",
+  "metergraph tools call TOOL [--args JSON | --args-file PATH] [--yes] [read options] [--json]",
+];
+const TOOLS_OPTIONS = [
+  { name: "--name", value: "TOOL", summary: "list only: show one tool, with its input schema under --json." },
+  { name: "--args", value: "JSON", summary: "call only: the tool's arguments as one JSON object. Default {}." },
+  { name: "--args-file", value: "PATH", summary: "call only: a file holding the arguments as one JSON object, up to 1 MiB." },
+  {
+    name: "--yes",
+    value: null,
+    summary:
+      "call only: run a tool that writes, starts work or calls a model provider. Pass it only after the person " +
+      "has approved this exact call.",
+  },
+  ...READ_BASE_OPTIONS,
+  JSON_OPTION,
+];
 const DAYS_OPTION = {
   name: "--days",
   value: "N",
@@ -296,7 +350,7 @@ const limitOption = (fallback, extra = "") => ({
   summary: `Rows to return, 1 to ${READ_MAX_LIMIT}. Default ${fallback}.${extra}`,
 });
 const READ_BASE_USAGE =
-  "[--url ORIGIN] [--workspace UUID] [--agent-token-file PATH] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
+  "[--url ORIGIN] [--workspace SLUG] [--agent-token-file PATH] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]";
 const REFUSED_NOTE =
   "--environment, --workload, --since, --until, --sql, --query, --content, --include-content, --debug and --replay " +
   "are recognized and refused with exit code 6 before any request, except --environment, --since and --until on usage.";
@@ -472,6 +526,7 @@ export function helpData(topic) {
       VERIFY_USAGE,
       ...READ_HELP.map((entry) => entry.usage),
       ...EXPERIMENTS_USAGE,
+      ...TOOLS_USAGE,
     ],
     commands: [
       { name: "pricing", summary: "Public model discovery, lookup and calculation. Current market board; historical charts in local reference mode.",
@@ -565,6 +620,13 @@ export function helpData(topic) {
           "treatments, with built-in statistics per arm next to production. list, estimate and get are Metadata " +
           "reads; start needs a key with Debug access and Allow analysis starts and spends within the server's budget.",
         options: EXPERIMENTS_OPTIONS,
+      },
+      {
+        name: "tools",
+        summary:
+          "List the Agent Access tools this credential can use and call one, as an MCP client would. A tool that " +
+          "writes, starts work or calls a model provider runs only with --yes.",
+        options: TOOLS_OPTIONS,
       },
       ...READ_HELP.map(({ name, summary, options, examples }) => ({
         name,
@@ -661,15 +723,18 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       lines.push(
         "Opens your browser on the service's own sign in and workspace consent pages, then",
         "binds this project to the workspace you approve. The CLI receives a delegated grant",
-        `limited to the Metadata scope (${METADATA_SCOPE}) and verifies the workspace, profile`,
-        "and scope with the service before saving anything. Your browser keeps its own sign in.",
+        `limited to the Metadata role (${METADATA_SCOPE}), or with --role debug to the Debug role and`,
+        "the workflow permissions the --allow-* options name, which only a workspace owner approves.",
+        "It verifies the workspace, profile and scope with the service before saving anything. Your",
+        "browser keeps its own sign in. Signing in again with another role or other permissions",
+        "replaces the grant.",
         "The grant is saved in your private config directory; the project gets only",
         ".metergraph/project.json, which holds no credentials.",
         "",
         "Login does not create an application ingest key, and no manual API key is required.",
-        "The service records the grant as a Metadata-only OAuth connection, separate from any",
-        "API or ingest key you manage. Login reads no telemetry or content and never asks for",
-        "Debug or Replay access. Rerunning it on a signed in project changes nothing.",
+        "The service records the grant as an OAuth connection, separate from any API or ingest",
+        "key you manage. Login reads no telemetry or content and never asks for Replay access.",
+        "Rerunning it on a signed in project with the same role and permissions changes nothing.",
         "",
       );
     } else {
@@ -690,6 +755,28 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "Opening requires a server link that selects the verified workspace; older links get a manual handoff.",
       "", "Options:");
     lines.push(...optionLines(VERIFY_OPTIONS, 22));
+  } else if (topic === "tools") {
+    lines.push(
+      "Usage:",
+      ...TOOLS_USAGE.map((usage) => `  ${usage}`),
+      "",
+      "Every Agent Access tool the service offers this credential, through its MCP endpoint, with the same",
+      "saved sign in or coding-agent key as the read commands and the same checks first. The service decides",
+      "which tools a credential sees: a Metadata credential gets the Metadata tools; the Debug role adds trace",
+      "content and evaluation reads, and Allow evaluation writes, Allow evaluation previews and Allow analysis",
+      "starts add the tools they name. Replay keys are refused.",
+      "",
+      "list prints the tools with whether each only reads. Under --json each carries its title, description",
+      "and input schema. call sends one tools/call with --args or --args-file and prints the tool's structured",
+      "result in data.result. A tool the service does not mark read-only, or marks as calling a model provider,",
+      "needs --yes: without it the command exits 18 (action_required, confirmation_required) and sends",
+      "nothing. Pass --yes only after the person has approved that exact call. A refusal by the tool exits 19",
+      "(refused) with the service's error in data.tool_error; a write whose answer was lost exits 20",
+      "(unconfirmed).",
+      "",
+      "Options:",
+    );
+    lines.push(...optionLines(TOOLS_OPTIONS, 22));
   } else if (topic === "experiments") {
     lines.push(
       "Usage:",
@@ -815,6 +902,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "  metergraph routes [options]      Routes and evaluation contract versions",
       "  metergraph traces [options]      One page of trace metadata",
       "  metergraph experiments list|estimate|start|get  Replay a workload on other models",
+      "  metergraph tools list|call       Any Agent Access tool this credential can use",
       "  metergraph pricing <action>      Public lookup, cost, history and market board",
       "",
       'Run "metergraph help doctor" for doctor options.',
@@ -824,6 +912,7 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       'Run "metergraph help verify" for exact-trace verification options.',
       'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
       'Run "metergraph help experiments" for experiment options.',
+      'Run "metergraph help tools" for tool options.',
       "",
       ...AGENT_PATH_HELP,
     );
@@ -1028,6 +1117,7 @@ const AUTH_MESSAGES = {
   oauth_metadata_missing: "This service does not support CLI sign in yet. Nothing was written.",
   metadata_scope_unsupported:
     "This service does not offer Metadata-only access for the CLI yet. The CLI does not fall back to broader access.",
+  debug_scope_unsupported: "This service does not offer Debug access for CLI sign in. Nothing was saved.",
   endpoint_not_allowed: "The service advertised an authorization endpoint outside its own origin or known paths.",
   resource_mismatch: "The service's protected resource does not match this origin.",
   issuer_mismatch: "The service's authorization issuer does not match this origin.",
@@ -1044,6 +1134,14 @@ const AUTH_MESSAGES = {
   client_mismatch: "The issued grant is for a different client. Nothing was saved.",
   scope_mismatch: "The issued grant is not limited to exactly the Metadata scope. It was not kept.",
   workspace_mismatch: "The browser granted a different workspace than --workspace. It was not kept.",
+  workspace_hint_ambiguous:
+    "More than one of your workspaces has the name --workspace gave, so the consent page offered no approval. " +
+    "Nothing was granted.",
+  workspace_hint_unknown:
+    "None of your workspaces has the slug or name --workspace gave, so the consent page offered no approval. " +
+    "Nothing was granted.",
+  workspace_name_unsupported:
+    "This service cannot match a workspace by name. Use its slug, which its Settings page shows. Nothing was sent.",
   workspace_context_mismatch: "The service reported a different workspace than the grant names. It was not kept.",
   profile_mismatch: "The service reported a different deployment profile than before sign in. It was not kept.",
   deployment_profile_mismatch:
@@ -1130,7 +1228,7 @@ export function authText(result, message, style = PLAIN) {
   const lines = [headline(style, toneFor(result.outcome), title, result.outcome), ""];
   const rows = [
     ["Origin", report.origin],
-    ["Workspace", report.workspace?.id ?? null],
+    ["Workspace", workspaceShown(report.workspace)],
     ["Profile", report.deployment_profile || null],
   ];
   if (login && result.ok) {

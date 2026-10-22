@@ -121,7 +121,20 @@ test("a matching callback without the advertised issuer, or with another, ends t
 
 test("denial, server errors and contradictory callbacks are reported without their text", async () => {
   const cases = [
-    [`/callback?error=access_denied&state=${STATE}&iss=${enc(ISSUER)}`, { kind: "denied" }],
+    [`/callback?error=access_denied&state=${STATE}&iss=${enc(ISSUER)}`, { kind: "denied", hint: null }],
+    // Only the two fixed workspace refusals are kept; any other text is not.
+    [
+      `/callback?error=access_denied&error_description=workspace_hint_ambiguous&state=${STATE}&iss=${enc(ISSUER)}`,
+      { kind: "denied", hint: "workspace_hint_ambiguous" },
+    ],
+    [
+      `/callback?error=access_denied&error_description=workspace_hint_unknown&state=${STATE}&iss=${enc(ISSUER)}`,
+      { kind: "denied", hint: "workspace_hint_unknown" },
+    ],
+    [
+      `/callback?error=access_denied&error_description=SYNTHETIC_BODY_MARKER&state=${STATE}&iss=${enc(ISSUER)}`,
+      { kind: "denied", hint: null },
+    ],
     [
       `/callback?error=server_error&error_description=SYNTHETIC_BODY_MARKER&state=${STATE}&iss=${enc(ISSUER)}`,
       { kind: "error", reason: "authorization_error" },

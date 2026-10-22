@@ -87,7 +87,11 @@ test("a fresh login binds the verified workspace with a Metadata-only grant", as
       runtime: "local",
       environment: result.data.environment,
       deployment_profile: "local",
-      workspace: { id: WORKSPACE_A },
+      workspace: { id: WORKSPACE_A, slug: "example-workspace", name: "Example Workspace" },
+      access: {
+        role: "metadata",
+        permissions: { allow_evaluation_writes: false, allow_evaluation_previews: false, allow_analysis_starts: false },
+      },
       scopes: ["agent:metadata"],
       authenticated: true,
       configured: true,
@@ -187,7 +191,7 @@ test("a service that offers the pre-registered CLI client is signed in without r
     const { run, result } = await login(assert, box, server);
     assert.equal(run.code, 0, run.stdout);
     assert.equal(result.data.status, "signed_in");
-    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A });
+    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: "example-workspace", name: "Example Workspace" });
     assert.deepEqual(
       server.requests.map((request) => `${request.method} ${request.path}`),
       [
@@ -233,7 +237,7 @@ test("a rerun on a signed in project reuses the grant without a browser or new c
     const { run, result } = await login(assert, box, server);
     assert.equal(run.code, 0);
     assert.equal(result.data.status, "reused");
-    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A });
+    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: "example-workspace", name: "Example Workspace" });
     assert.deepEqual(
       server.requests.slice(before).map((request) => request.path),
       ["/v1/agent/workspace", "/v1/agent/capabilities"],
@@ -347,7 +351,7 @@ test("a bound project is never switched silently, only with --reconnect", async 
       const reconnected = await login(assert, box, server, ["--reconnect"]);
       assert.equal(reconnected.run.code, 0);
       assert.equal(reconnected.result.data.status, "reconnected");
-      assert.deepEqual(reconnected.result.data.workspace, { id: WORKSPACE_B });
+      assert.deepEqual(reconnected.result.data.workspace, { id: WORKSPACE_B, slug: "example-workspace", name: "Example Workspace" });
       assert.equal(reconnected.result.data.previous_grant_revocation, "accepted");
       const binding = readBindingFile(box);
       assert.equal(binding.workspace_id, WORKSPACE_B);
@@ -790,7 +794,7 @@ test("a rerun after the service revoked the grant signs in again and replaces it
     const { run, result } = await login(assert, box, server);
     assert.equal(run.code, 0, run.stdout);
     assert.equal(result.data.status, "reconnected");
-    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A });
+    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: "example-workspace", name: "Example Workspace" });
     const binding = readBindingFile(box);
     assert.notEqual(binding.credential_slot, oldSlot);
     assert.deepEqual(credentialFiles(box), [`${binding.credential_slot}.json`]);

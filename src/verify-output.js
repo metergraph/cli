@@ -1,4 +1,4 @@
-import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor, workspaceShown } from "./style.js";
 
 const MESSAGES = Object.freeze({
   invalid_trace_identity: "Provide exactly one exact trace or request ID from your application run.",
@@ -27,7 +27,7 @@ export function verifyText(result, style = PLAIN) {
   const lines = [headline(style, toneFor(result.outcome), title, result.outcome), ""];
   if (data) {
     lines.push(...fields(style, [
-      ["Workspace", data.workspace.id],
+      ["Workspace", workspaceShown(data.workspace)],
       ["Deployment", data.deployment_profile],
       ["Trace ID", data.trace?.trace_id ?? null],
       ["Invocation source", data.invocation.source],

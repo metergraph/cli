@@ -82,6 +82,21 @@ export const WORKFLOW_SCOPES = Object.freeze(WORKFLOW_PERMISSIONS.map(({ scope }
 // evaluations; customer-owned AWS (byoc-core) and the open-source server do not.
 export const WORKFLOW_DEPLOYMENT_CAPABILITY = "evaluations";
 
+// The scope login asks for and a saved sign in records: Metadata, or Debug
+// followed by the chosen workflow permissions in WORKFLOW_SCOPES order.
+export function loginScope(role, permissions = []) {
+  if (role !== "debug") return METADATA_SCOPE;
+  return [DEBUG_SCOPE, ...WORKFLOW_SCOPES.filter((scope) => permissions.includes(scope))].join(" ");
+}
+
+// Whether a saved sign in's scope is one login asks for, in that exact form.
+export function isLoginScope(scope) {
+  if (scope === METADATA_SCOPE) return true;
+  if (typeof scope !== "string") return false;
+  const [first, ...rest] = scope.split(" ");
+  return first === DEBUG_SCOPE && scope === loginScope("debug", rest);
+}
+
 // The service's agent access contract version, as sent in schema_version by
 // GET /v1/agent/workspace and GET /v1/agent/capabilities. It is the
 // service's own string and is unrelated to SCHEMA_VERSION, the version of

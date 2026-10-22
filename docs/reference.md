@@ -5,7 +5,7 @@ exit codes, see the [README](../README.md). Every command also prints its option
 `metergraph help COMMAND`, and `metergraph --help --json` returns the command list and
 exit code table in machine-readable form.
 
-Sign in needs a Metergraph service that offers Metadata-only CLI grants and grant
+Sign in needs a Metergraph service that offers Metadata CLI grants and grant
 revocation. A service without them is reported as unsupported, and the CLI never falls
 back to broader access. The read commands need a project signed in with `login` or
 `setup`. `setup` also needs the deployment's ingest bootstrap API and browser approval
@@ -39,7 +39,7 @@ metergraph skills install --client CLIENT [--runtime RUNTIME] [--project DIR] [-
 metergraph skills update --client CLIENT [--runtime RUNTIME] [--project DIR] [--json]
 metergraph skills list [--project DIR] [--json]
 metergraph help login [--json]
-metergraph login --runtime local [--url ORIGIN] [--workspace UUID] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
+metergraph login --runtime local [--url ORIGIN] [--workspace SLUG] [--role metadata|debug] [--allow-evaluation-writes] [--allow-evaluation-previews] [--allow-analysis-starts] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--signup] [--no-browser] [--reconnect] [--json]
 metergraph logout [--project DIR] [--config-dir DIR] [--json]
 metergraph setup --runtime local (--client codex|claude|cursor | --skip-skill) [--deployment managed|customer-local|byoc|oss] [--url ORIGIN] [--workspace UUID] [--confirm-prerequisites] [--agent-token-file FILE] [--project DIR] [--config-dir DIR] [--env-file .env] [--timeout-ms N] [--signup] [--reconnect] [--no-browser] [--repair] [--json]
 metergraph status [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
@@ -49,7 +49,7 @@ metergraph usage [--days N | --today | --since TIME [--until TIME]] [--group-by 
 metergraph routes [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph traces [--days N] [--limit N] [--route NAME] [--status success|error] [--metadata KEY=VALUE]... [--metadata-json JSON] [--cursor CURSOR] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--json]
 metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [--source application|synthetic|demo|import|unspecified] [--days N] [--timeout-ms N] [--poll-ms N] [--max-attempts N] [--open] [--no-browser] [--project DIR] [--config-dir DIR] [--json]
-metergraph experiments list [--workload ID] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--url ORIGIN] [--workspace UUID] [--agent-token-file PATH] [--json]
+metergraph experiments list [--workload ID] [--limit N] [--project DIR] [--config-dir DIR] [--timeout-ms N] [--url ORIGIN] [--workspace SLUG] [--agent-token-file PATH] [--json]
 metergraph experiments estimate --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] [--sample-model MODEL] [--track PATH]... [read options] [--json]
 metergraph experiments start --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] [--sample-model MODEL] [--track PATH]... [--agent-token-file PATH] [read options] [--json]
 metergraph experiments get --id UUID [read options] [--json]
@@ -262,7 +262,11 @@ metergraph logout
 | --- | --- | --- |
 | `--runtime RUNTIME` | required | Where this terminal runs, not which Metergraph service you sign in to. `local`: your own machine, where the browser runs; use it for the hosted service too. `cloud` and `cloud-no-shell`: a remote cloud sandbox, which gets a handoff to the [connection guide](https://www.metergraph.dev/docs/guides/agent-access/) with exit code 6. |
 | `--url ORIGIN` | `https://app.metergraph.dev` | Bare origin only, see [Safe origins](#safe-origins). |
-| `--workspace UUID` | none | The workspace you expect. Sign in fails unless the browser grants exactly this one. Without it, the workspace you choose in the browser is used after the service confirms it. |
+| `--workspace SLUG` | none | The workspace you expect, by its slug (on its Settings page, and in `metergraph context`) or its name; an ID also works. A service that advertises `metergraph_workspace_hint_supported` gets it as `workspace_hint` and offers approval for that one workspace; where the name matches none or several of your workspaces, the consent page says so and sign in exits 2 (`workspace_hint_unknown` or `workspace_hint_ambiguous`, next action `use_workspace_slug`). Without that support, a name exits 6 (`workspace_name_unsupported`) before the browser opens, and a slug is checked after sign in. Sign in fails unless the browser grants this workspace (exit 11, `workspace_mismatch`). The match is strict, because anyone who owns a workspace chooses its name: text shaped like a slug (lower-case letters, digits and hyphens) matches only the slug, and other text only the exact name, ignoring case. Without it, the workspace you choose in the browser is used after the service confirms it. |
+| `--role ROLE` | `metadata` | `metadata`: the Metadata scope (`agent:metadata`). `debug`: the Debug role (`agent:read`), with the workflow permissions the options below add. Replay is never asked for. The read commands, `tools` and `status` then use the grant, and `status` and `login --json` report it in `data.access`. Rerunning with another role or other permissions than the saved grant signs in again for the same workspace and replaces it. |
+| `--allow-evaluation-writes` | off | With `--role debug`: Allow evaluation writes (`agent:eval-write`). Only a workspace owner can approve a workflow permission. Without `--role debug`, exits 2 with `permission_needs_debug` before any request. |
+| `--allow-evaluation-previews` | off | With `--role debug`: Allow evaluation previews (`agent:eval-preview`). |
+| `--allow-analysis-starts` | off | With `--role debug`: Allow analysis starts (`agent:analysis-run`), which replays captured prompts on model providers and spends money. |
 | `--project DIR` | current directory | Existing project directory to bind. |
 | `--config-dir DIR` | see below | Private per-user directory for the saved grant. |
 | `--timeout-ms N` | `300000` | How long to wait for the browser, 1000 to 900000. |
@@ -627,7 +631,7 @@ repository its own identity.
 
 | `environment` | How it is recognized | Recommended sequence |
 | --- | --- | --- |
-| `local_shell` | No marker below | `metergraph setup --runtime local --client C --json --no-browser`, rerun after each approval, then `metergraph status --json`. For an existing workspace, `metergraph login --runtime local --workspace UUID --json --no-browser`. |
+| `local_shell` | No marker below | `metergraph setup --runtime local --client C --json --no-browser`, rerun after each approval, then `metergraph status --json`. For an existing workspace, `metergraph login --runtime local --workspace SLUG --json --no-browser`. |
 | `local_container` | `/.dockerenv`, `/run/.containerenv`, `REMOTE_CONTAINERS`, `DEVCONTAINER` or `container` | As `local_shell`. The browser must reach the container's loopback callback (a forwarded port). If it cannot, use a Metadata key as below; `browser_unavailable` names that `alternative`. |
 | `ssh_session` | `SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY` | A Metadata key (below). `login` exits 6 `ssh_session` and `setup` exits 6 `run_on_local_machine`, each with a structured next action. |
 | `cloud_workspace` | `CODESPACES`, `GITPOD_WORKSPACE_ID` or `CLOUD_SHELL` | A Metadata key. `login` exits 6 `cloud_workspace`. |
@@ -1032,7 +1036,7 @@ sign in is used and the notice `agent_key_not_used` says so.
 | Option or variable | Meaning |
 | --- | --- |
 | `--url ORIGIN` / `METERGRAPH_URL` | Where the key is sent for an unbound project. Default `https://app.metergraph.dev`. A bound project's origin must match, or the command exits 8 `bound_to_other_origin` with no request. Because `.metergraph/project.json` is repository content, a key is sent to a non-hosted origin it names only when this machine holds a sign in for that origin or `--url` / `METERGRAPH_URL` confirms it; otherwise exit 8 `agent_key_origin_unconfirmed` (`confirm_origin`) with no request. |
-| `--workspace UUID` | The workspace the key must be for. A bound project pins its own. Without either, the key's own workspace is verified and used, with the notice `workspace_not_pinned`. |
+| `--workspace SLUG` | The workspace the key must be for, by its slug or name (or ID), checked against the workspace the service reports for the key (exit 11 `workspace_context_mismatch` otherwise). A bound project pins its own. Without either, the key's own workspace is verified and used, with the notice `workspace_not_pinned`. |
 
 Before any read, in order and under one `--timeout-ms` deadline:
 
@@ -1132,6 +1136,47 @@ and sends nothing to the experiments endpoints. A refusal by the service, for ex
 `over_budget`, `daily_budget_exhausted`, `experiments_in_progress`, `route_unpriced` or
 `no_replayable_calls`, exits 19 (`refused`) with the code, reason and any budget figures
 in `data.refusal`.
+
+### tools
+
+```sh
+metergraph tools list [--name TOOL] [read options] [--json]
+metergraph tools call TOOL [--args JSON | --args-file PATH] [--yes] [read options] [--json]
+```
+
+Every Agent Access tool the service offers this credential, through its MCP endpoint
+(`POST /v1/agent/mcp`, JSON-RPC `tools/list` and `tools/call`), as an MCP client calls
+it. The credential, origin and workspace are chosen and verified exactly as for the read
+commands (a saved sign in or a coding-agent key with the Metadata or Debug role; Replay is
+refused). The service decides which tools the credential sees: a Metadata credential gets
+the Metadata tools, the Debug role adds trace content and evaluation reads, and Allow
+evaluation writes, Allow evaluation previews and Allow analysis starts add the tools they
+name.
+
+- `list` sends `tools/list`. Each tool has `name`, `title`, `description`,
+  `input_schema` (the service's JSON schema), `read_only`, `open_world` and
+  `needs_confirmation`. `--name` shows one tool.
+- `call` sends `tools/list`, then one `tools/call` with the arguments from `--args` or the
+  file `--args-file` names: one JSON object, up to 1 MiB, never stdin. The tool's
+  structured result is in `data.result.result`.
+- A tool the service does not annotate `readOnlyHint: true`, or annotates
+  `openWorldHint: true` (it calls a model provider), has `needs_confirmation: true` and
+  runs only with `--yes`. Without it the command exits 18 (`action_required`,
+  `confirmation_required`) and calls nothing. A tool listed without annotations, as by an
+  older service, needs `--yes`. Pass `--yes` only after the person has approved that exact
+  call.
+
+| Result | Exit | `next_action.kind` |
+| --- | --- | --- |
+| The tool is not offered to this credential | 14 `tool_unavailable` | `list_tools` |
+| `--yes` missing for a tool that needs it | 18 `confirmation_required` | `confirm_tool_call` |
+| The tool refused the call (`isError`), or rejected its arguments | 19 `tool_error` or `tool_rejected`, with `data.tool_error` | `fix_tool_arguments` |
+| A call that needs `--yes` reached the service but its answer was lost | 20 `tool_call_unconfirmed` | `check_before_retry` |
+| `--args` or the file is not one JSON object | 2 `args_invalid` | none |
+
+The result and `data.tool_error` are the service's JSON. Before printing, the output is
+checked for the credential, as for every command, and C1 control and bidirectional
+characters are escaped as `\uXXXX`.
 
 ## JSON output
 

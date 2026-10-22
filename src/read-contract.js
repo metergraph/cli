@@ -1112,6 +1112,33 @@ export function combinePages(pages) {
   };
 }
 
+const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
+const MAX_WORKSPACE_NAME = 200;
+
+// A workspace document's slug and name, each kept only when it is safe to
+// print (a well-formed slug; a name with no control or bidirectional
+// characters), else null. This is how output names a workspace: never by ID.
+export function workspaceLabel(workspace) {
+  const slug = typeof workspace?.slug === "string" && SLUG.test(workspace.slug) ? workspace.slug : null;
+  const raw = workspace?.name;
+  const name = typeof raw === "string" && raw.trim() !== "" && raw.length <= MAX_WORKSPACE_NAME && !hasUnsafeText(raw)
+    ? raw : null;
+  return { slug, name };
+}
+
+// Whether a workspace document is the one a person named with --workspace.
+// Slugs are unique, names are not, and anyone who owns a workspace chooses
+// its name, including a workspace a person was invited to. So the match is
+// strict, for sign in and for every credential pin: text shaped like a slug
+// matches only the slug, and other text only the exact name, ignoring case.
+export function workspacePinned(workspace, text) {
+  const { slug, name } = workspaceLabel(workspace);
+  const wanted = text.trim().toLowerCase();
+  if (SLUG.test(wanted)) return slug === wanted;
+  return name !== null && name.trim().toLowerCase() === wanted;
+}
+
+
 // GET /v1/agent/workspace, already checked by checkWorkspace during the
 // session. Returns the approved workspace fields only.
 export function workspaceContext(body, ctx, notices) {

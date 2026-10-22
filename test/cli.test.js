@@ -66,6 +66,7 @@ test("help works offline in text and JSON form", async () => {
       "setup",
       "verify",
       "experiments",
+      "tools",
       "status",
       "context",
       "capabilities",
@@ -206,7 +207,7 @@ test("unknown commands, arguments and bad timeouts exit 2 without echo", async (
 
 test("every help topic keeps at least two spaces between a flag and its summary", async () => {
   for (const topic of [
-    "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments",
+    "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", "tools",
     "status", "context", "capabilities", "usage", "routes", "traces",
   ]) {
     const { stdout } = await runCli(["help", topic]);

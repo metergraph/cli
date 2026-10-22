@@ -3,7 +3,7 @@ import { verifiedSession } from "./auth-session.js";
 import { Stop } from "./auth-store.js";
 import { AUTH_PATHS, READ_MAX_BYTES } from "./constants.js";
 import { parseJsonObject } from "./http.js";
-import { capabilitySummary } from "./read-contract.js";
+import { capabilitySummary, workspaceLabel } from "./read-contract.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 import { traceReceipt, traceSelection } from "./trace-contract.js";
 import { openTrace } from "./trace-open.js";
@@ -47,7 +47,10 @@ export async function runVerify(options, dependencies = {}) {
     if (!sessionResult.ok) return end(sessionResult.outcome, sessionResult.reason);
     known = sessionResult.knownCredentials;
     const session = sessionResult.session;
-    const ctx = { origin: session.origin, workspaceId: session.workspaceId, profile: session.profile };
+    const ctx = {
+      origin: session.origin, workspaceId: session.workspaceId, profile: session.profile,
+      workspaceLabel: workspaceLabel(sessionResult.documents?.workspace?.workspace),
+    };
     const capabilities = capabilitySummary(sessionResult.documents.capabilities, ctx, new Set());
     if (!capabilities.ok) return end(capabilities.outcome, capabilities.reason);
     if (capabilities.value.agent.trace_metadata?.available !== true) return end("capability_unavailable", "capability_unavailable");
