@@ -1,6 +1,6 @@
 ---
 name: metergraph-analyze
-description: Take one classified Metergraph workload to a model-swap recommendation through a connected Agent Access server, checking readiness, sample count and provider credentials, confirming spend before starting an analysis, then polling the run and explaining the report. Use for analysis, cheaper-model or model-swap requests after setup is verified; use the metergraph skill first when not connected.
+description: Take one classified Metergraph workload to a model-swap recommendation through the metergraph CLI or the Agent Access MCP server, checking readiness, sample count and provider credentials, confirming spend before starting an analysis, then polling the run and explaining the report. Use for analysis, cheaper-model or model-swap requests after setup is verified; use the metergraph skill first only when neither the CLI nor MCP can read the workspace.
 ---
 
 # Analyze a workload for a model swap
@@ -10,48 +10,108 @@ workload move to a different model, and what would that do to quality and cost.
 It is stage 4 of the `metergraph-model-swap` loop. Choosing the workload,
 candidates and eval first (`metergraph-workloads`, `metergraph-candidates`,
 `metergraph-evals`) makes the result easier to act on, but is not required.
-It adds no tools, scopes or authority. When no Metergraph MCP server is
-connected, stop and use the `metergraph` skill for setup routing. Never ask
-for, echo, store or print a key, token or provider credential, and never read
-`.env` values aloud.
+It adds no tools, scopes or authority, and works the same through the
+`metergraph` CLI or the Agent Access MCP server (step 0). Never ask for, echo,
+store or print a key, token or provider credential, and never read `.env`
+values aloud.
 
-## 1. Confirm the deployment and the tools
+## 0. Discover what this agent can use
 
-1. Call `metergraph_get_workspace_context`, then `metergraph_get_capabilities`.
-   Confirm with the user that the workspace name, `provenance.workspace_id` and
-   `deployment_profile` are the installation they mean. Stop on a mismatch or an
-   authorization error.
-2. Plan only from what the server advertises. Reading needs
+Skip this when the conversation has already done it. The `metergraph` CLI and
+the Agent Access MCP server reach the same tools with the same key. Use
+whichever this agent has, and never tell the person the other one is missing.
+
+1. If `metergraph --help` lists `tools`, run `metergraph status --json` and
+   `metergraph capabilities --json`, then `metergraph tools list --json`.
+2. Otherwise, if Metergraph MCP tools are available, call
+   `metergraph_get_workspace_context`, then `metergraph_get_capabilities`.
+   Say nothing about the CLI.
+3. If the CLI is installed without `tools` and there are no Metergraph MCP
+   tools, check `npx --yes metergraph-cli@latest --help`. If it lists
+   `tools`, use it as the prefix. If it does not, these stages need the
+   Metergraph MCP connection: set it up with the `metergraph` skill and keep
+   using the CLI for the reads it has. Do not tell the person to upgrade the
+   CLI for `tools` unless a release's help lists it.
+4. If one path cannot read the intended workspace, use the other. Use the
+   `metergraph` skill for setup only when neither can.
+
+Say in one line which workspace (name and slug, never its ID) and deployment
+you reached, and stop if it is not the one the person means. Plan only with
+the tools listed. The steps below name each tool once. From the CLI, call one
+as `metergraph tools call <tool> --args '<json object>' --json` and read
+`data.result`. A tool that writes, starts work or calls a provider (annotation
+`readOnlyHint: false` or `openWorldHint: true`) also needs `--yes`: add it
+only when this skill's approval rule for that exact call is met. Exit code 18
+with reason `confirmation_required` means `--yes` was missing; ask the person.
+
+Name missing access by the job it does. **Read access** is the Metadata role
+(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
+**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
+previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
+`metergraph status --json` say which this key has (`available`, and the
+scopes still `missing`); over MCP, the capabilities' `available` flags do.
+Only a workspace owner grants loop access; **Loop access** in
+`metergraph-model-swap` says how on each deployment.
+
+## 1. Check the tools and access
+
+1. Confirm that `deployment_profile` is the installation the person means.
+   Stop on a mismatch or an authorization error that neither path gets past.
+2. Plan only from the tools step 0 listed. Reading needs
    `metergraph_list_classified_workloads`, `metergraph_get_workload_readiness`,
    `metergraph_get_model_readiness`, `metergraph_list_analysis_runs`,
    `metergraph_get_analysis_run`, `metergraph_list_reports` and
    `metergraph_get_report`. Starting needs `metergraph_start_analysis` and the
    `analysis_start` capability with `available: true`. Do not guess a tool name
-   or substitute a dashboard API, replay, generic SQL or a shell command.
-3. Reading needs metadata only; starting adds `agent:analysis-run`. The start
-   capability is classed `replay` because the run sends captured content to
-   providers, but it does not need `agent:read` or `agent:replay`. Do not
-   request those, read trace content or report evidence, or replay a trace to
+   or substitute a dashboard API, replay, generic SQL or an ad hoc shell
+   command.
+3. Reading needs read access. Starting needs the Debug role plus **Allow
+   analysis starts** (`agent:read` and `agent:analysis-run`), both part of loop
+   access. The start capability is classed `replay` because the run sends
+   captured content to providers, but it does not need `agent:replay`. Do not
+   request replay, read trace content or report evidence, or replay a trace to
    reach a recommendation.
 
-## 2. When the start tool is missing
+## 2. When start access is missing
 
-`metergraph_start_analysis` needs a coding-agent key with the Debug role and
-**Allow analysis starts** (scope `agent:analysis-run`). `metergraph setup` and
-the default OAuth sign-in cannot grant it. If the tool is absent or the
-capability is unavailable, keep going with the read steps below, then tell the
-user:
+`metergraph setup` and the default sign-in grant read access only. Starting
+needs only the Debug role and **Allow analysis starts**; the evaluation
+permissions belong to the full model-swap workflow, not to this step. If
+`metergraph_start_analysis` is not listed or `analysis_start` is unavailable,
+keep going with the read steps below, then tell the person once what to grant
+for their deployment (`deployment_profile`):
 
-1. A workspace owner opens the **Keys** page in the Metergraph app, creates a
-   coding-agent key with the Debug role and turns on **Allow analysis starts**.
-2. The user puts the key in their MCP client configuration themselves, as an
-   environment variable the configuration references (for example
-   `METERGRAPH_AGENT_TOKEN`), and restarts the client.
-3. They come back here; you repeat step 1 and confirm the tool is now listed.
+- **Hosted** (`managed`). When the agent has a shell and `metergraph help
+  login` lists `--access`, run `metergraph login --access loop` with the
+  runtime and approval flags the `metergraph` skill uses for `login`; a
+  workspace owner approves the request on the consent page. Otherwise a
+  workspace owner creates a coding-agent key on the **Keys** page with the
+  **Model-swap loop** access choice. The person saves it in their own editor
+  as `export METERGRAPH_AGENT_TOKEN=…` in a private file outside the project
+  (for example `~/.config/metergraph/agent.env`), runs
+  `. ~/.config/metergraph/agent.env` in the shell that starts the agent, and
+  restarts the agent.
+- **Customer-local bundle** (`local`). The bundle's `bin/agent-key`, as
+  `metergraph-local-bundle` describes. Explain what each grant allows; run
+  `./bin/agent-key create --role debug --allow-analysis-starts --write-to ~/.config/metergraph/agent.env`
+  (add `--allow-evaluation-writes --allow-evaluation-previews` only if they also
+  want the agent to write and test evaluations)
+  in the bundle directory (adding `--yes`) only after the person agrees to
+  exactly that access, or let them run it in their own terminal. Never add a
+  grant they did not agree to. They load the file and restart the agent as
+  above. A bundle without the command uses its own **Keys** page.
+- **Customer-owned AWS** (`byoc-core`) **or the open-source server.** Loop
+  access is not offered there: there are no managed evaluations and no trace
+  content. Say so once and stop before the start step.
 
-Do not ask them to paste the key into chat, and do not write it to a file for
-them. Until the tool appears, the run can also be started from the analysis
-page in the Metergraph app.
+The same `METERGRAPH_AGENT_TOKEN` serves the CLI and an MCP configuration that
+references it; a client without a shell takes the key in its private connector
+settings, as the `metergraph` skill describes. Do not ask them to paste the key
+into chat, and never handle the token or write it to a file yourself. When
+they come back, run step 0 again and confirm the start tool is now listed.
+Until then, on a deployment that offers analyses, the run can also be started
+from the analysis page in the Metergraph app.
 
 ## 3. Choose a workload and check readiness
 
@@ -60,7 +120,8 @@ page in the Metergraph app.
    (`source_run_id`, `pattern_id`, `pattern_set_version`). Keep the selection
    reference exactly as returned; the name is a label, not identity. An empty
    list with `no_traces` or `classification_pending` means there is nothing to
-   analyze yet: say so and point to sending more traffic.
+   analyze yet: say so and point to sending more traffic, or see
+   `metergraph-workloads` step 5 on starting a classification.
 2. For the workload the user cares about, `metergraph_get_workload_readiness`
    with that selection reference. Report `blocking_reasons`, the
    `counts` (classified, retained, eligible by capture metadata, missing) and
@@ -106,7 +167,12 @@ restate what you are starting and proceed. Otherwise ask and wait.
    example `analyze-<pattern_id>-<date>`, and keep it. Call
    `metergraph_start_analysis` with `request_key` and `pinned_workload` set to
    the selection reference. Add `reference_binding_id` only if the user chose
-   one.
+   one. From the CLI, `--yes` stands for the confirmation in section 4; never
+   add it before that:
+
+   ```sh
+   metergraph tools call metergraph_start_analysis --args '{"request_key": "analyze-<pattern_id>-<date>", "pinned_workload": <selection_reference>}' --yes --json
+   ```
 2. Keep `run.run_id`, the returned `pinned_inputs` (capture window, profile,
    `execution_limits`) and every warning. `request.replayed: true` means the
    same request already existed; that is the same run, not a new one.
@@ -115,8 +181,9 @@ restate what you are starting and proceed. Otherwise ask and wait.
    changed arguments (`idempotency_conflict`). On `analysis_active`, follow
    the returned run instead of starting another. On `precondition_failed`,
    report the `reason` and stop.
-4. Poll `metergraph_get_analysis_run` with the `run_id` at a modest interval
-   (about every 30 to 60 seconds). Do not restart a run because it is slow.
+4. Poll `metergraph_get_analysis_run` with the `run_id` (from the CLI,
+   `metergraph tools call metergraph_get_analysis_run --args '{"run_id": "<run_id>"}' --json`)
+   at a modest interval (about every 30 to 60 seconds). Do not restart a run because it is slow.
    Stop polling when the status is final, and say if it failed, with its
    `error_code`.
 5. After the start and after every poll, write a progress report in the

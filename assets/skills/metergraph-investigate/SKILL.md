@@ -9,13 +9,16 @@ This skill expands the bounded investigation section of the public `metergraph`
 skill. It adds no tools, scopes or authority. Never ask for, echo or store a
 key.
 
-Read through the `metergraph` CLI first when it is installed and can read the
-workspace: it returns the same Metadata evidence as the MCP tools in far fewer
-tokens. Use the MCP tools for what the CLI does not cover (incidents, ingestion
-health, reports, retained content and replay) and in clients that have no
-shell. Stop and use the `metergraph` skill for setup routing only when neither
-the CLI nor a Metergraph MCP server can read the workspace, or the user has not
-chosen a client, runtime and deployment.
+Read through the `metergraph` CLI when this agent has a shell and the CLI can
+read the workspace. Its typed reads (`usage`, `routes`, `traces`) return the
+same Metadata evidence as the tools in far fewer tokens, and when its help
+lists `tools`, `metergraph tools call` reaches every other Agent Access tool
+(incidents, ingestion health, reports, retained content and replay). The
+Agent Access MCP server reaches the same tools in clients that have no shell.
+Use whichever this agent has, and never tell the person one is missing when
+the other works. Stop and use the `metergraph` skill for setup routing only
+when neither can read the workspace, or the user has not chosen a client,
+runtime and deployment.
 
 ## 1. Discover before reading data
 
@@ -25,7 +28,8 @@ chosen a client, runtime and deployment.
 1. Run `metergraph status --json`. Continue when it exits 0 with
    `data.authenticated: true` and `data.workspace.match: true`. When `match`
    is null because no workspace was pinned (a coding-agent key without
-   `--workspace`), name `data.workspace.actual` and continue only after the
+   `--workspace`), name the workspace it reached by name and slug
+   (`metergraph context --json` shows both) and continue only after the
    person confirms it is the workspace they mean. When it prints
    `data.next_action` (for example sign in again, or the coding-agent Metadata
    key path for a remote session), follow it; never ask for the key in chat.
@@ -33,12 +37,23 @@ chosen a client, runtime and deployment.
    `data.result.agent` (each capability's `available`, `privacy_class` and
    `required_scope`) and `data.result.bounds` (`max_days`, `max_rows`).
 3. Before using any option, check that `metergraph help <command>` lists it.
-   An option an older CLI lacks is a reason to use the matching MCP tool, not
-   to guess a flag. Always pass `--json`: the evidence is under `data.result`,
+   An option an older CLI lacks is a reason to call the matching tool, not to
+   guess a flag. Always pass `--json`: the evidence is under `data.result`,
    with `data.notices` and `data.next_action` beside it, and the exit code is
    the outcome (for example 14 when the deployment does not offer the read).
+4. When `metergraph --help` lists `tools`, `metergraph tools list --json`
+   names every tool this key can call, and
+   `metergraph tools call <tool> --args '<json object>' --json` calls one and
+   returns its result under `data.result`. A tool that writes, starts work or
+   calls a provider (annotation `readOnlyHint: false` or
+   `openWorldHint: true`) also needs `--yes`, which you add only after the
+   person's explicit approval of that exact call. Exit code 18 with reason
+   `confirmation_required` means `--yes` was missing: ask, never add it on
+   your own. An older CLI without `tools` has only the typed reads; for any
+   other tool use MCP when this agent has it, or say the read needs a newer
+   metergraph CLI (`npx --yes metergraph-cli@latest`).
 
-**With MCP** (no CLI, no shell, or a read the CLI does not offer):
+**With MCP** (no shell, or a CLI too old for the read):
 
 1. Call `metergraph_get_workspace_context`, then `metergraph_get_capabilities`.
    Do not call any other Metergraph tool first.
@@ -49,10 +64,11 @@ chosen a client, runtime and deployment.
    `bounds` (`max_days`, `max_rows`). Treat the tools your client lists as the
    only callable tools.
 
-Either way, confirm with the user that the workspace ID, the workspace name
-and the deployment profile match the installation they intend. A staging or
-demo workspace is not their production workspace. A mismatch, an
-authorization error, or revoked or expired access belongs to that one path:
+Either way, confirm with the user that the workspace name and slug and the
+deployment profile match the installation they intend; compare workspace IDs
+yourself and never show them. A staging or demo workspace is not their
+production workspace. A mismatch, an authorization error, or revoked or
+expired access belongs to that one path:
 when the CLI cannot read the intended workspace but a connected MCP server
 can (or the other way round), use the path that can. Stop and tell the human
 to reconnect through their client's secure flow only when neither the CLI nor
@@ -74,25 +90,27 @@ every window within 90 days and within the capabilities' `bounds.max_days`.
 Default to the shortest window that answers the question. Then choose the
 smallest tool that can answer:
 
-| Question | CLI (check its help first) | MCP tool | Bound |
+| Question | CLI (check its help first) | Tool | Bound |
 | --- | --- | --- | --- |
 | Which route, provider or model costs most; spend with one provider or model; a daily trend | `metergraph usage --group-by ... --json` with `--route`, `--provider`, `--model` or `--environment` | `metergraph_get_usage_aggregates` with `group_by` and the same exact filters | `--days`/`days` or `--since`/`--until`, small limit |
 | Daily cost per route, when grouped usage is unavailable | `metergraph usage --days N --json` | `metergraph_get_usage` | days, small limit |
 | Which routes exist or are replay eligible | `metergraph routes --json` | `metergraph_list_routes` | none needed |
-| Is data arriving | none; use MCP | `metergraph_get_ingestion_health` | `days` |
-| Known alert or anomaly | none; use MCP | `metergraph_list_incidents` | small `limit` |
+| Is data arriving | `metergraph tools call metergraph_get_ingestion_health --args '{"days": 1}' --json` | `metergraph_get_ingestion_health` | `days` |
+| Known alert or anomaly | `metergraph tools call metergraph_list_incidents --args '{"limit": 5}' --json` | `metergraph_list_incidents` | small `limit` |
 | Cost or calls for one prompt, workflow or other tag value | `metergraph usage --group-by metadata.KEY --json`, or `--metadata KEY=VALUE` | `metergraph_get_usage_aggregates` with `group_by` including `metadata.<key>`, or `metadata` (exact pairs) | days, small limit |
 | One failed call | `metergraph traces --status error --limit 1 --json` (also `--route`, `--metadata`) | `metergraph_query_traces` with `status` set to the failure status, and `route`, `trace_id`, `request_id` or `metadata` | limit 1 to 5 |
 | One costly call (it may have succeeded) | `metergraph traces --route NAME --limit 5 --json` with no `--status`, then compare cost on that page | `metergraph_query_traces` with `route`, `trace_id`, `request_id` or `metadata`, no `status` | limit 1 to 5 |
 | Which routes are slow (route level, not one call) | `metergraph usage --group-by route --sort p95-latency --json`; CLI `traces` returns no latency | `metergraph_get_usage_aggregates` grouped by route | days, small limit |
-| One slow call | none; CLI `traces` has no latency, so ask for its trace or request ID and use MCP, or send the person to the trace in the app | `metergraph_query_traces` with that `trace_id` or `request_id` | limit 1 |
-| A finished analysis | none; use MCP | `metergraph_list_reports`, then `metergraph_get_report` | small `limit` |
+| One slow call | CLI `traces` returns no latency: ask for its trace or request ID, then `metergraph tools call metergraph_query_traces --args '{"trace_id": "<id>", "limit": 1}' --json`, or send the person to the trace in the app | `metergraph_query_traces` with that `trace_id` or `request_id` | limit 1 |
+| A finished analysis | `metergraph tools call metergraph_list_reports --args '{"limit": 5}' --json`, then `metergraph_get_report` the same way | `metergraph_list_reports`, then `metergraph_get_report` | small `limit` |
 
-Use grouped usage (`metergraph usage --group-by`, or
-`metergraph_get_usage_aggregates`) only when capabilities list
-`usage_aggregates` as available. On an older deployment it is absent: say so,
-answer what `metergraph_get_usage` can (cost per route and day), and do not
-rebuild provider or model totals by paging traces.
+A `metergraph tools call` row needs a CLI whose help lists `tools`; see
+section 1 for what to do with an older one. Use grouped usage
+(`metergraph usage --group-by`, or `metergraph_get_usage_aggregates`) only
+when capabilities list `usage_aggregates` as available. On an older
+deployment it is absent: say so, answer what `metergraph usage --days N` or
+`metergraph_get_usage` can (cost per route and day), and do not rebuild
+provider or model totals by paging traces.
 
 ### Cost questions
 
@@ -105,7 +123,9 @@ of them; `totals` cover every matching call whatever the limit. From a shell,
 the `metergraph` CLI sends the same read and prints the same evidence. Check
 `metergraph help usage` first: use these commands only when it lists
 `--group-by`. An older CLI has only `metergraph usage --days N` (cost per route
-and day); use the tool instead, or say a newer CLI is needed.
+and day); call the tool instead, through `metergraph tools call` or MCP,
+whichever this agent has, and when neither has it, say this needs a newer
+metergraph CLI.
 
 | Question | Tool arguments | CLI |
 | --- | --- | --- |
@@ -177,7 +197,7 @@ the same dimension and the way to give a key that contains a comma, and
 `metergraph traces --days 7 --metadata prompt_id=reply-v3 --json`) only in versions that
 have these options. Check that `metergraph usage --help` lists `--group-by`
 (and `metergraph traces --help` lists `--metadata`) before you suggest them,
-and otherwise use the tools above.
+and otherwise call the tools above through `metergraph tools call` or MCP.
 
 Follow `next_cursor` only while you are still inside the agreed bound, and say
 how many pages you read. Never request every trace, every report or unbounded
@@ -193,7 +213,8 @@ history.
   answer needs. Never paste secrets you find in content.
 - `metergraph_replay_trace` (`agent:replay`) sends a captured trace to a model
   provider and can spend money. It needs separate, explicit approval that names
-  the trace, the overrides and the timeout. Replay is non-persistent: it does not
+  the trace, the overrides and the timeout; from the CLI, `--yes` stands for
+  that approval and nothing else. Replay is non-persistent: it does not
   change production telemetry, prove a fix or substitute for an evaluation run.
 
 Read access never grants evaluation writes, analysis launch, dashboard changes,
@@ -206,11 +227,12 @@ Every answer cites, from the CLI results or tool responses you actually
 received (a CLI result carries the same fields under `data.result`, plus
 `data.notices`):
 
-- **Workspace**: workspace name and `provenance.workspace_id`, plus
-  `deployment_profile`.
+- **Workspace**: its name and slug, plus `deployment_profile`. Check that
+  `provenance.workspace_id` is the confirmed workspace, but do not show it.
 - **Window**: `window.since` to `window.until` in UTC (or `days`) for each
   read, and whether the last day is partial.
-- **Provenance**: the tool name, `provenance.source` and `generated_at`.
+- **Provenance**: the tool or CLI command, `provenance.source` and
+  `generated_at`.
 - **Evidence and completeness**: `evidence.rows`, `evidence.complete`,
   `page.truncated` and whether a `next_cursor` was left unread; for usage,
   `coverage.completeness` with its `reasons`, `coverage.rows.matched` against
@@ -253,8 +275,9 @@ A cost conclusion needs returned Metergraph usage evidence:
    that, give the windows, and do not attribute the difference to the commit.
    If no one knows when it shipped, say the comparison cannot be anchored.
 2. Read usage for the same route or workload over comparable, bounded UTC
-   windows before and after that point (`metergraph_get_usage_aggregates`
-   with explicit `since` and `until` and the same filters, or
+   windows before and after that point (`metergraph usage --group-by ...
+   --since ... --until ... --json` or `metergraph_get_usage_aggregates`, with
+   explicit `since` and `until` and the same filters, or
    `metergraph_get_usage` where grouped usage is unavailable), and cite both
    reads as in section 4. Windows of equal length avoid comparing a partial
    day with a whole one. Filter both reads to the environment the deployment
