@@ -665,6 +665,8 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "--skip-skill is explicit. Non-hosted setup requires an explicit origin, workspace and",
       "operator prerequisite attestation; OSS remains an operator handoff. No application",
       "traffic is claimed until an exact instrumented invocation is separately verified.",
+      "", "At a terminal without --json, setup asks for any of these it needs that are",
+      "missing, prints the full command, then runs it. Scripts and agents get no questions.",
       "", "Options:");
     lines.push(...optionLines(helpData(null).commands.find((entry) => entry.name === "setup").options, 25));
     lines.push("", ...AGENT_APPROVAL_HELP);

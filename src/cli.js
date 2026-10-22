@@ -1,4 +1,3 @@
-import { interactiveArgs } from "./interactive.js";
 import { runPricing } from "./pricing.js";
 import { pricingText, pricingHtml } from "./pricing-output.js";
 import { READ_COMMANDS, parseArgs } from "./args.js";
@@ -24,25 +23,30 @@ import { readMessage, readText } from "./read-output.js";
 import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
 import { containsKnownCredential, preflightNonHostedSetup, prerequisiteGuide, resumeNonHostedRoute } from "./setup-deployment.js";
-import { EXIT_CODES, VERSION } from "./constants.js";
+import {
+  ASKABLE,
+  agentAccessOffer,
+  canAsk,
+  commandLine,
+  fillSetupArgv,
+  fillLoginArgv,
+  offerAgentAccess,
+  terminalPrompter,
+} from "./setup-interactive.js";
+import { VERSION } from "./constants.js";
 import { createStyle, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 import { runVerify } from "./verify.js";
 import { verifyMessage, verifyText } from "./verify-output.js";
 
 // Runs one command and resolves with the exit code. With --json, stdout gets
 // exactly one JSON line and stderr stays empty. Without it, results go to
-// stdout and usage or internal errors go to stderr. Setup prompts only in a local
-// terminal.
-export async function main(argv, { stdout, stderr, stdin, env, choose }) {
+// stdout and usage or internal errors go to stderr. Only setup reads stdin,
+// and only to ask a person at a terminal (see setup-interactive.js).
+export async function main(argv, { stdout, stderr, stdin = null }) {
   const json = argv.includes("--json");
   let result;
   try {
-    const prepared = await interactiveArgs(argv, { stdin, stdout, stderr, env, choose });
-    if (prepared === null) {
-      stderr.write("Setup cancelled. Nothing was changed.\n");
-      return EXIT_CODES.cancelled;
-    }
-    result = await run(prepared, { stdout, stderr });
+    result = await run(argv, { stdout, stderr, stdin });
   } catch {
     result = envelope({
       command: null,
@@ -56,9 +60,38 @@ export async function main(argv, { stdout, stderr, stdin, env, choose }) {
   return result.exit_code;
 }
 
-async function run(argv, { stdout, stderr }) {
-  const parsed = parseArgs(argv);
+async function run(argv, { stdout, stderr, stdin }) {
+  let parsed = parseArgs(argv);
   const style = createStyle(stdout);
+  const say = (...lines) => stdout.write(lines.map((line) => `${line}\n`).join(""));
+  const asking = canAsk(argv, { stdin, stdout, stderr });
+
+  if (asking && parsed.command === "login") {
+    argv = fillLoginArgv(argv);
+    parsed = parseArgs(argv);
+  }
+
+  // A person at a terminal is asked for what setup is missing; the answers
+  // become flags and go through the same parsing as a script's.
+  if (parsed.command === "setup" && !parsed.ok && ASKABLE.has(parsed.code) && asking) {
+    const prompter = terminalPrompter(stdin, stdout);
+    let filled;
+    try {
+      filled = await fillSetupArgv(argv, { ask: prompter.ask, say });
+    } finally {
+      prompter.close();
+    }
+    if (filled === null) {
+      stderr.write("Setup was cancelled. Nothing was changed.\n");
+      return envelope({ command: "setup", outcome: "cancelled", reason: "questions_cancelled",
+        message: "Setup was cancelled. Nothing was changed." });
+    }
+    argv = filled;
+    parsed = parseArgs(argv);
+    // Only a command that parses is shown: a value the parser refuses may be
+    // a mistyped credential, and its error never echoes input.
+    if (parsed.ok) say("", `Running: ${commandLine(filled)}`, "");
+  }
 
   if (!parsed.ok) {
     const result = envelope({
@@ -73,10 +106,8 @@ async function run(argv, { stdout, stderr }) {
       const [first, ...rest] = paragraph(errorStyle, `Error: ${parsed.message}`, "");
       const help = parsed.command && parsed.command !== "help"
         ? `metergraph ${parsed.command} --help` : "metergraph --help";
-      stderr.write(render([
-        first.replace(/^Error:/, errorStyle.red("Error:")), ...rest,
-        "", ...steps(errorStyle, [["Help", help]]),
-      ]));
+      stderr.write(render([first.replace(/^Error:/, errorStyle.red("Error:")), ...rest,
+        "", ...steps(errorStyle, [["Help", help]])]));
     }
     return result;
   }
@@ -134,18 +165,30 @@ async function run(argv, { stdout, stderr }) {
       ? await runSetup({ ...options, expectedProfile: routed.profile ?? null, announce: pending.announce }, progress)
       : routed;
     if (pending.result) return pending.result;
-    const { outcome, reason, data } = response;
+    const { outcome, reason } = response;
+    // The customer-local bundle can give the agent more than Metadata
+    // without a sign in; say how.
+    const offer = outcome === "ok" && routed.profile === "local";
+    const data = offer ? { ...response.data, agent_access: agentAccessOffer(options.origin) } : response.data;
     let result = envelope({ command: "setup", outcome, reason, data,
       message: outcome === "ok" ? null : "Setup did not complete. Review the reason and retry safely." });
     if (containsKnownCredential(result, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
     }
-    const human = setupText(result, style);
+    const human = setupText(result, style, { asking });
     if (containsKnownCredential(human, routed)) {
       result = envelope({ command: "setup", outcome: "unsupported", reason: "credential_echo" });
       stdout.write(parsed.json ? toJsonLine(result) : "Setup stopped.\n");
-    } else {
-      stdout.write(parsed.json ? toJsonLine(result) : human);
+      return result;
+    }
+    stdout.write(parsed.json ? toJsonLine(result) : human);
+    if (offer && asking && result.ok) {
+      const prompter = terminalPrompter(stdin, stdout);
+      try {
+        await offerAgentAccess({ client: options.client, origin: options.origin, prompter, say });
+      } finally {
+        prompter.close();
+      }
     }
     return result;
   }
@@ -256,7 +299,7 @@ const SETUP_TITLES = {
   operator_handoff: "Setup is waiting on the operator",
 };
 
-function setupText(result, style) {
+function setupText(result, style, { asking = false } = {}) {
   const data = result.data;
   const status = data?.status ?? "not_ready";
   const title = SETUP_TITLES[status] ?? (result.ok ? `Setup: ${status}` : "Setup did not complete");
@@ -285,7 +328,21 @@ function setupText(result, style) {
   lines.push(...remoteLines(data, style));
   lines.push(...budgetLines(data, style));
   if (result.ok) lines.push(...steps(style, [["", "Instrument your application and verify an exact trace."]]));
+  // At a terminal the offer is a question asked next instead.
+  if (data?.agent_access && !asking) lines.push(...agentAccessLines(data.agent_access, style));
   return render(lines);
+}
+
+// How to give the agent more than Metadata on the customer-local bundle.
+function agentAccessLines(access, style) {
+  const offer = access.offer;
+  return ["", ...steps(style, [
+    ["", "Your coding agent has Metadata access. To let it write evaluations and start analyses, " +
+      "run this in the bundle directory. It shows what it grants and asks you to confirm, then writes " +
+      "the key to that file without printing it."],
+    ["In the bundle directory", style.bold(offer.command)],
+    ["Bundle without bin/agent-key", offer.keys_page_url],
+  ]), ""];
 }
 
 // What an operator handoff is waiting for, in fixed text: each unconfirmed

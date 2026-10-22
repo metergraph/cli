@@ -38,11 +38,10 @@ adds an action descriptor while retaining the existing command catalog. Examples
 and relevant options come before operational details in command help. Short
 synopses avoid repeating every optional flag in the first line.
 
-In a local terminal, `metergraph setup` supplies the local runtime and asks for
-Codex, Claude Code, Cursor or an explicit skip. `metergraph login` supplies the
+In a local terminal, `metergraph setup` uses the existing setup flow to choose a deployment
+and Codex, Claude Code, Cursor or an explicit skip. `metergraph login` supplies the
 local runtime. All three streams must be terminals. JSON, CI, SSH and cloud
-workspaces retain explicit non-interactive flags. The full command is validated
-before a prompt appears, including any explicit deployment prerequisites. EOF
+workspaces retain explicit non-interactive flags. Answers become ordinary flags and pass through the same validation as scripts. EOF
 and Ctrl+C cancel without starting setup. Browser consent and credential checks
 continue through the existing setup implementation.
 

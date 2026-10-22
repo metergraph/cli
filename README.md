@@ -109,7 +109,11 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   `schema_version`, `command`, `ok`, `outcome`, `exit_code`, `data` and `error`.
   Failures carry a fixed `error.reason` and, where useful, a `data.next_action` that
   tells the agent what to do next.
-- **No hidden prompts.** No command reads stdin or asks a question. `--no-browser`
+- **No hidden prompts.** Only `setup` asks questions, and only a person at a terminal:
+  with stdin and stdout both terminals, no `--json` and no `CI`, it asks for what its
+  flags leave out and prints the full command before running it. Otherwise no command
+  reads stdin or asks a question, so an agent or script gets the same flag errors as
+  before. `--no-browser`
   prints the sign in URL for a person to open instead of launching a browser. With
   `--json`, a step that needs approval exits within seconds with 18
   `action_required` and `data.next_action` set to
