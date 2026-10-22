@@ -94,6 +94,23 @@ test("flags already given are kept and never asked for", async () => {
   assert.ok(!asked.some((question) => question.includes("Address")));
 });
 
+test("client choices accept their displayed labels without retrying", async () => {
+  for (const [label, flags] of [
+    ["Claude Code", ["--client", "claude"]],
+    ["cLaUdE cOdE", ["--client", "claude"]],
+    ["Codex", ["--client", "codex"]],
+    ["Cursor", ["--client", "cursor"]],
+    ["None (skip installing the skill)", ["--skip-skill"]],
+    ["Skip skill installation", ["--skip-skill"]],
+  ]) {
+    const { filled, asked, said } = await fill(["setup", "--deployment", "managed"], [label]);
+    assert.deepEqual(filled, ["setup", "--deployment", "managed", "--runtime", "local", ...flags]);
+    assert.equal(asked.length, 1);
+    assert.ok(!said.includes("Enter a number from 1 to 4."));
+    assert.equal(parseArgs(filled).ok, true);
+  }
+});
+
 test("a project set up before resumes its route without the deployment questions", async () => {
   const { filled, asked } = await fill(["setup"], ["1"], { saved: "local" });
   assert.deepEqual(filled, ["setup", "--runtime", "local", "--client", "claude"]);

@@ -4,6 +4,17 @@ import { parseArgs } from "../src/args.js";
 import { helpText, helpData } from "../src/output.js";
 import { main } from "../src/cli.js";
 
+test("pricing action help offers reference mode only for supported actions", () => {
+  for (const action of ["models", "calculate"]) {
+    assert.ok(!helpData("pricing", action).action.options.some(o => o.name === "--api"));
+    assert.doesNotMatch(helpText("pricing", undefined, action, true), /--api|reference/i);
+  }
+  for (const action of ["lookup", "cost", "market", "history"]) {
+    assert.match(helpData("pricing", action).action.options.find(o => o.name === "--api").summary, /reference/i);
+    assert.match(helpText("pricing", undefined, action, true), /--api/);
+  }
+});
+
 for (const [topic, actions] of Object.entries({ pricing: ["models", "lookup", "calculate", "cost", "market", "history"],
   experiments: ["list", "estimate", "start", "get"], skill: ["install", "update"], skills: ["install", "update", "list"] })) {
   test(`${topic} actions have focused offline help in both spellings and JSON`, async () => {

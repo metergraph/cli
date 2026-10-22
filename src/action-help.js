@@ -52,7 +52,8 @@ export function actionHelpData(topic, action, commands) {
       return o;
     });
     return { summary, usage: `metergraph pricing ${action} ${usage} [options]`,
-      options: [...focused, ...pricingCommon.filter(o => !options.some(specific => specific.name === o.name))], examples: [example.replace("pricing calculate", `pricing ${action}`)], note };
+      options: [...focused, ...pricingCommon.filter(o => !options.some(specific => specific.name === o.name)
+        && !(o.name === "--api" && ["models", "calculate"].includes(action)))], examples: [example.replace("pricing calculate", `pricing ${action}`)], note };
   }
   if (topic === "experiments") {
     const entry = commands.find(c => c.name === topic);
