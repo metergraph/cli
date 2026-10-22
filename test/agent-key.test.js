@@ -482,3 +482,40 @@ test("with a Metadata key, status reports no permissions and says how to grant t
     assert.match(human.stdout, /\.\/bin\/agent-key create --role debug/);
   });
 });
+
+test("Debug status derives content access from available content capabilities", async () => {
+  for (const contentAvailable of [false, true]) {
+    await withServer({
+      debugTokens: [DEBUG_KEY],
+      capabilities: (doc) => ({
+        ...doc,
+        agent: Object.fromEntries(Object.entries(doc.agent).map(([name, entry]) => [
+          name, entry.content === true ? { ...entry, available: contentAvailable } : entry,
+        ])),
+      }),
+    }, async (server) => {
+      const box = sandbox();
+      const env = keyed(server, { METERGRAPH_AGENT_TOKEN: DEBUG_KEY });
+      const { run, result } = await read(box, ["status"], env);
+      assert.equal(run.code, 0, run.stdout);
+      assert.equal(result.data.content_access, contentAvailable);
+      const human = await runCli(["status", "--project", box.project, "--config-dir", box.config], {
+        env: { ...LOCAL_ENV, ...env },
+      });
+      assert.equal(human.code, 0, human.stdout);
+      assert.ok(human.stdout.includes(contentAvailable
+        ? "available to this credential; the read commands never request it"
+        : "not available to this credential"));
+    });
+  }
+});
+
+test("experiment help and reference describe Debug reads and all workflow permissions", async () => {
+  const run = await runCli(["help", "experiments"]);
+  assert.equal(run.code, 0, run.stdout);
+  assert.match(run.stdout, /For list, estimate and get: a key with the Metadata or Debug role/);
+  const reference = fs.readFileSync(new URL("../docs/reference.md", import.meta.url), "utf8");
+  assert.match(reference, /workflow requires the Debug role with all three permissions: Allow evaluation\n   writes, Allow evaluation previews and Allow analysis starts/);
+  assert.match(reference, /accept keys with the Metadata or Debug role and send only Metadata requests/);
+  assert.ok(!reference.includes("refuse a key that holds more than Metadata access"));
+});
