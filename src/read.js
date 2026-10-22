@@ -2,7 +2,7 @@ import { agentKeySource, keySession, keyTarget, readAgentKey } from "./agent-key
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { checkDeployment } from "./doctor.js";
 import { sessionFor } from "./auth-session.js";
-import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.js";
+import { Stop, openStore, readProjectCredential, resolveConfigDir } from "./auth-store.js";
 import {
   DEFAULT_ORIGIN,
   MAX_BODY_BYTES,
@@ -104,9 +104,10 @@ export async function runRead(options) {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
         data: build("verification_failed", null),
+        validateOutput: (text) => !outputHoldsKnown(text, known),
       };
     }
-    return { outcome, reason, data };
+    return { outcome, reason, data, validateOutput: (text) => !outputHoldsKnown(text, known) };
   };
   // A deadline or Ctrl+C reported by a lower layer as a timeout or
   // cancellation is reported here by what actually happened.
@@ -139,7 +140,7 @@ export async function runRead(options) {
     if (binding !== null) {
       try {
         store = openStore(configDir, { create: false });
-        const record = store === null ? null : readCredential(store, binding.credential_slot);
+        const record = store === null ? null : readProjectCredential(store, binding.credential_slot, root);
         grantSaved = record !== null;
         originConfirmed = record !== null && record.origin === binding.origin;
       } catch (error) {
@@ -639,4 +640,13 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
     };
   }
   return null;
+}
+
+// The final renderer may join independent service fields or insert styling.
+// Check exact emitted bytes and their terminal-visible equivalent.
+export function outputHoldsKnown(text, known) {
+  const visible = (value) => value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").normalize("NFKC");
+  return holdsKnown(text, known) || known.some((secret) => visible(text).includes(visible(secret)));
 }

@@ -232,3 +232,35 @@ test("a handoff names each unconfirmed prerequisite with fixed guidance and send
   assert.equal(server.requests.length, 0);
   assert.deepEqual(projectFiles(box), []);
 });
+
+test("a copied public setup route cannot send an existing token to a different service", async () => {
+  const owner = await serve();
+  const attacker = await serve();
+  const box = boxFor();
+  assert.equal((await cli(box, route(owner))).result.outcome, "ok");
+  const env = read(box, ".env");
+  const stateFile = path.join(box.project, ".metergraph/setup.json");
+  const state = JSON.parse(fs.readFileSync(stateFile));
+  state.origin = attacker.origin;
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  fs.unlinkSync(path.join(box.project, ".metergraph/project.json"));
+  const run = await cli(box, route(attacker));
+  assert.equal(run.result.error.reason, "ingest_url_mismatch");
+  assert.equal(signInRequests(attacker).length, 0);
+  assert.deepEqual(read(box, ".env"), env);
+});
+
+test("saved setup origins reject terminal controls and noncanonical URLs without echo", async () => {
+  const server = await serve();
+  const box = boxFor();
+  assert.equal((await cli(box, route(server))).result.outcome, "ok");
+  const file = path.join(box.project, ".metergraph/setup.json");
+  const state = JSON.parse(fs.readFileSync(file));
+  for (const origin of ["https://example.com\u001b]0;spoof\u0007", "https://example.com\nspoof", "https://example.com\u0085", "https://example.com\u202e", "https://example.com/path", "https://user@example.com"]) {
+    fs.writeFileSync(file, JSON.stringify({ ...state, origin }));
+    const run = await cli(box, [], { json: false });
+    assert.notEqual(run.code, 0);
+    assert.ok(!run.stdout.includes(origin));
+    assert.ok(!run.stdout.includes("spoof"));
+  }
+});

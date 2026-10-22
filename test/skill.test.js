@@ -12,8 +12,8 @@ import { assertNoLeak, parseJsonLine, runCli } from "./helpers.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL = fs.readFileSync(path.join(ROOT, "assets", "skill", "SKILL.md"));
-const SHA256 = "482bdb6c32ad04766ba5159449a612419c90bfe78ea07038eb8d1ca7fb1edb76";
-const REVISION = "sha256-482bdb6c32ad";
+const SHA256 = "f77e815d8894c57105430cd0263a1b8f421e0d47622804f97d6f9fdbffc7d349";
+const REVISION = "sha256-f77e815d8894";
 const GUIDE_URL = "https://www.metergraph.dev/docs/guides/agent-access/";
 const FAULTS = pathToFileURL(fileURLToPath(new URL("./fixtures/fs-faults.js", import.meta.url))).href;
 const isWindows = process.platform === "win32";
@@ -109,9 +109,7 @@ function entryFor(client, content, runtimes = ["local"]) {
   };
 }
 
-const OLD_SKILL = Buffer.from(
-  "---\nname: metergraph\ndescription: Older synthetic revision used only by tests.\n---\n\nSynthetic.\n",
-);
+const OLD_SKILL = fs.readFileSync(new URL("./fixtures/prior-skill.md", import.meta.url));
 
 // Lays down what an earlier CLI version would have installed.
 function priorInstall(dir, client = "claude") {
@@ -156,7 +154,7 @@ function trySymlink(target, link, type) {
 
 test("the bundled skill matches the pinned hash and its manifest", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "assets", "skill", "manifest.json"), "utf8"));
-  assert.equal(SKILL.length, 22520);
+  assert.equal(SKILL.length, 24018);
   assert.equal(sha256(SKILL), SHA256);
   assert.deepEqual(manifest, {
     manifest_version: 1,
@@ -164,7 +162,7 @@ test("the bundled skill matches the pinned hash and its manifest", () => {
     file: "SKILL.md",
     source_url: "https://www.metergraph.dev/SKILL.md",
     sha256: SHA256,
-    size: 22520,
+    size: 24018,
     revision: REVISION,
   });
   assert.ok(SKILL.toString("utf8").startsWith("---\nname: metergraph\ndescription: "));
@@ -667,4 +665,16 @@ test("a held lock blocks writes and is not removed", async () => {
   const result = await install(dir);
   assertFailure(result, "conflict", "locked");
   assert.deepEqual(listFiles(dir), [".metergraph/", LOCK]);
+});
+
+test("a forged self-consistent receipt cannot authorize replacing user-authored bytes", async () => {
+  const dir = project();
+  const mine = Buffer.from("---\nname: metergraph\ndescription: User instructions\n---\nPreserve my work.\n");
+  write(dir, PATHS.claude, mine);
+  write(dir, RECEIPT, receiptFor([entryFor("claude", mine)]));
+  const before = snapshot(dir);
+  for (const action of ["install", "update"]) {
+    assertFailure(await install(dir, { action }), "conflict", "not_owned");
+    assert.deepEqual(snapshot(dir), before);
+  }
 });

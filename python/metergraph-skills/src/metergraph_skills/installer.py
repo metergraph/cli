@@ -10,6 +10,8 @@ CLAUDE.md or any other file, never follows a symbolic link below the resolved
 project directory and makes no network request.
 """
 
+from .trusted import TRUSTED_SKILLS
+
 import errno
 import json
 import os
@@ -233,6 +235,8 @@ def _decide(action: str, runtime: str, state: Dict[str, Any], bundle) -> Dict[st
         return {"status": "installed", "noop": False, "write_skill": True}
     if file is not None and (file["content"] is None or sha256_hex(file["content"]) != entry["sha256"]):
         raise Stop("conflict", "modified")
+    if file is not None and entry["sha256"] != bundle.sha256 and entry["sha256"] not in TRUSTED_SKILLS.get(bundle.name, []):
+        raise Stop("conflict", "not_owned")
     current = entry["revision"] == bundle.revision
     if not current and action == "install":
         raise Stop("conflict", "update_required")

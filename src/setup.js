@@ -112,9 +112,14 @@ export async function runSetup(options, progress = () => {}) {
     // An env key this setup does not own stops before any sign in, so the
     // refusal costs no approval and leaves the binding untouched. The check
     // after sign in stays, against a fresh read.
-    if (!saved) {
-      const early = currentEnvValues(preflightEnv({ project: root, envFile: options.envFile, signal: trap.signal }));
-      if (early.token !== null) return stop("conflict", "existing_ingest_key_unowned");
+    const early = currentEnvValues(preflightEnv({ project: root, envFile: options.envFile, signal: trap.signal }));
+    if (early.token !== null) {
+      if (!saved) return stop("conflict", "existing_ingest_key_unowned");
+      // The saved public route cannot choose the destination of a token.
+      // Require its colocated ingest destination before any sign-in request.
+      if (early.ingestUrl !== intendedOrigin && early.ingestUrl !== `${intendedOrigin}/v1/ingest`) {
+        return stop("conflict", "ingest_url_mismatch");
+      }
     }
     const bindingDiffers = bound !== null && (bound.origin !== intendedOrigin ||
       (intendedWorkspace !== null && bound.workspace_id !== intendedWorkspace));
@@ -182,6 +187,10 @@ export async function runSetup(options, progress = () => {}) {
     // being reused. Pending delivery is acknowledged, including after a
     // previous process stopped after the env write.
     if (previous && existing.token !== null) {
+      // Recheck the fresh env snapshot immediately before the bearer sink.
+      if (existing.ingestUrl !== origin && existing.ingestUrl !== `${origin}/v1/ingest`) {
+        return stop("conflict", "ingest_url_mismatch");
+      }
       const checked = await checkCredential(origin, existing.token, previous.value, profile, trap.signal);
       if (checked.ok) {
         if (existing.ingestUrl !== origin && existing.ingestUrl !== `${origin}/v1/ingest`) {

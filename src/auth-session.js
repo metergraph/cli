@@ -1,6 +1,6 @@
 import { endpointsFor, refreshGrant, sameScopes, verifyContext } from "./auth-oauth.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
-import { Stop, openStore, readCredential, resolveConfigDir, withSlotLock, writeCredential } from "./auth-store.js";
+import { Stop, openStore, readProjectCredential, resolveConfigDir, withSlotLock, writeCredential } from "./auth-store.js";
 import { AUTH_HTTP_TIMEOUT_MS, METADATA_SCOPE } from "./constants.js";
 import { deadline } from "./transport.js";
 
@@ -25,7 +25,7 @@ export async function verifiedSession({ project = null, configDir = null, cancel
     const store = openStore(resolveConfigDir(configDir), { create: false });
     const found = readBinding(root);
     if (found === null) return stop("login_required", "not_signed_in");
-    return await sessionFor(found.binding, store, cancel);
+    return await sessionFor(found.binding, store, cancel, root);
   } catch (error) {
     if (error instanceof Stop) return stop(error.outcome, error.reason);
     throw error;
@@ -34,10 +34,10 @@ export async function verifiedSession({ project = null, configDir = null, cancel
 
 // The same, for a binding and store already read by the caller. store may be
 // null when the private store does not exist.
-export async function sessionFor(binding, store, cancel) {
+export async function sessionFor(binding, store, cancel, root) {
   if (store === null) return stop("login_required", "credential_missing");
   const slot = binding.credential_slot;
-  let record = readCredential(store, slot);
+  let record = readProjectCredential(store, slot, root);
   if (record === null) return stop("login_required", "credential_missing");
   const context = checkIdentity(record, binding);
   if (!context.ok) return context;
@@ -52,7 +52,7 @@ export async function sessionFor(binding, store, cancel) {
   if (record.refresh_pending || record.expires_at - Date.now() <= REFRESH_MARGIN_MS) {
     let refreshed;
     try {
-      refreshed = await withSlotLock(store, slot, () => refreshLocked(store, slot, binding, cancel), {
+      refreshed = await withSlotLock(store, slot, () => refreshLocked(store, slot, binding, cancel, root), {
         waitMs: LOCK_WAIT_MS,
         signal: cancel,
       });
@@ -134,8 +134,8 @@ function checkContext(record, binding) {
 // unusable answer, a failed save or a killed process) leaves the mark, so the
 // possibly consumed refresh token is never sent again and the user is asked
 // to reconnect.
-async function refreshLocked(store, slot, binding, cancel) {
-  const current = readCredential(store, slot);
+async function refreshLocked(store, slot, binding, cancel, root) {
+  const current = readProjectCredential(store, slot, root);
   if (current === null) return stop("login_required", "credential_missing");
   const context = checkContext(current, binding);
   if (!context.ok) return context;

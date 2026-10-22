@@ -75,6 +75,7 @@ const EXPECTED_FILES = [
   "src/setup-state.js",
   "src/setup.js",
   "src/skill-bundle.js",
+  "src/skill-trusted.js",
   "src/skill.js",
   "src/style.js",
   "src/tools-output.js",
@@ -86,7 +87,7 @@ const EXPECTED_FILES = [
   "src/verify-output.js",
   "src/verify.js",
 ];
-const SKILL_SHA256 = "482bdb6c32ad04766ba5159449a612419c90bfe78ea07038eb8d1ca7fb1edb76";
+const SKILL_SHA256 = "f77e815d8894c57105430cd0263a1b8f421e0d47622804f97d6f9fdbffc7d349";
 const NO_NETWORK = fileURLToPath(new URL("../fixtures/no-network.js", import.meta.url));
 
 let workDir;

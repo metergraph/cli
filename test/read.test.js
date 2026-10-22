@@ -1123,3 +1123,27 @@ test("grouped usage that breaks totals, ordering or the row limit is refused", a
     }
   }
 });
+
+test("final text screening refuses a credential reconstructed by joined route fields", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    const token = "synthetic-prefix,synthetic-suffix";
+    changeGrant(box, { refresh_token: token });
+    server.behavior.traces = (doc) => ({ ...doc, traces: doc.traces.map((trace) => ({ ...trace, routes: token.split(",") })) });
+    const { run } = await read(box, server, ["traces"], { json: false });
+    assert.equal(run.code, 11, run.stdout);
+    assert.ok(!run.stdout.includes(token));
+    assert.ok(!run.stdout.includes("synthetic-prefix"));
+  });
+});
+
+test("even the fixed refusal envelope is suppressed if it contains a known credential", async () => {
+  await withServer(async (server) => {
+    const box = await signedIn(server);
+    changeGrant(box, { refresh_token: "schema_version" });
+    const run = await runCli(["--json", "traces", "--project", box.project, "--config-dir", box.config], { env: LOCAL_ENV });
+    assert.equal(run.code, 11);
+    assert.equal(run.stdout, "");
+    assert.equal(run.stderr, "");
+  });
+});

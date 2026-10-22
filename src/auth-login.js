@@ -26,7 +26,8 @@ import {
   deleteCredential,
   newSlot,
   openStore,
-  readCredential,
+  readProjectCredential,
+  projectIdentity,
   resolveConfigDir,
   withSlotLock,
   writeCredential,
@@ -110,9 +111,9 @@ export async function runLogin(options, progress) {
     // A rerun with a working grant for the same role and permissions changes
     // nothing and opens no browser. Asking for others signs in again, for the
     // same workspace.
-    const saved = bound === null ? null : readOrNull(store, bound.credential_slot);
+    const saved = bound === null ? null : readOrNull(store, bound.credential_slot, root);
     if (bound !== null && !options.reconnect && saved?.scope === ctx.scope) {
-      const session = await sessionFor(bound, store, trap.signal);
+      const session = await sessionFor(bound, store, trap.signal, root);
       if (session.ok) {
         if (workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, workspaceText)) {
           return end("conflict", "bound_to_other_workspace", RECONNECT);
@@ -148,6 +149,7 @@ export async function runLogin(options, progress) {
     try {
       writeCredential(store, slot, {
         schema_version: 1,
+        project_id: projectIdentity(root),
         origin: ctx.origin,
         issuer: endpoints.issuer,
         resource: endpoints.resource,
@@ -182,7 +184,7 @@ export async function runLogin(options, progress) {
     // The old grant is no longer referenced. Ask the service to revoke it
     // and remove it locally; neither affects the new binding.
     if (bound !== null && bound.credential_slot !== slot) {
-      ctx.previousGrant = await retireSlot(store, bound);
+      ctx.previousGrant = await retireSlot(store, bound, root);
     }
     return { ...end("ok", null, connected(ctx)), ingestSetup: flow.ingestSetup };
   } catch (error) {
@@ -377,7 +379,8 @@ export async function runLogout(options) {
         store,
         bound.credential_slot,
         async () => {
-          const record = readOrNull(store, bound.credential_slot);
+          const record = readOrNull(store, bound.credential_slot, root);
+          if (record === null) return false;
           // A grant is only ever sent back to the origin it came from.
           if (record !== null && record.origin === bound.origin) {
             const limit = deadline(AUTH_HTTP_TIMEOUT_MS, trap.signal);
@@ -414,13 +417,14 @@ export async function runLogout(options) {
 // Revokes and removes the grant a previous binding pointed to. Returns
 // "accepted", "unconfirmed" or "not_attempted". Failures here never undo the
 // new binding.
-async function retireSlot(store, bound) {
+async function retireSlot(store, bound, root) {
   try {
     return await withSlotLock(
       store,
       bound.credential_slot,
       async () => {
-        const record = readOrNull(store, bound.credential_slot);
+        const record = readOrNull(store, bound.credential_slot, root);
+        if (record === null) return "not_attempted";
         let revocation = "not_attempted";
         if (record !== null && record.origin === bound.origin) {
           revocation = await revokeQuietly(endpointsFor(record.origin), record.client_id, record.refresh_token);
@@ -435,9 +439,9 @@ async function retireSlot(store, bound) {
   }
 }
 
-function readOrNull(store, slot) {
+function readOrNull(store, slot, root) {
   try {
-    return readCredential(store, slot);
+    return readProjectCredential(store, slot, root);
   } catch (error) {
     if (error instanceof Stop && error.outcome === "login_required") return null;
     throw error;

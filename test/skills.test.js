@@ -173,7 +173,7 @@ test("update installs skills added since and replaces older owned revisions", as
   fs.rmSync(path.dirname(path.join(dir, skillPath("claude", added))), { recursive: true });
   fs.rmSync(path.join(dir, receiptPath(added)));
   // An older revision this CLI installed and that is unchanged since.
-  const old = Buffer.from(`---\nname: ${older}\ndescription: An older revision.\n---\n`);
+  const old = fs.readFileSync(new URL(`./fixtures/prior-${older}.md`, import.meta.url));
   write(dir, skillPath("claude", older), old);
   const receipt = JSON.parse(fs.readFileSync(path.join(dir, receiptPath(older)), "utf8"));
   Object.assign(receipt.installations[0], { sha256: sha256(old), revision: `sha256-${sha256(old).slice(0, 12)}` });

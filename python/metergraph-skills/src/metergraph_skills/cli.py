@@ -42,7 +42,7 @@ Install or update the Metergraph agent skill in a project.
   --json     Print one JSON line on stdout.
 
 This does not sign in, connect a workspace or configure MCP. For those, use
-the Metergraph CLI: npx metergraph-cli@next
+a separately installed, verified Metergraph CLI release
 """
 
 ACTIONS = ("install", "update")
