@@ -469,6 +469,10 @@ export async function startOAuthServer(initial = {}) {
     } catch {
       return send(response, 200, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
     }
+    if (behavior.mcp) {
+      const reply = behavior.mcp(message);
+      if (reply) return send(response, reply.status ?? 200, reply.body ?? { jsonrpc: "2.0", id: message.id, ...reply }, reply.headers);
+    }
     const tools = MCP_TOOLS.filter((tool) => tool.scope === "agent:metadata" || grant.scopes?.includes(tool.scope))
       .map(({ scope, ...tool }) => (behavior.annotations ? tool : { ...tool, annotations: undefined }));
     if (message.method === "tools/list") return send(response, 200, { jsonrpc: "2.0", id: message.id, result: { tools } });
@@ -1159,8 +1163,8 @@ function readBody(request) {
   });
 }
 
-function send(response, status, body) {
-  response.writeHead(status, { "content-type": "application/json" });
+function send(response, status, body, headers = {}) {
+  response.writeHead(status, { "content-type": "application/json", ...headers });
   response.end(JSON.stringify(body));
 }
 

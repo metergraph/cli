@@ -30,7 +30,7 @@ import {
 import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 import { experimentNextAction, experimentRead } from "./experiments.js";
-import { toolsNextAction, toolsRead } from "./tools.js";
+import { readArguments, toolsNextAction, toolsRead } from "./tools.js";
 import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
@@ -120,6 +120,11 @@ export async function runRead(options) {
   };
 
   try {
+    if (options.command === "tools" && options.action === "call") {
+      const args = readArguments(options.tool);
+      if (!args.ok) return end(args.outcome, args.reason);
+      options = { ...options, toolArguments: args };
+    }
     const root = resolveProject(options.project);
     const configDir = resolveConfigDir(options.configDir);
     const found = readBinding(root);
@@ -206,6 +211,7 @@ export async function runRead(options) {
     ctx.profile = session.session.profile;
     ctx.access = session.session.access;
     ctx.scopes = session.session.scopes;
+    known = session.knownCredentials;
     ctx.workspaceLabel = workspaceLabel(session.documents.workspace?.workspace);
     // A workspace named by slug or name is checked against the verified one.
     if (target.workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, target.workspaceText)) {
@@ -213,9 +219,9 @@ export async function runRead(options) {
     }
     if (ctx.workspaceId === null) {
       ctx.workspaceId = session.session.workspaceId;
-      notices.add("workspace_not_pinned");
+      if (target.workspaceText === null) notices.add("workspace_not_pinned");
+      else ctx.intendedWorkspace = ctx.workspaceId;
     }
-    known = session.knownCredentials;
     ctx.authenticated = true;
     const { documents } = session;
 
@@ -240,6 +246,7 @@ export async function runRead(options) {
     if (options.command === "tools") {
       const tools = await toolsRead(session.session, options, limit.signal);
       if (!tools.ok) {
+        if (ctx.credential === "agent_key" && tools.reason === "access_revoked") tools.reason = "agent_key_rejected";
         const settled = ["refused", "unconfirmed", "action_required"].includes(tools.outcome) ? tools : settle(tools);
         return end(settled.outcome, settled.reason, tools.report);
       }
@@ -384,7 +391,7 @@ export function holdsKnown(value, known) {
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
-function retryAfterOf(response) {
+export function retryAfterOf(response) {
   const header = response.headers["retry-after"];
   const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
   return seconds !== null && seconds <= 86400 ? seconds : null;

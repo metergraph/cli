@@ -441,3 +441,13 @@ test("Debug with every permission passes only where the caller accepts Debug, an
   assert.equal(checkCapabilities(offered, CONTEXT).reason, "content_access_granted");
   assert.deepEqual(checkCapabilities(offered, { ...CONTEXT, access: "debug" }), { ok: true });
 });
+
+test("Debug discovery refuses metadata that omits the requested base scope", async () => {
+  for (const field of ["prm", "asm"]) {
+    await withServer({ [field]: (doc) => ({ ...doc, scopes_supported: ["agent:metadata"] }) }, async (server) => {
+      const result = await discover(server.origin, AbortSignal.timeout(5000), "agent:read");
+      assert.equal(result.reason, "debug_scope_unsupported");
+      assert.ok(!server.requests.some((request) => request.path.includes("register")));
+    });
+  }
+});

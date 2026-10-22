@@ -56,7 +56,7 @@ export function toJsonLine(result) {
 // read U+009B as an escape sequence) and bidirectional overrides as they are.
 // Inside a JSON string \uXXXX means the same character, so escaping them
 // changes nothing a parser sees and keeps them away from the terminal.
-const TERMINAL_UNSAFE = /[\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+const TERMINAL_UNSAFE = /[\u061c\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 export function jsonText(value, indent = undefined) {
   return JSON.stringify(value, null, indent).replace(
@@ -1115,6 +1115,7 @@ const AUTH_MESSAGES = {
   oauth_metadata_missing: "This service does not support CLI sign in yet. Nothing was written.",
   metadata_scope_unsupported:
     "This service does not offer Metadata-only access for the CLI yet. The CLI does not fall back to broader access.",
+  debug_scope_unsupported: "This service does not offer Debug access for CLI sign in. Nothing was saved.",
   endpoint_not_allowed: "The service advertised an authorization endpoint outside its own origin or known paths.",
   resource_mismatch: "The service's protected resource does not match this origin.",
   issuer_mismatch: "The service's authorization issuer does not match this origin.",

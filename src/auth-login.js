@@ -209,7 +209,7 @@ async function authorize(options, ctx, cancel, progress, announce) {
   if (options.signup && ctx.profile !== "managed") return fail("unsupported", "signup_unsupported");
 
   let limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
-  const discovered = await discover(ctx.origin, limit.signal);
+  const discovered = await discover(ctx.origin, limit.signal, ctx.scope.split(" ")[0]);
   if (!discovered.ok) return httpFailure(discovered, cancel);
   const { endpoints, requireIss, offeredClientId } = discovered;
   const scopes = ctx.scope.split(" ");

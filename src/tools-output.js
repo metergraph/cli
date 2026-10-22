@@ -1,6 +1,6 @@
 import { jsonText } from "./output.js";
-import { readMessage } from "./read-output.js";
-import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
+import { noticeText, readMessage } from "./read-output.js";
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor, workspaceShown } from "./style.js";
 
 // Fixed text for tools results. A tool's result and error are the service's
 // own JSON, printed with jsonText so no control or bidirectional character
@@ -29,7 +29,7 @@ export function toolsMessage(outcome, reason) {
   return MESSAGES[reason] ?? readMessage(outcome, reason);
 }
 
-const CONTROL = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g;
+const CONTROL = /[\u061c\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g;
 const plain = (value) => (typeof value === "string" ? value.replace(CONTROL, "") : "");
 
 function kindOf(tool) {
@@ -40,8 +40,13 @@ function kindOf(tool) {
 export function toolsText(result, message, style = PLAIN, action) {
   const data = result.data;
   const title = action === "list" ? "Agent Access tools" : `Tool ${data.result?.tool ?? ""}`.trim();
-  const lines = [headline(style, result.ok ? "info" : toneFor(result.outcome), result.ok ? title : `${title} did not run`, result.outcome), ""];
-  lines.push(...fields(style, [["Origin", data.origin], ["Credential", data.credential === "agent_key" ? "coding-agent key" : "saved sign in"]]), "");
+  const lines = [headline(style, result.ok ? "info" : toneFor(result.outcome), result.ok ? title : result.outcome === "unconfirmed" ? "Tool call unconfirmed" : `${title} did not run`, result.outcome), ""];
+  lines.push(...fields(style, [["Origin", data.origin], ["Workspace", workspaceShown(data.workspace)], ["Credential", data.credential === "agent_key" ? "coding-agent key" : "saved sign in"]]), "");
+  for (const notice of data.notices) {
+    const message = noticeText(notice);
+    if (message) lines.push(...paragraph(style, message), "");
+  }
+  if (data.retry_after_seconds !== null) lines.push(...fields(style, [["Retry after", `${data.retry_after_seconds} seconds`]]), "");
   if (result.ok && action === "list") {
     const tools = data.result.tools;
     const width = Math.max(4, ...tools.map((tool) => tool.name.length));

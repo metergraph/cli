@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import { AUTH_PATHS } from "./constants.js";
+import { retryAfterOf } from "./read.js";
 import { parseJsonObject } from "./http.js";
 import { failureOf, send } from "./transport.js";
 
@@ -39,7 +40,7 @@ export async function toolsRead(session, options, signal) {
 
   const tool = listed.tools.find((entry) => entry.name === request.name);
   if (!tool) return stop("capability_unavailable", "tool_unavailable");
-  const args = readArguments(request);
+  const args = options.toolArguments ?? readArguments(request);
   if (!args.ok) return args;
   if (tool.needs_confirmation && !request.yes) return stop("action_required", "confirmation_required");
 
@@ -52,21 +53,22 @@ export async function toolsRead(session, options, signal) {
   }
   const answer = rpcAnswer(response, id);
   if (!answer.ok) {
-    if (tool.needs_confirmation && answer.reason === "tool_response_invalid") return stop("unconfirmed", "tool_call_unconfirmed");
+    if (tool.needs_confirmation && response.kind === "response" && !["access_revoked", "forbidden", "rate_limited", "endpoint_unavailable"].includes(answer.reason)) return stop("unconfirmed", "tool_call_unconfirmed");
     return answer;
   }
   if (answer.error !== undefined) {
-    return stop("refused", "tool_rejected", { tool_error: { code: "invalid_params", message: text(answer.error.message) } });
+    if (tool.needs_confirmation && ![-32700, -32600, -32601, -32602].includes(answer.error.code)) return stop("unconfirmed", "tool_call_unconfirmed");
+    return rpcError(answer.error);
   }
   const result = answer.result;
-  if (!isObject(result) || typeof result.isError !== "boolean") {
+  if (!isObject(result) || (result.isError !== undefined && typeof result.isError !== "boolean")) {
     return tool.needs_confirmation ? stop("unconfirmed", "tool_call_unconfirmed") : stop("verification_failed", "tool_response_invalid");
   }
-  const document = isObject(result.structuredContent) ? result.structuredContent : null;
+  const document = isObject(result.structuredContent) ? result.structuredContent : result.content ?? null;
   if (result.isError) {
     const error = isObject(document?.error) ? document.error : {};
     return stop("refused", "tool_error", {
-      tool_error: { code: typeof error.code === "string" ? error.code : "tool_error", message: text(error.message) },
+      tool_error: error,
     });
   }
   return {
@@ -76,34 +78,59 @@ export async function toolsRead(session, options, signal) {
 }
 
 async function listTools(session, signal) {
-  const id = 1;
-  const answer = rpcAnswer(await rpc(session, { jsonrpc: "2.0", id, method: "tools/list" }, signal), id);
-  if (!answer.ok) return answer;
-  if (answer.error !== undefined) return stop("unsupported", "tools_unavailable");
-  const listed = answer.result?.tools;
-  if (!Array.isArray(listed) || listed.length > MAX_TOOLS) return stop("verification_failed", "tool_response_invalid");
   const tools = [];
-  for (const entry of listed) {
-    if (!isObject(entry) || typeof entry.name !== "string" || !TOOL_NAME.test(entry.name)) {
-      return stop("verification_failed", "tool_response_invalid");
+  const names = new Set();
+  const cursors = new Set();
+  let cursor;
+  for (let page = 0; page < MAX_TOOLS; page++) {
+    const id = 1;
+    const answer = rpcAnswer(await rpc(session, {
+      jsonrpc: "2.0", id, method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }),
+    }, signal), id);
+    if (!answer.ok) return answer;
+    if (answer.error !== undefined) {
+      return answer.error.code === -32601 ? stop("unsupported", "tools_unavailable") : rpcError(answer.error);
     }
-    const hints = isObject(entry.annotations) ? entry.annotations : {};
-    // Without annotations (an older service), a tool counts as one that
-    // writes and calls out, so it is never called without --yes.
-    const readOnly = hints.readOnlyHint === true;
-    const openWorld = hints.openWorldHint !== false;
-    tools.push({
-      name: entry.name,
-      title: text(entry.title),
-      description: text(entry.description),
-      input_schema: isObject(entry.inputSchema) ? entry.inputSchema : null,
-      read_only: readOnly,
-      open_world: openWorld,
-      needs_confirmation: !readOnly || openWorld,
-    });
+    const listed = answer.result?.tools;
+    if (!Array.isArray(listed) || tools.length + listed.length > MAX_TOOLS) return stop("verification_failed", "tool_response_invalid");
+    for (const entry of listed) {
+      if (!isObject(entry) || typeof entry.name !== "string" || !TOOL_NAME.test(entry.name) ||
+          names.has(entry.name) || !isObject(entry.inputSchema) || entry.inputSchema.type !== "object") {
+        return stop("verification_failed", "tool_response_invalid");
+      }
+      names.add(entry.name);
+      const hints = isObject(entry.annotations) ? entry.annotations : {};
+      // Without annotations (an older service), a tool counts as one that
+      // writes and calls out, so it is never called without --yes.
+      const readOnly = hints.readOnlyHint === true;
+      const openWorld = hints.openWorldHint !== false;
+      tools.push({
+        name: entry.name,
+        title: text(entry.title),
+        description: text(entry.description),
+        input_schema: entry.inputSchema,
+        read_only: readOnly,
+        open_world: openWorld,
+        needs_confirmation: !readOnly || openWorld,
+      });
+    }
+    const next = answer.result.nextCursor;
+    if (next === undefined) {
+      tools.sort((a, b) => a.name.localeCompare(b.name));
+      return { ok: true, tools };
+    }
+    if (typeof next !== "string" || next.length === 0 || cursors.has(next)) return stop("verification_failed", "tool_response_invalid");
+    cursors.add(next);
+    cursor = next;
   }
-  tools.sort((a, b) => a.name.localeCompare(b.name));
-  return { ok: true, tools };
+  return stop("verification_failed", "tool_response_invalid");
+}
+
+function rpcError(error) {
+  if ([-32700, -32600, -32601, -32602].includes(error.code)) {
+    return stop("refused", "tool_rejected", { tool_error: error });
+  }
+  return stop("unhealthy", "server_error");
 }
 
 function rpc(session, message, signal) {
@@ -118,7 +145,7 @@ function rpcAnswer(response, id) {
   if (response.kind === "response") {
     if (response.status === 401) return stop("login_required", "access_revoked");
     if (response.status === 403) return stop("permission_denied", "forbidden");
-    if (response.status === 429) return stop("rate_limited", "rate_limited");
+    if (response.status === 429) return stop("rate_limited", "rate_limited", { retry_after_seconds: retryAfterOf(response) });
     if (response.status === 404) return stop("unsupported", "endpoint_unavailable");
     if (response.tooLarge) return stop("unsupported", "response_too_large");
   }
@@ -126,6 +153,7 @@ function rpcAnswer(response, id) {
   if (fault !== null) return { ok: false, ...fault, report: null };
   if (response.status !== 200) return stop("unsupported", "unexpected_status");
   const message = parseJsonObject(response);
+  if (!boundedJson(message)) return stop("verification_failed", "tool_response_invalid");
   if (message?.jsonrpc !== "2.0" || message.id !== id) return stop("verification_failed", "tool_response_invalid");
   if (isObject(message.error)) return { ok: true, error: message.error };
   return { ok: true, result: message.result };
@@ -133,7 +161,7 @@ function rpcAnswer(response, id) {
 
 // The call's arguments: a JSON object from --args or the file --args-file
 // names, at most TOOL_ARGS_MAX_BYTES. No value from them is ever printed.
-function readArguments(request) {
+export function readArguments(request) {
   let raw = request.args;
   if (request.argsFile !== null) {
     try {
@@ -153,7 +181,7 @@ function readArguments(request) {
   } catch {
     return stop("invalid_input", "args_invalid");
   }
-  return isObject(value) ? { ok: true, value } : stop("invalid_input", "args_invalid");
+  return isObject(value) && boundedJson(value, true) ? { ok: true, value } : stop("invalid_input", "args_invalid");
 }
 
 // What an agent does next with a tools result, or undefined for the read
@@ -205,4 +233,17 @@ function text(value) {
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function boundedJson(value, numbers = false) {
+  const pending = [[value, 0]];
+  while (pending.length > 0) {
+    const [entry, depth] = pending.pop();
+    if (depth > 100) return false;
+    if (numbers && typeof entry === "number" && (!Number.isFinite(entry) || (Number.isInteger(entry) && !Number.isSafeInteger(entry)))) return false;
+    if (entry !== null && typeof entry === "object") {
+      for (const child of Object.values(entry)) pending.push([child, depth + 1]);
+    }
+  }
+  return true;
 }

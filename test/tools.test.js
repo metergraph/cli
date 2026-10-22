@@ -143,14 +143,14 @@ test("a tool the key cannot use is not called", () =>
   }));
 
 test("a tool's refusal is reported with the service's error document", () =>
-  withServer({ toolCall: () => ({ error: { code: "invalid_argument", message: "draft.members[0]: required" } }) }, async (server) => {
+  withServer({ toolCall: () => ({ error: { code: "invalid_argument", message: "draft.members[0]: required", details: { path: ["draft", "members", 0] } } }) }, async (server) => {
     const { run, result } = await tools(server, ["call", "metergraph_save_evaluation_draft", "--args", '{"draft": {}}', "--yes"], {
       key: DEBUG_KEY,
     });
     assert.equal(run.code, 19);
     assert.equal(result.outcome, "refused");
     assert.equal(result.error.reason, "tool_error");
-    assert.deepEqual(result.data.tool_error, { code: "invalid_argument", message: "draft.members[0]: required" });
+    assert.deepEqual(result.data.tool_error, { code: "invalid_argument", message: "draft.members[0]: required", details: { path: ["draft", "members", 0] } });
     assert.equal(result.data.next_action.kind, "fix_tool_arguments");
   }));
 
@@ -161,7 +161,7 @@ test("arguments must be one JSON object, from --args or --args-file", { skip: is
       const { run, result } = await tools(server, ["call", "metergraph_list_classified_workloads", "--args", args]);
       assert.equal(run.code, 2, args);
       assert.equal(result.error.reason, "args_invalid");
-      assert.ok(!rpcMethods(server, before).some((message) => message.method === "tools/call"));
+      assert.deepEqual(sent(server, before), []);
     }
     const file = path.join(workDir, "args.json");
     fs.writeFileSync(file, '{"limit": 3}');
@@ -204,11 +204,132 @@ test("tools arguments are checked before anything is sent", async () => {
 });
 
 test("control and bidirectional characters in a result never reach the terminal raw", () =>
-  withServer({ toolCall: () => ({ note: "a\u009b31mred‮b\u0007c" }) }, async (server) => {
+  withServer({ toolCall: () => ({ note: "a\u061c\u009b31mred‮b\u0007c" }) }, async (server) => {
     for (const json of [true, false]) {
       const { run } = await tools(server, ["call", "metergraph_list_classified_workloads"], { json });
       assert.equal(run.code, 0, run.stdout);
-      assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮]/.test(run.stdout), "a raw control character was printed");
+      assert.ok(!/[\u0000-\u0008\u000b-\u001f\u061c\u007f-\u009f‪-‮]/.test(run.stdout), "a raw control character was printed");
       assert.ok(run.stdout.includes("\\u009b31mred\\u202eb\\u0007c"));
     }
   }));
+
+const readTool = {
+  name: "metergraph_test", inputSchema: { type: "object" },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+};
+
+test("optional MCP fields preserve content-only results", () =>
+  withServer({ mcp: (message) => message.method === "tools/call" ? { result: { content: [{ type: "text", text: "hello" }] } } : null }, async (server) => {
+    const { result } = await tools(server, ["call", "metergraph_list_classified_workloads"]);
+    assert.deepEqual(result.data.result.result, [{ type: "text", text: "hello" }]);
+  }));
+
+test("catalog pagination is followed for calls and repeated cursors fail closed", async () => {
+  await withServer({ mcp: (message) => message.method === "tools/list"
+    ? { result: message.params?.cursor ? { tools: [readTool] } : { tools: [], nextCursor: "second" } } : null }, async (server) => {
+    const { result } = await tools(server, ["call", readTool.name]);
+    // The fixture does not implement the synthetic tool, but discovery found it.
+    assert.equal(result.error.reason, "tool_rejected");
+    assert.equal(rpcMethods(server, 0).filter((m) => m.method === "tools/list").length, 2);
+  });
+  await withServer({ mcp: () => ({ result: { tools: [], nextCursor: "same" } }) }, async (server) => {
+    const { result } = await tools(server, ["list"]);
+    assert.equal(result.error.reason, "tool_response_invalid");
+  });
+});
+
+test("malformed catalogs and deeply nested results fail closed", async () => {
+  let deep = {};
+  for (let i = 0; i < 200; i++) deep = { child: deep };
+  for (const entries of [[{ name: readTool.name }], [{ ...readTool, inputSchema: 1 }], [readTool, readTool], [{ ...readTool, inputSchema: { type: "object", properties: deep } }]]) {
+    await withServer({ mcp: () => ({ result: { tools: entries } }) }, async (server) => {
+      const { result } = await tools(server, ["list"]);
+      assert.equal(result.error.reason, "tool_response_invalid");
+    });
+  }
+  await withServer({ toolCall: () => deep }, async (server) => {
+    const { result } = await tools(server, ["call", "metergraph_list_classified_workloads"]);
+    assert.equal(result.error.reason, "tool_response_invalid");
+  });
+});
+
+test("unsafe numeric arguments and unreadable files fail before authentication", () =>
+  withServer({}, async (server) => {
+    for (const args of [
+      ["--args", '{"n":9007199254740993}'], ["--args", '{"n":1e400}'],
+      ["--args-file", path.join(workDir, "missing.json")], ["--args", "[]"],
+    ]) {
+      const before = server.requests.length;
+      const { result } = await tools(server, ["call", readTool.name, ...args], { key: "" });
+      assert.equal(result.outcome, "invalid_input");
+      assert.deepEqual(sent(server, before), []);
+    }
+  }));
+
+test("ambiguous writes are unconfirmed in JSON and human output", async () => {
+  for (const reply of [{ status: 500 }, { status: 503 }, { error: { code: -32603, message: "Internal error" } }, { result: { structuredContent: { value: "x".repeat(6 * 1024 * 1024) } } }]) {
+    await withServer({ mcp: (m) => m.method === "tools/call" ? reply : null }, async (server) => {
+      const { result } = await tools(server, ["call", "metergraph_start_analysis", "--yes"], { key: DEBUG_KEY });
+      assert.equal(result.error.reason, "tool_call_unconfirmed");
+      const { run } = await tools(server, ["call", "metergraph_start_analysis", "--yes"], { key: DEBUG_KEY, json: false });
+      assert.match(run.stdout, /Tool call unconfirmed/);
+      assert.doesNotMatch(run.stdout, /did not run/);
+    });
+  }
+});
+
+test("catalog internal errors remain transient and missing methods are unsupported", async () => {
+  for (const [code, reason] of [[-32603, "server_error"], [-32601, "tools_unavailable"]]) {
+    await withServer({ mcp: () => ({ error: { code, message: "failure" } }) }, async (server) => {
+      const { result } = await tools(server, ["list"]);
+      assert.equal(result.error.reason, reason);
+    });
+  }
+});
+
+test("tool endpoint rejection recommends replacing the agent key", async () => {
+  for (const method of ["tools/list", "tools/call"]) {
+    await withServer({ mcp: (m) => m.method === method ? { status: 401 } : null }, async (server) => {
+      const { result } = await tools(server, ["call", "metergraph_list_classified_workloads"]);
+      assert.equal(result.error.reason, "agent_key_rejected");
+      assert.notEqual(result.data.next_action.kind, "login");
+    });
+  }
+});
+
+test("human confirmation shows the verified workspace and pinning notice", () =>
+  withServer({}, async (server) => {
+    const { run } = await tools(server, ["call", "metergraph_start_analysis"], { key: DEBUG_KEY, json: false });
+    assert.match(run.stdout, /Workspace/);
+    assert.match(run.stdout, /No workspace was pinned/);
+  }));
+
+test("rate limits preserve backoff for listing and calling", async () => {
+  for (const method of ["tools/list", "tools/call"]) {
+    await withServer({ mcp: (m) => m.method === method ? { status: 429, headers: { "retry-after": "17" } } : null }, async (server) => {
+      const { result } = await tools(server, ["call", "metergraph_list_classified_workloads"]);
+      assert.equal(result.data.retry_after_seconds, 17);
+      const { run } = await tools(server, ["call", "metergraph_list_classified_workloads"], { json: false });
+      assert.match(run.stdout, /17 seconds/);
+    });
+  }
+});
+
+test("workspace text mismatch cannot echo a key and matching text pins it", async () => {
+  await withServer({ workspace: (doc) => ({ ...doc, workspace: { ...doc.workspace, name: KEY } }) }, async (server) => {
+    const box = sandbox();
+    const run = await runCli(["--json", "status", "--workspace", "different", "--project", box.project, "--config-dir", box.config],
+      { env: { ...LOCAL_ENV, METERGRAPH_URL: server.origin, METERGRAPH_AGENT_TOKEN: KEY } });
+    assert.equal(JSON.parse(run.stdout).error.reason, "credential_in_metadata_response");
+    assert.ok(!run.stdout.includes(KEY));
+  });
+  await withServer({ workspace: (doc) => ({ ...doc, workspace: { ...doc.workspace, slug: "synthetic-team", name: "Synthetic Team" } }) }, async (server) => {
+    const { result } = await tools(server, ["list", "--workspace", "synthetic-team"]);
+    assert.equal(result.outcome, "ok");
+    assert.ok(!result.data.notices.includes("workspace_not_pinned"));
+    const box = sandbox();
+    const run = await runCli(["--json", "status", "--workspace", "synthetic-team", "--project", box.project, "--config-dir", box.config],
+      { env: { ...LOCAL_ENV, METERGRAPH_URL: server.origin, METERGRAPH_AGENT_TOKEN: KEY } });
+    assert.equal(JSON.parse(run.stdout).data.workspace.match, true);
+  });
+});

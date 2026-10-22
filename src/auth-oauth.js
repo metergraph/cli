@@ -63,7 +63,7 @@ const stop = (outcome, reason) => ({ ok: false, outcome, reason });
 // fixed path on this origin. A server that does not advertise the Metadata
 // scope, S256 or public clients is unsupported; there is no fallback to
 // another scope.
-export async function discover(origin, signal) {
+export async function discover(origin, signal, baseScope = METADATA_SCOPE) {
   const expected = endpointsFor(origin);
 
   const prm = await fetchMetadata(origin, [
@@ -82,6 +82,9 @@ export async function discover(origin, signal) {
   }
   if (resource.scopes_supported !== undefined && !includes(resource.scopes_supported, METADATA_SCOPE)) {
     return stop("unsupported", "metadata_scope_unsupported");
+  }
+  if (resource.scopes_supported !== undefined && !includes(resource.scopes_supported, baseScope)) {
+    return stop("unsupported", "debug_scope_unsupported");
   }
   if (resource.bearer_methods_supported !== undefined && !includes(resource.bearer_methods_supported, "header")) {
     return stop("unsupported", "oauth_metadata_invalid");
@@ -106,6 +109,7 @@ export async function discover(origin, signal) {
   if (!includes(server.scopes_supported, METADATA_SCOPE)) {
     return stop("unsupported", "metadata_scope_unsupported");
   }
+  if (!includes(server.scopes_supported, baseScope)) return stop("unsupported", "debug_scope_unsupported");
   if (!includes(server.code_challenge_methods_supported, "S256")) return stop("unsupported", "pkce_unsupported");
   if (!includes(server.token_endpoint_auth_methods_supported, "none")) {
     return stop("unsupported", "public_client_unsupported");

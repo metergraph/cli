@@ -249,3 +249,15 @@ test("a workspace name that holds a credential is not printed by login", () =>
     assert.equal(run.code, 0, run.stdout);
     assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: null, name: null });
   }));
+
+test("unsupported Debug scopes stop login before registration or consent", async () => {
+  for (const field of ["prm", "asm"]) {
+    await withServer({ [field]: (doc) => ({ ...doc, scopes_supported: ["agent:metadata"] }) }, async (server) => {
+      const box = sandbox();
+      const { result } = await login(assert, box, server, ["--role", "debug"]);
+      assert.equal(result.error.reason, "debug_scope_unsupported");
+      assert.equal(authorizeRequests(server).length, 0);
+      assert.equal(server.requestsTo("/v1/oauth/register").length, 0);
+    });
+  }
+});
