@@ -122,6 +122,9 @@ test("parses login and logout with explicit runtime, paths and flags", () => {
     runtime: "local",
     origin: "http://127.0.0.1:4000",
     workspace: workspace.toLowerCase(),
+    workspaceText: null,
+    role: "metadata",
+    permissions: [],
     project: "my app",
     configDir: "my config",
     timeoutMs: 60000,
@@ -130,6 +133,16 @@ test("parses login and logout with explicit runtime, paths and flags", () => {
     reconnect: true,
     json: false,
   });
+  // A slug or name is kept as text, and login can ask for Debug with
+  // workflow permissions, by bin/agent-key's flags.
+  const named = parseArgs([
+    "login", "--runtime", "local", "--workspace", " Acme Prod ", "--role", "debug",
+    "--allow-analysis-starts", "--allow-evaluation-writes",
+  ]);
+  assert.equal(named.workspace, null);
+  assert.equal(named.workspaceText, "Acme Prod");
+  assert.equal(named.role, "debug");
+  assert.deepEqual(named.permissions, ["agent:eval-write", "agent:analysis-run"]);
   const defaults = parseArgs(["--json", "login", "--runtime", "cloud", "--signup"]);
   assert.equal(defaults.ok, true);
   assert.equal(defaults.origin, "https://app.metergraph.dev");
@@ -200,7 +213,13 @@ test("rejects bad login and logout input without echoing it", () => {
     [["login"], "missing_runtime"],
     [["login", "--runtime", "sk-fake-2222222222222222"], "invalid_runtime"],
     [["login", "--runtime", "local", "--url", "https://user:hunter2@example.com"], "invalid_url"],
-    [["login", "--runtime", "local", "--workspace", "hunter2-not-a-uuid"], "invalid_workspace"],
+    [["login", "--runtime", "local", "--workspace", "hunter2\u0007"], "invalid_workspace"],
+    [["login", "--runtime", "local", "--workspace", "x".repeat(201)], "invalid_workspace"],
+    [["login", "--runtime", "local", "--role", "hunter2"], "invalid_role"],
+    [["login", "--runtime", "local", "--role", "replay"], "invalid_role"],
+    [["login", "--runtime", "local", "--allow-evaluation-writes"], "permission_needs_debug"],
+    [["login", "--runtime", "local", "--role", "metadata", "--allow-analysis-starts"], "permission_needs_debug"],
+    [["login", "--runtime", "local", "--access", "metadata"], "unknown_argument"],
     [["login", "--runtime", "local", "--timeout-ms", "500"], "invalid_timeout"],
     [["login", "--runtime", "local", "--timeout-ms", "900001"], "invalid_timeout"],
     [["login", "--runtime", "local", "--config-dir="], "invalid_config_dir"],
@@ -239,6 +258,7 @@ test("parses read commands with bounded defaults and explicit values", () => {
     cursor: null,
     origin: null,
     workspace: null,
+    workspaceText: null,
     agentTokenFile: null,
     metadata: null,
     groupByMetadata: null,
@@ -247,6 +267,8 @@ test("parses read commands with bounded defaults and explicit values", () => {
   const keyed = parseArgs(["usage", "--url", "https://metergraph.example.com/", "--workspace", "0B5C7C1E-1A2B-4C3D-8E4F-5A6B7C8D9E01", "--agent-token-file", "/run/secrets/key"]);
   assert.equal(keyed.origin, "https://metergraph.example.com");
   assert.equal(keyed.workspace, "0b5c7c1e-1a2b-4c3d-8e4f-5a6b7c8d9e01");
+  assert.equal(keyed.workspaceText, null);
+  assert.equal(parseArgs(["usage", "--workspace", "acme-prod"]).workspaceText, "acme-prod");
   assert.equal(keyed.agentTokenFile, "/run/secrets/key");
   const usage = parseArgs(["--json", "usage", "--days=90", "--limit", "200", "--project", "app", "--timeout-ms", "60000"]);
   assert.equal(usage.ok, true);

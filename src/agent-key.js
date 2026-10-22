@@ -69,6 +69,8 @@ export function keyTarget({ binding, options, env, originConfirmed = false }) {
       ok: true,
       origin: binding.origin,
       workspaceId: binding.workspace_id,
+      // A slug or name to match against the verified workspace.
+      workspaceText: options.workspaceText ?? null,
       profile: binding.deployment_profile,
       originSource: "binding",
     };
@@ -77,6 +79,7 @@ export function keyTarget({ binding, options, env, originConfirmed = false }) {
     ok: true,
     origin: requested ?? DEFAULT_ORIGIN,
     workspaceId: pinned,
+    workspaceText: options.workspaceText ?? null,
     profile: null,
     originSource: source ?? "default",
   };

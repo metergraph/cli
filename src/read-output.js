@@ -1,6 +1,6 @@
 import { WORKFLOW_PERMISSIONS } from "./constants.js";
 import { authMessage } from "./output.js";
-import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
+import { PLAIN, fields, headline, paragraph, render, steps, toneFor, workspaceShown } from "./style.js";
 
 // Fixed text for read command reasons and notices. Reasons shared with sign
 // in and doctor fall back to their wording. Nothing here contains a value from
@@ -281,7 +281,7 @@ export function readText(result, message, style = PLAIN) {
     statusRows(data, rows);
     lines.push(...fields(style, rows));
   } else {
-    rows.push(["Workspace", data.workspace?.id ?? null]);
+    rows.push(["Workspace", workspaceShown(data.workspace)]);
     if (result.ok) {
       const body = [];
       resultLines(result.command, data.result, body);
@@ -335,13 +335,22 @@ export function readText(result, message, style = PLAIN) {
   return render(lines);
 }
 
+// The verified workspace by name and slug, and whether it is the bound one.
+function statusWorkspace(workspace) {
+  const shown = workspaceShown(workspace);
+  if (workspace.actual === null) return workspace.intended === null ? "none" : "bound, not verified";
+  const name = shown ?? "verified";
+  if (workspace.match === false) return `${name}, which is not the workspace this project is bound to`;
+  return workspace.match === true ? `${name}, the bound workspace` : name;
+}
+
 function statusRows(data, rows) {
   rows.push(
     ["Configured", data.configured ? "yes" : "no"],
     ["Credential", { oauth_grant: "saved sign in", agent_key: "coding-agent key" }[data.credential] ?? "none"],
     ["Reachable", yesNo(data.reachable)],
     ["Authenticated", data.authenticated ? "yes, verified by the service" : "no"],
-    ["Workspace", `bound ${show(data.workspace.intended)}, verified ${show(data.workspace.actual)}`],
+    ["Workspace", statusWorkspace(data.workspace)],
     ["Deployment profile", `bound ${show(data.deployment_profile)}, reported by the service: ${
       data.deployment_profile_verified === true
         ? "same"
@@ -389,9 +398,11 @@ export function permissionsStep(profile) {
       "--write-to ~/.config/metergraph/agent.env, then loads that file in the shell that starts the agent.";
   }
   if (profile === "managed") {
-    return "A workspace owner creates a coding-agent key on the Keys page, choosing \"Debug with all three " +
-      "permissions\" under Access. Save it as METERGRAPH_AGENT_TOKEN in a private file outside the project and " +
-      "load it in the shell that starts the agent. Do not paste it into chat.";
+    return 'Run "metergraph login --runtime local --role debug --allow-evaluation-writes ' +
+      '--allow-evaluation-previews --allow-analysis-starts"; a workspace owner approves it in the browser. ' +
+      'Or a workspace owner creates a coding-agent key on the Keys page, choosing "Debug with all three ' +
+      'permissions" under Access, saved as METERGRAPH_AGENT_TOKEN in a private file outside the project. ' +
+      "Do not paste a key into chat.";
   }
   return null;
 }

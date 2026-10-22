@@ -66,7 +66,7 @@ export function traceReceipt(body, ctx, selected) {
   if (page.truncated || page.next_cursor !== null || !e.complete) return fail("trace_evidence_incomplete");
   const provenance = { workspace_id: ctx.workspaceId, deployment_profile: ctx.profile, generated_at: p.generated_at, source: p.source };
   const base = {
-    origin: ctx.origin, workspace: { id: ctx.workspaceId }, deployment_profile: ctx.profile,
+    origin: ctx.origin, workspace: { id: ctx.workspaceId, ...(ctx.workspaceLabel ?? {}) }, deployment_profile: ctx.profile,
     provenance, invocation: { trace_id: selected.traceId, request_id: selected.requestId, since: selected.since, until: selected.until, source: selected.source },
     request_match: requestMatch, warnings, complete: true, content_included: false,
     application_traffic_verified: false,

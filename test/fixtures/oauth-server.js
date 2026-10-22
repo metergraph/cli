@@ -78,6 +78,10 @@ export async function startOAuthServer(initial = {}) {
     startTokens: [],
     // Keys with the Debug role and all three workflow permissions.
     debugTokens: [],
+    // null: discovery does not advertise workspace hints. "match": it does
+    // and the consent page matches the hint; "ambiguous" or "unknown": it
+    // refuses the hint.
+    workspaceHint: null,
     // The MCP endpoint: whether tools/list carries annotations, and the
     // structured result of a tools/call (null for a fixed one).
     annotations: true,
@@ -92,6 +96,9 @@ export async function startOAuthServer(initial = {}) {
   };
 
   const state = {
+    // The workspace_hint and scope of each authorization request.
+    hints: [],
+    scopes: [],
     clients: new Map(),
     codes: new Map(),
     refresh: new Map(),
@@ -273,6 +280,7 @@ export async function startOAuthServer(initial = {}) {
       revocation_endpoint_auth_methods_supported: ["none"],
       authorization_response_iss_parameter_supported: true,
       ...offered(),
+      ...(behavior.workspaceHint === null ? {} : { metergraph_workspace_hint_supported: true }),
     };
   }
 
@@ -321,7 +329,7 @@ export async function startOAuthServer(initial = {}) {
       client !== undefined &&
       redirectMatches(client, params.get("redirect_uri")) &&
       params.get("response_type") === "code" &&
-      params.get("scope") === "agent:metadata" &&
+      grantable(params.get("scope")) &&
       params.get("code_challenge_method") === "S256" &&
       /^[A-Za-z0-9_-]{43}$/.test(params.get("code_challenge") ?? "") &&
       params.get("resource") === resource &&
@@ -334,7 +342,14 @@ export async function startOAuthServer(initial = {}) {
     const target = new URL(redirectUri);
     target.searchParams.set("state", params.get("state"));
     if (behavior.includeIss) target.searchParams.set("iss", issuer);
-    if (behavior.authorize === "deny") {
+    state.hints.push(params.get("workspace_hint"));
+    state.scopes.push(params.get("scope"));
+    // A consent page that matched no single workspace for the hint offers
+    // only Cancel, which reports why.
+    if (params.get("workspace_hint") !== null && behavior.workspaceHint !== null && behavior.workspaceHint !== "match") {
+      target.searchParams.set("error", "access_denied");
+      target.searchParams.set("error_description", `workspace_hint_${behavior.workspaceHint}`);
+    } else if (behavior.authorize === "deny") {
       target.searchParams.set("error", "access_denied");
       target.searchParams.set("error_description", "SYNTHETIC_BODY_MARKER");
     } else {
@@ -345,6 +360,7 @@ export async function startOAuthServer(initial = {}) {
         redirectUri,
         challenge: params.get("code_challenge"),
         workspaceId: behavior.workspaceId,
+        scope: params.get("scope"),
       });
       target.searchParams.set("code", code);
       // A server without the combined approval ignores the extra fields, as
@@ -368,28 +384,31 @@ export async function startOAuthServer(initial = {}) {
     return response.end();
   }
 
-  function issue(clientId, workspaceId, family) {
+  function issue(clientId, workspaceId, family, scope = METADATA) {
     const claims = behavior.claims({
       iss: issuer,
       aud: resource,
       sub: "synthetic-user",
       client_id: clientId,
       tenant_id: workspaceId,
-      scope: "agent:metadata",
+      scope,
       exp: Math.floor(Date.now() / 1000) + behavior.expiresIn,
       jti: randomUUID(),
     });
     const accessToken = `${b64({ alg: "none", typ: "at+jwt" })}.${b64(claims)}.${b64("SYNTHETIC_SIGNATURE")}`;
     const refreshToken = `refresh-${randomBytes(24).toString("hex")}`;
     state.issued.push(accessToken, refreshToken);
-    state.access.set(accessToken, { clientId, workspaceId, family });
-    state.refresh.set(refreshToken, { clientId, workspaceId, family, used: false });
+    // A Debug grant reads its workspace document as a key with the same
+    // scopes does.
+    const scopes = scope === METADATA ? null : scope.split(" ").sort();
+    state.access.set(accessToken, { clientId, workspaceId, family, scopes });
+    state.refresh.set(refreshToken, { clientId, workspaceId, family, used: false, scope });
     return behavior.token({
       access_token: accessToken,
       token_type: "Bearer",
       expires_in: behavior.expiresIn,
       refresh_token: refreshToken,
-      scope: "agent:metadata",
+      scope,
     });
   }
 
@@ -408,7 +427,7 @@ export async function startOAuthServer(initial = {}) {
       ) {
         return invalid();
       }
-      return send(response, 200, issue(code.clientId, code.workspaceId, randomUUID()));
+      return send(response, 200, issue(code.clientId, code.workspaceId, randomUUID(), code.scope));
     }
     if (form.get("grant_type") === "refresh_token") {
       if (behavior.refresh === "hang") return;
@@ -421,7 +440,7 @@ export async function startOAuthServer(initial = {}) {
         return invalid();
       }
       grant.used = true;
-      return send(response, 200, issue(grant.clientId, grant.workspaceId, grant.family));
+      return send(response, 200, issue(grant.clientId, grant.workspaceId, grant.family, grant.scope));
     }
     return send(response, 400, { error: "unsupported_grant_type" });
   }
@@ -450,7 +469,7 @@ export async function startOAuthServer(initial = {}) {
     } catch {
       return send(response, 200, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
     }
-    const tools = MCP_TOOLS.filter((tool) => grant.allPermissions || tool.scope === "agent:metadata")
+    const tools = MCP_TOOLS.filter((tool) => tool.scope === "agent:metadata" || grant.scopes?.includes(tool.scope))
       .map(({ scope, ...tool }) => (behavior.annotations ? tool : { ...tool, annotations: undefined }));
     if (message.method === "tools/list") return send(response, 200, { jsonrpc: "2.0", id: message.id, result: { tools } });
     if (message.method !== "tools/call") {
@@ -473,9 +492,10 @@ export async function startOAuthServer(initial = {}) {
     const presented = header.startsWith("Bearer ") ? header.slice(7) : null;
     const grant = presented === null ? undefined : state.access.get(presented) ??
       (behavior.agentTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false } : undefined) ??
-      (behavior.startTokens.includes(presented) ? { workspaceId: behavior.workspaceId, revoked: false, start: true } : undefined) ??
+      (behavior.startTokens.includes(presented)
+        ? { workspaceId: behavior.workspaceId, revoked: false, scopes: START_SCOPES } : undefined) ??
       (behavior.debugTokens.includes(presented)
-        ? { workspaceId: behavior.workspaceId, revoked: false, start: true, allPermissions: true } : undefined);
+        ? { workspaceId: behavior.workspaceId, revoked: false, scopes: DEBUG_SCOPES } : undefined);
     if (grant === undefined || grant.revoked) {
       response.writeHead(401, {
         "content-type": "application/json",
@@ -492,8 +512,7 @@ export async function startOAuthServer(initial = {}) {
     };
     if (path === "/v1/agent/workspace") {
       const doc = workspaceDocument(provenance, grant.workspaceId);
-      if (grant.allPermissions) doc.access = { scopes: ["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"] };
-      else if (grant.start) doc.access = { scopes: ["agent:analysis-run", "agent:read"] };
+      if (grant.scopes) doc.access = { scopes: grant.scopes };
       served.workspace = behavior.workspace(doc);
       return send(response, 200, served.workspace);
     }
@@ -520,7 +539,7 @@ export async function startOAuthServer(initial = {}) {
       served.read = behavior[name](built, query);
       return send(response, 200, served.read);
     }
-    served.capabilities = behavior.capabilities(capabilitiesDocument(provenance, { start: grant.start === true }));
+    served.capabilities = behavior.capabilities(capabilitiesDocument(provenance, { start: canStart(grant) }));
     return send(response, 200, served.capabilities);
   }
 
@@ -544,7 +563,7 @@ export async function startOAuthServer(initial = {}) {
       return send(response, 200, served.experiment);
     }
     if (request.method === "POST" && path === "/v1/agent/experiments") {
-      if (!grant.start) return refuse(403, "forbidden");
+      if (!canStart(grant)) return refuse(403, "forbidden");
       served.experiment = behavior.experiments(experimentStartDocument(provenance, payload, origin, workspace), "start");
       return send(response, 202, served.experiment);
     }
@@ -592,10 +611,12 @@ export function workspaceDocument(provenance, workspaceId) {
   return {
     schema_version: CONTRACT_VERSION,
     provenance,
+    // Output names a workspace by slug and name, so these are plain
+    // synthetic values; the marker stays in text the CLI must never print.
     workspace: {
       id: workspaceId,
-      slug: "synthetic-SYNTHETIC_BODY_MARKER",
-      name: "SYNTHETIC_BODY_MARKER workspace",
+      slug: "example-workspace",
+      name: "Example Workspace",
       created_at: "2026-01-01T00:00:00Z",
     },
     retention: { metadata_days: 90 },
@@ -617,6 +638,21 @@ const capability = (available, content, privacyClass, requiredScope, schema, ext
   schema,
   external_calls: externalCalls,
 });
+
+const METADATA = "agent:metadata";
+const WORKFLOW = ["agent:analysis-run", "agent:eval-preview", "agent:eval-write"];
+// The scopes each kind of key carries; a sign in's come from its grant.
+const START_SCOPES = ["agent:analysis-run", "agent:read"];
+const DEBUG_SCOPES = [...WORKFLOW, "agent:read"];
+const canStart = (grant) => grant.scopes?.includes("agent:analysis-run") === true;
+// What a sign in may ask for, as the service's CLI client allows: Metadata,
+// or Debug with any of the workflow permissions.
+function grantable(value) {
+  const scopes = (value ?? "").split(" ");
+  if (new Set(scopes).size !== scopes.length) return false;
+  if (scopes.length === 1 && scopes[0] === METADATA) return true;
+  return scopes.includes("agent:read") && scopes.every((scope) => scope === "agent:read" || WORKFLOW.includes(scope));
+}
 
 // Tools the fixture's MCP endpoint offers, with the service's annotations. A
 // Metadata grant sees the agent:metadata ones; a grant with Debug and every

@@ -167,7 +167,9 @@ test("corrupt, foreign or oversized grant files are unreadable rather than guess
   const cases = [
     "not json",
     JSON.stringify({ schema_version: 1, protection: isWindows ? "owner_only_file" : "dpapi", credential: record() }),
-    JSON.stringify({ schema_version: 1, protection: PROTECTION, credential: { ...record(), scope: "agent:read" } }),
+    // Login never asks for Replay, a scope out of order or one twice.
+    ...["agent:read agent:replay", "agent:eval-write agent:read", "agent:read agent:eval-write agent:eval-write"].map((scope) =>
+      JSON.stringify({ schema_version: 1, protection: PROTECTION, credential: { ...record(), scope } })),
     JSON.stringify({ schema_version: 1, protection: PROTECTION, credential: { ...record(), extra: true } }),
     "x".repeat(70 * 1024),
   ];

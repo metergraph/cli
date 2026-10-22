@@ -49,6 +49,17 @@ export function headline(style, tone, title, outcome = null) {
   return line;
 }
 
+// How text output names a workspace: "Name (slug)", or the slug or name
+// alone, from data the service verified. Never by its ID; null when neither
+// is known, and the row is then left out.
+export function workspaceShown(workspace) {
+  if (!workspace) return null;
+  const slug = workspace.slug ?? null;
+  const name = workspace.name ?? null;
+  if (slug !== null && name !== null) return `${name} (${slug})`;
+  return slug ?? name;
+}
+
 // Aligned "label  value" rows. Rows whose value is null or undefined are left out.
 export function fields(style, rows, indent = "  ") {
   const shown = rows.filter(([, value]) => value !== null && value !== undefined);
