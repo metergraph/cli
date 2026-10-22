@@ -127,6 +127,13 @@ test("status keeps configured, reachable, authenticated and the verified workspa
         trace_replay: false,
       },
       content_access: false,
+      // The fixture's deployment reports no managed evaluations, so the
+      // workflow permissions are not offered whatever the credential.
+      access: {
+        role: "metadata",
+        permissions: { allow_evaluation_writes: false, allow_evaluation_previews: false, allow_analysis_starts: false },
+        permissions_offered: false,
+      },
       application_traffic_verified: false,
       notices: ["application_traffic_not_verified"],
       next_action: null,

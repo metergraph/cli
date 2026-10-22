@@ -3,6 +3,19 @@
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
 `latest` stays on the last stable version, currently `0.2.2`.
 
+## Unreleased
+
+- One key for an agent. The read commands and `experiments` accept a coding-agent key
+  with the Debug role and the workflow permissions a workspace owner grants (Allow
+  evaluation writes, Allow evaluation previews, Allow analysis starts) as well as a
+  Metadata key, and still send only their Metadata requests with it. `experiments start`
+  accepts a Debug key with all three permissions. A key with Replay access is still
+  refused.
+- `status` reports the credential's role and each permission in `data.access`
+  (`role`, `permissions` with one boolean per permission, and `permissions_offered`,
+  false where the deployment offers no managed evaluations) and, in text, how to grant
+  Debug with all three permissions on this deployment.
+
 ## 0.2.3 (prepared; not yet published)
 
 - At a terminal, `setup` asks for what its flags leave out instead of failing one flag

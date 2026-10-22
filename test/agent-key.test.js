@@ -22,6 +22,7 @@ const sandbox = sandboxes(workDir);
 
 const KEY = "mgak_synthetic_metadata_key_5555555555555555";
 const OTHER_KEY = "mgak_synthetic_revoked_key_6666666666666666";
+const DEBUG_KEY = "mgak_synthetic_debug_key_4444444444444444";
 const SSH = { SSH_CONNECTION: "192.0.2.1 50000 192.0.2.2 22" };
 
 const PLAIN_WORKSPACE = (doc) => ({
@@ -44,7 +45,7 @@ async function read(box, args, env = {}) {
   const full = ["--json", ...args, "--project", box.project, "--config-dir", box.config];
   const run = await runCli(full, { env: { ...LOCAL_ENV, ...env } });
   const { result } = checked(assert, run, { box });
-  for (const secret of [KEY, OTHER_KEY]) {
+  for (const secret of [KEY, OTHER_KEY, DEBUG_KEY]) {
     assert.ok(!run.stdout.includes(secret) && !run.stderr.includes(secret), "a key was printed");
     for (const dir of [box.project, box.config]) {
       for (const file of filesUnder(dir)) {
@@ -192,15 +193,17 @@ test("unknown, revoked, insufficient and broader keys fail closed with a precise
     assert.equal(result.data.next_action.kind, "replace_agent_key");
     server.behavior.bearerStatus = 200;
 
-    // A Debug key is broader than Metadata. It is never used, never "reduced".
+    // A Replay key, or one mixing roles, is never used, never "reduced".
     const plain = server.behavior.workspace;
-    server.behavior.workspace = (doc) => ({ ...plain(doc), access: { scopes: ["agent:metadata", "agent:read"] } });
-    const before = server.requests.length;
-    ({ run, result } = await read(box, ["usage"], keyed(server)));
-    assert.equal(run.code, 11);
-    assert.equal(result.error.reason, "scope_mismatch");
-    assert.equal(result.data.next_action.kind, "use_metadata_only_key");
-    assert.ok(!sent(server, before).includes("GET /v1/agent/usage"));
+    for (const scopes of [["agent:read", "agent:replay"], ["agent:metadata", "agent:read"]]) {
+      server.behavior.workspace = (doc) => ({ ...plain(doc), access: { scopes } });
+      const before = server.requests.length;
+      ({ run, result } = await read(box, ["usage"], keyed(server)));
+      assert.equal(run.code, 11);
+      assert.equal(result.error.reason, "scope_mismatch");
+      assert.equal(result.data.next_action.kind, "use_metadata_only_key");
+      assert.ok(!sent(server, before).includes("GET /v1/agent/usage"));
+    }
   });
 });
 
@@ -416,4 +419,104 @@ test("handoff commands never carry shell syntax from an origin, binding or optio
   // No placeholder with < | > that a shell would treat as redirection.
   const setup = remoteSetupAction({ kind: "ci", remote: true }, "https://app.metergraph.dev", {});
   assert.equal(setup.command, "metergraph setup --runtime local --skip-skill");
+});
+
+// A deployment that offers managed evaluations, as hosted and the
+// customer-local bundle do.
+const WITH_EVALUATIONS = (doc) => ({ ...doc, deployment_capabilities: [...doc.deployment_capabilities, "evaluations"] });
+
+test("a Debug key with every permission reads with Metadata requests only, and status reports them", async () => {
+  await withServer({ debugTokens: [DEBUG_KEY], capabilities: WITH_EVALUATIONS }, async (server) => {
+    const box = sandbox();
+    const env = keyed(server, { METERGRAPH_AGENT_TOKEN: DEBUG_KEY });
+    let before = server.requests.length;
+    let { run, result } = await read(box, ["usage"], env);
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(result.data.scopes, ["agent:analysis-run", "agent:eval-preview", "agent:eval-write", "agent:read"]);
+    // The same GETs as with a Metadata key: nothing that reads content.
+    assert.deepEqual(sent(server, before), [
+      "GET /v1/deployment",
+      "GET /v1/agent/workspace",
+      "GET /v1/agent/capabilities",
+      "GET /v1/agent/usage",
+    ]);
+
+    ({ run, result } = await read(box, ["status"], env));
+    assert.equal(run.code, 0, run.stdout);
+    assert.equal(result.data.content_access, true);
+    assert.deepEqual(result.data.access, {
+      role: "debug",
+      permissions: { allow_evaluation_writes: true, allow_evaluation_previews: true, allow_analysis_starts: true },
+      permissions_offered: true,
+    });
+    before = server.requests.length;
+    const human = await runCli(["status", "--project", box.project, "--config-dir", box.config], {
+      env: { ...LOCAL_ENV, ...env },
+    });
+    assert.equal(human.code, 0, human.stdout);
+    assert.match(human.stdout, /Role +Debug/);
+    assert.match(human.stdout, /Permissions +Allow evaluation writes, Allow evaluation previews, Allow analysis starts/);
+    assert.match(human.stdout, /the read commands never request it/);
+    assert.ok(!human.stdout.includes("Writing and testing evaluations"));
+    assert.ok(!human.stdout.includes(DEBUG_KEY));
+  });
+});
+
+test("with a Metadata key, status reports no permissions and says how to grant them", async () => {
+  await withServer({ capabilities: WITH_EVALUATIONS }, async (server) => {
+    const box = sandbox();
+    const { run, result } = await read(box, ["status"], keyed(server));
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(result.data.access, {
+      role: "metadata",
+      permissions: { allow_evaluation_writes: false, allow_evaluation_previews: false, allow_analysis_starts: false },
+      permissions_offered: true,
+    });
+    const human = await runCli(["status", "--project", box.project, "--config-dir", box.config], {
+      env: { ...LOCAL_ENV, ...keyed(server) },
+    });
+    assert.match(human.stdout, /Role +Metadata/);
+    assert.match(human.stdout, /Permissions +none/);
+    // The fixture is a customer-local deployment: the bundle's own command.
+    assert.match(human.stdout, /need the Debug role with Allow evaluation writes, Allow evaluation previews and Allow analysis starts\. From the bundle directory/);
+    assert.match(human.stdout, /\.\/bin\/agent-key create --role debug/);
+  });
+});
+
+test("Debug status derives content access from available content capabilities", async () => {
+  for (const contentAvailable of [false, true]) {
+    await withServer({
+      debugTokens: [DEBUG_KEY],
+      capabilities: (doc) => ({
+        ...doc,
+        agent: Object.fromEntries(Object.entries(doc.agent).map(([name, entry]) => [
+          name, entry.content === true ? { ...entry, available: contentAvailable } : entry,
+        ])),
+      }),
+    }, async (server) => {
+      const box = sandbox();
+      const env = keyed(server, { METERGRAPH_AGENT_TOKEN: DEBUG_KEY });
+      const { run, result } = await read(box, ["status"], env);
+      assert.equal(run.code, 0, run.stdout);
+      assert.equal(result.data.content_access, contentAvailable);
+      const human = await runCli(["status", "--project", box.project, "--config-dir", box.config], {
+        env: { ...LOCAL_ENV, ...env },
+      });
+      assert.equal(human.code, 0, human.stdout);
+      assert.ok(human.stdout.includes(contentAvailable
+        ? "available to this credential; the read commands never request it"
+        : "not available to this credential"));
+    });
+  }
+});
+
+test("experiment help and reference describe Debug reads and all workflow permissions", async () => {
+  // Connection settings such as --agent-token-file are in the advanced help.
+  const run = await runCli(["help", "experiments", "--advanced"]);
+  assert.equal(run.code, 0, run.stdout);
+  assert.match(run.stdout, /For list, estimate and get: a key with the Metadata or Debug role/);
+  const reference = fs.readFileSync(new URL("../docs/reference.md", import.meta.url), "utf8");
+  assert.match(reference, /workflow requires the Debug role with all three permissions: Allow evaluation\n   writes, Allow evaluation previews and Allow analysis starts/);
+  assert.match(reference, /accept keys with the Metadata or Debug role and send only Metadata requests/);
+  assert.ok(!reference.includes("refuse a key that holds more than Metadata access"));
 });

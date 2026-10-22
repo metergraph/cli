@@ -1,3 +1,4 @@
+import { WORKFLOW_PERMISSIONS } from "./constants.js";
 import { authMessage } from "./output.js";
 import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 
@@ -7,18 +8,18 @@ import { PLAIN, fields, headline, paragraph, render, steps, toneFor } from "./st
 
 const READ_MESSAGES = {
   not_signed_in:
-    'This project is not signed in and no Metadata key was given. Run "metergraph login --runtime local" first, ' +
-    "or, where browser sign in cannot finish, give the CLI a coding-agent key with Metadata access in " +
-    "METERGRAPH_AGENT_TOKEN.",
+    'This project is not signed in and no coding-agent key was given. Run "metergraph login --runtime local" first, ' +
+    "or, where browser sign in cannot finish, give the CLI a coding-agent key with the Metadata or Debug role " +
+    "in METERGRAPH_AGENT_TOKEN.",
   agent_key_rejected:
-    "The service refused the Metadata key: it is unknown, expired or revoked. Nothing was read.",
+    "The service refused the coding-agent key: it is unknown, expired or revoked. Nothing was read.",
   agent_key_insufficient_scope:
     "The key is valid but lacks Metadata access to this workspace, for example because it is an ingest key. " +
     "No broader access was requested. Nothing was read.",
   agent_token_malformed:
     "METERGRAPH_AGENT_TOKEN does not hold exactly one key with no label, spaces or extra lines. Its value is not " +
     "shown. Nothing was sent.",
-  agent_token_missing: "No Metadata key was found. Nothing was sent.",
+  agent_token_missing: "No coding-agent key was found. Nothing was sent.",
   metergraph_url_invalid:
     "METERGRAPH_URL is not a bare https origin, or an http origin on localhost. Its value is not shown. Nothing was sent.",
   bound_to_other_origin:
@@ -28,13 +29,14 @@ const READ_MESSAGES = {
     "This project's binding names a non-hosted origin, and a key is never sent to an origin taken only from a " +
     "project file. Set METERGRAPH_URL or pass --url with the same origin to confirm it. Nothing was sent.",
   scope_mismatch:
-    "The credential is not limited to exactly the Metadata scope, so it was not used. The CLI never uses broader access.",
+    "The credential has Replay access or a scope this CLI does not use, so it was not used. Use a credential with " +
+    "the Metadata or Debug role.",
   content_access_granted:
-    "The credential would allow content, replay or provider access, so it was not used. The CLI never uses broader access.",
+    "The service offered content, replay or provider access to a Metadata credential, so it was not used.",
   platform_credential_handoff:
     "--agent-token-file cannot be checked for privacy on this platform. Use METERGRAPH_AGENT_TOKEN instead.",
   capability_unavailable:
-    "The service does not offer this read to the project's Metadata grant. No data was read and no broader access was requested.",
+    "The service does not offer this read to this credential. No data was read and no broader access was requested.",
   exceeds_service_bounds:
     "The requested --days or --limit is larger than the service allows. It was not reduced automatically. No data was read.",
   insufficient_scope: "The service refused this read because the grant lacks a required scope. No broader scope was requested.",
@@ -325,13 +327,18 @@ export function readText(result, message, style = PLAIN) {
       ["Connection guide", handoff ? next.url : null],
     ]));
   }
+  const access = result.command === "status" && result.ok ? data.access : null;
+  const step = access && !allPermissions(access) && access.permissions_offered !== false
+    ? permissionsStep(data.deployment_profile)
+    : null;
+  if (step !== null) lines.push("", ...steps(style, [["", `${PERMISSIONS_NEEDED} ${step}`]]));
   return render(lines);
 }
 
 function statusRows(data, rows) {
   rows.push(
     ["Configured", data.configured ? "yes" : "no"],
-    ["Credential", { oauth_grant: "saved sign in", agent_key: "Metadata key" }[data.credential] ?? "none"],
+    ["Credential", { oauth_grant: "saved sign in", agent_key: "coding-agent key" }[data.credential] ?? "none"],
     ["Reachable", yesNo(data.reachable)],
     ["Authenticated", data.authenticated ? "yes, verified by the service" : "no"],
     ["Workspace", `bound ${show(data.workspace.intended)}, verified ${show(data.workspace.actual)}`],
@@ -348,10 +355,45 @@ function statusRows(data, rows) {
     const flag = (name) => yesNo(data.capabilities[name]);
     rows.push(
       ["Metadata reads", `usage ${flag("usage")}, routes ${flag("routes")}, traces ${flag("trace_metadata")}`],
-      ["Content and replay", "not available to this grant"],
+      ["Content", data.content_access
+        ? "available to this credential; the read commands never request it"
+        : "not available to this credential"],
     );
   }
+  if (data.access) rows.push(["Role", ROLE_LABELS[data.access.role] ?? "none"], ["Permissions", permissionsText(data.access)]);
   rows.push(["Application traffic verified", "no"]);
+}
+
+// The role and permission labels the Keys and consent pages use.
+const ROLE_LABELS = { metadata: "Metadata", debug: "Debug" };
+
+const PERMISSIONS_NEEDED =
+  "Writing and testing evaluations and starting analyses need the Debug role with Allow evaluation writes, " +
+  "Allow evaluation previews and Allow analysis starts.";
+
+const allPermissions = (access) =>
+  access.role === "debug" && WORKFLOW_PERMISSIONS.every(({ field }) => access.permissions[field] === true);
+
+function permissionsText(access) {
+  if (access.permissions_offered === false) return "not offered by this deployment";
+  const granted = WORKFLOW_PERMISSIONS.filter(({ field }) => access.permissions[field] === true);
+  return granted.length > 0 ? granted.map(({ label }) => label).join(", ") : "none";
+}
+
+// How a person gives this agent Debug with all three permissions, by
+// deployment. Fixed text: no value from the service is printed.
+export function permissionsStep(profile) {
+  if (profile === "local") {
+    return "From the bundle directory, a workspace owner runs ./bin/agent-key create --role debug " +
+      "--allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts " +
+      "--write-to ~/.config/metergraph/agent.env, then loads that file in the shell that starts the agent.";
+  }
+  if (profile === "managed") {
+    return "A workspace owner creates a coding-agent key on the Keys page, choosing \"Debug with all three " +
+      "permissions\" under Access. Save it as METERGRAPH_AGENT_TOKEN in a private file outside the project and " +
+      "load it in the shell that starts the agent. Do not paste it into chat.";
+  }
+  return null;
 }
 
 function resultLines(command, report, lines) {

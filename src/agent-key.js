@@ -1,15 +1,17 @@
 import { verifyContext } from "./auth-oauth.js";
-import { DEFAULT_ORIGIN, MAX_BODY_BYTES, METADATA_SCOPE } from "./constants.js";
+import { DEFAULT_ORIGIN, MAX_BODY_BYTES } from "./constants.js";
 import { CREDENTIAL_MIN_LENGTH, readCredentialFile } from "./deployment-credential.js";
 import { checkDeployment } from "./doctor.js";
 import { AGENT_TOKEN_ENV, AGENT_URL_ENV } from "./environment.js";
 import { parseOrigin } from "./origin.js";
 import { send } from "./transport.js";
 
-// The read commands' second credential: a coding-agent key with Metadata
-// access that a person created on the Keys page and handed to the agent's
-// environment as a secret. It is for agents where browser sign in cannot
-// finish (SSH, cloud workspaces, CI, some containers).
+// The read commands' second credential: a coding-agent key that a person
+// created on the Keys page (or with a bundle's bin/agent-key) and handed to
+// the agent's environment as a secret. It has the Metadata role, or the
+// Debug role with workflow permissions. It is how agents read where browser
+// sign in cannot finish (SSH, cloud workspaces, CI, some containers), and how
+// they get the Debug role and permissions.
 //
 // The key comes only from the METERGRAPH_AGENT_TOKEN environment variable or
 // from a private file named by --agent-token-file (checked as setup checks
@@ -17,10 +19,11 @@ import { send } from "./transport.js";
 // written anywhere, never printed, and sent only as a bearer header to the
 // chosen origin, and only after that origin has answered the unauthenticated
 // deployment probe as a supported Metergraph service. Before any read, the
-// service's own workspace and capabilities documents must show exactly the
-// Metadata scope, no content access, the expected deployment profile and,
-// when one is pinned, the expected workspace. A broader key fails closed:
-// there is no fallback to Debug or Replay access.
+// service's own workspace and capabilities documents must show Metadata, or
+// Debug with workflow permissions, the expected deployment profile and, when
+// one is pinned, the expected workspace. A Replay key, or one with any other
+// scope, fails closed. The read commands send only Metadata requests,
+// whichever key they use.
 
 const TOKEN = new RegExp(`^[\\x21-\\x7e]{${CREDENTIAL_MIN_LENGTH},8192}$`);
 
@@ -84,10 +87,10 @@ export function keyTarget({ binding, options, env, originConfirmed = false }) {
 //   { ok: false, outcome, reason }
 // verifiedProfile is the profile the caller already read from GET
 // /v1/deployment under the same deadline, or null to read it here.
-// access is "metadata" for the read commands, or "experiment_start" for
-// experiments start, which needs Debug access and the start grant instead
-// (verifyContext) and uses the key for that one request.
-export async function keySession({ target, source, env, signal, verifiedProfile = null, access = "metadata" }) {
+// access is "read" for the read commands, or "experiment_start" for
+// experiments start, which needs Debug access and the start grant
+// (verifyContext).
+export async function keySession({ target, source, env, signal, verifiedProfile = null, access = "read" }) {
   // A key already in the environment is checked for shape before any
   // request; a key file is opened only once the origin has proven itself.
   let key = source.kind === "env" ? readAgentKey(source, env) : null;
@@ -128,7 +131,8 @@ export async function keySession({ target, source, env, signal, verifiedProfile 
       origin: target.origin,
       workspaceId: verified.workspaceId,
       profile,
-      scopes: access === "metadata" ? [METADATA_SCOPE] : verified.scopes,
+      access: verified.access,
+      scopes: verified.scopes,
       accessToken: token,
     },
     documents: verified.documents,

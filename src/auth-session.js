@@ -1,7 +1,7 @@
 import { endpointsFor, refreshGrant, verifyContext } from "./auth-oauth.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { Stop, openStore, readCredential, resolveConfigDir, withSlotLock, writeCredential } from "./auth-store.js";
-import { AUTH_HTTP_TIMEOUT_MS, METADATA_SCOPE } from "./constants.js";
+import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
 import { deadline } from "./transport.js";
 
 // The verified session that later read commands build on. It never opens a
@@ -14,7 +14,7 @@ const REFRESH_MARGIN_MS = 60 * 1000;
 export const LOCK_WAIT_MS = AUTH_HTTP_TIMEOUT_MS + 5000;
 
 // Resolves with
-//   { ok: true, session: { origin, workspaceId, profile, scopes, accessToken }, documents, knownCredentials }
+//   { ok: true, session: { origin, workspaceId, profile, access, scopes, accessToken }, documents, knownCredentials }
 //   { ok: false, outcome, reason }
 // documents holds the workspace and capabilities documents the service
 // returned during verification, already checked by verifyContext.
@@ -87,7 +87,8 @@ export async function sessionFor(binding, store, cancel) {
       origin: binding.origin,
       workspaceId: binding.workspace_id,
       profile: binding.deployment_profile,
-      scopes: [METADATA_SCOPE],
+      access: verified.access,
+      scopes: verified.scopes,
       accessToken: record.access_token,
     },
     documents: verified.documents,
