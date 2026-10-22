@@ -122,9 +122,17 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
   until `--timeout-ms`; afterwards, run the same command again to continue from the
   saved state
   ([details](https://github.com/metergraph/cli/blob/main/docs/reference.md#approval-from-an-agent)).
-- **MCP.** Workspace tools for agents are served by the hosted MCP endpoint, not by this
-  CLI. See the [MCP server guide](https://www.metergraph.dev/docs/guides/mcp-server/)
-  and the [agent access guide](https://www.metergraph.dev/docs/guides/agent-access/).
+- **Access, said by role and permission.** Sign in and setup give the Metadata role,
+  which is enough for usage, cost and trace questions. Writing and testing evaluations
+  and starting analyses need the Debug role with Allow evaluation writes, Allow
+  evaluation previews and Allow analysis starts: a coding-agent key a workspace owner
+  creates on the Keys page by choosing "Debug with all three permissions", or with
+  `bin/agent-key create --role debug --allow-evaluation-writes --allow-evaluation-previews
+  --allow-analysis-starts` on the customer-local bundle. Save it as
+  `METERGRAPH_AGENT_TOKEN`; the same key serves the read commands and an MCP client
+  configuration. `metergraph status --json` reports the role and each permission in
+  `data.access`. Clients without a shell connect through the
+  [MCP server](https://www.metergraph.dev/docs/guides/mcp-server/) instead.
 
 Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 
@@ -153,7 +161,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `login`, `logout` | Sign a project in or out without the rest of `setup` | Yes |
 | `doctor` | Check that a service is reachable, healthy and supported, without credentials | Yes |
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |
-| `skills install`, `skills update`, `skills list` | Install, update or list the workflow skills, such as the model-swap loop | No |
+| `skills install`, `skills update`, `skills list` | Install, update or list the workflow skills, such as model swap | No |
 
 `metergraph help COMMAND` lists a command's options. The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and
@@ -220,12 +228,13 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 - **No usage telemetry.** The CLI collects no analytics about how you use it. It talks
   only to the Metergraph origin you point it at.
 - **Least access.** Sign in grants only the Metadata scope, `agent:metadata`. The CLI
-  never requests Debug or Replay access, never falls back to broader access, and never
-  reads retained prompts, responses or other content. It calls no model provider. The one
-  exception is `experiments start`: it uses a coding-agent key a workspace owner created
-  with exactly Debug access and Allow analysis starts, refuses a key with any other scope,
-  and sends it only with that one start request. The service then replays the sampled calls on the
-  chosen providers within its own budget. Every other command refuses such a key.
+  never requests Debug or Replay access, never falls back to broader access, and the read
+  commands never read retained prompts, responses or other content, whichever credential
+  they use. It calls no model provider. A coding-agent key a workspace owner created with
+  the Debug role and workflow permissions is accepted, so one key serves an agent;
+  the read commands still send only their Metadata requests with it. `experiments start`
+  needs Debug access and Allow analysis starts; the service then replays the sampled calls
+  on the chosen providers within its own budget. A key with Replay access is refused.
 - **Credentials.** The sign in grant is stored per user in `~/.config/metergraph`
   (`AppData\Roaming\Metergraph` on Windows), as owner-only files on Linux and macOS and
   encrypted with DPAPI on Windows. The ingest key goes only into the project's private

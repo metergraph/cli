@@ -63,6 +63,7 @@ test("a valid session is verified with the service and returns its token to code
       origin: server.origin,
       workspaceId: WORKSPACE_A,
       profile: "local",
+      access: "metadata",
       scopes: ["agent:metadata"],
       accessToken: project.record().access_token,
     });

@@ -11,11 +11,12 @@ const MESSAGES = {
     "This deployment does not offer experiments to this credential, for example because the feature is off. " +
     "Nothing was read or started.",
   experiment_start_key_required:
-    "Starting an experiment needs a coding-agent key with Debug access and Allow analysis starts, in " +
-    "--agent-token-file or METERGRAPH_AGENT_TOKEN. A saved sign in is Metadata only. Nothing was sent.",
+    "Starting an experiment needs a coding-agent key with the Debug role and Allow analysis starts, in " +
+    "--agent-token-file or METERGRAPH_AGENT_TOKEN. A saved sign in is Metadata only. " +
+    "Nothing was sent.",
   experiment_start_not_granted:
-    "This key cannot start experiments: it needs exactly Debug access and the Allow analysis starts grant from a " +
-    "workspace owner, and nothing more. Nothing was started.",
+    "This key cannot start experiments: it needs Debug access and the Allow analysis starts grant from a " +
+    "workspace owner, and no Replay access. Nothing was started.",
   experiment_start_unavailable:
     "The service does not offer experiment starts to this key, for example because the feature is off or the " +
     "granting owner is no longer an owner. Nothing was started.",

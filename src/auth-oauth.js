@@ -3,9 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   AGENT_CONTRACT_VERSION,
   AUTH_PATHS,
+  DEBUG_SCOPE,
   EXPERIMENT_START_KEY_SCOPES,
   EXPERIMENT_START_SCOPE,
   METADATA_SCOPE,
+  WORKFLOW_SCOPES,
 } from "./constants.js";
 import { parseJsonObject } from "./http.js";
 import { failureOf, send } from "./transport.js";
@@ -384,27 +386,43 @@ function decodeClaims(token) {
   }
 }
 
+// What a credential's scopes amount to: "metadata" for exactly the Metadata
+// scope, "debug" for Debug with any of the workflow permissions, or null for
+// anything else, including Replay.
+export function credentialAccess(scopes) {
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
+  if (new Set(scopes).size !== scopes.length) return null;
+  if (scopes.length === 1 && scopes[0] === METADATA_SCOPE) return "metadata";
+  if (!scopes.includes(DEBUG_SCOPE)) return null;
+  return scopes.every((scope) => scope === DEBUG_SCOPE || WORKFLOW_SCOPES.includes(scope)) ? "debug" : null;
+}
+
 // Asks the service, with the access token, which workspace and profile the
 // grant is for and what it may do. The answers are server-authoritative:
 //   GET /v1/agent/workspace: workspace.id, provenance.workspace_id and the
 //     expected workspace must agree, provenance.deployment_profile must be
-//     the profile seen before sign in, access.scopes must be exactly the
-//     Metadata scope and content.included must be false. Capture being
+//     the profile seen before sign in, access.scopes must be what this use
+//     accepts (below) and content.included must be false. Capture being
 //     enabled for the workspace (content.captured) is not a reason to refuse.
 //   GET /v1/agent/capabilities: provenance.workspace_id and both
-//     provenance.deployment_profile and deployment_profile must match, and
-//     every capability that reads content or replays, or calls a configured
-//     provider, must be unavailable to this grant.
+//     provenance.deployment_profile and deployment_profile must match. For a
+//     Metadata credential, every capability that reads content or replays,
+//     or calls a configured provider, must be unavailable.
 // Nothing else is read: no telemetry, content or provider requests.
-// Returns { ok: true, workspaceId, documents } or { ok: false, outcome, reason, denied }
-// where denied means the service refused the token (401 or 403).
+// Returns { ok: true, workspaceId, access, scopes, documents } or
+// { ok: false, outcome, reason, denied } where denied means the service
+// refused the token (401 or 403).
 // workspaceId is the workspace the credential must be for. Only an agent key
 // with nothing to pin it to passes anyWorkspace: true with workspaceId null,
 // and then the workspace the service reports is checked for consistency and
 // returned as the verified one.
-// access is "metadata" (every read command and sign in) or
-// "experiment_start" (experiments start only: a coding-agent key with Debug
-// access and the start grant, checked for exactly that and used for nothing else).
+// access says what this use accepts:
+//   "metadata": exactly the Metadata scope (sign in).
+//   "read": Metadata, or Debug with any workflow permissions, which a person
+//     grants for writing evaluations and starting analyses (the read
+//     commands). Replay is refused.
+//     A read command still sends only its own Metadata requests.
+//   "experiment_start": Debug with the start grant (experiments start).
 export async function verifyContext(origin, accessToken, { profile, workspaceId, anyWorkspace = false, access = "metadata" }, signal) {
   const workspace = await bearerJson(origin, AUTH_PATHS.workspace, accessToken, WORKSPACE_BYTES, signal, "workspace");
   if (!workspace.ok) return workspace;
@@ -414,7 +432,7 @@ export async function verifyContext(origin, accessToken, { profile, workspaceId,
   }
   const checked = access === "experiment_start"
     ? checkStartWorkspace(workspace.body, { profile, workspaceId })
-    : checkWorkspace(workspace.body, { profile, workspaceId });
+    : checkWorkspace(workspace.body, { profile, workspaceId, debug: access === "read" });
   if (!checked.ok) return checked;
 
   const capabilities = await bearerJson(
@@ -428,14 +446,15 @@ export async function verifyContext(origin, accessToken, { profile, workspaceId,
   if (!capabilities.ok) return capabilities;
   const allowed = access === "experiment_start"
     ? checkStartCapabilities(capabilities.body, { profile, workspaceId })
-    : checkCapabilities(capabilities.body, { profile, workspaceId });
+    : checkCapabilities(capabilities.body, { profile, workspaceId, access: checked.access });
   if (!allowed.ok) return allowed;
   // The verified documents stay in memory for read commands, which print
   // only fields they validate themselves.
   return {
     ok: true,
     workspaceId,
-    scopes: checked.scopes ?? [METADATA_SCOPE],
+    access: checked.access,
+    scopes: checked.scopes,
     documents: { workspace: workspace.body, capabilities: capabilities.body },
   };
 }
@@ -443,7 +462,8 @@ export async function verifyContext(origin, accessToken, { profile, workspaceId,
 // Both documents carry the service's contract version string in
 // schema_version. Any other value, including a number, is a contract this
 // CLI does not know.
-export function checkWorkspace(body, { profile, workspaceId }) {
+// debug: true accepts Debug with workflow permissions as well as Metadata.
+export function checkWorkspace(body, { profile, workspaceId, debug = false }) {
   const id = normalizeUuid(body.workspace?.id);
   if (body.schema_version !== AGENT_CONTRACT_VERSION || id === null || !isObject(body.provenance)) {
     return stop("verification_failed", "workspace_response_invalid");
@@ -453,29 +473,27 @@ export function checkWorkspace(body, { profile, workspaceId }) {
   }
   if (body.provenance.deployment_profile !== profile) return stop("verification_failed", "profile_mismatch");
   const scopes = body.access?.scopes;
-  if (!Array.isArray(scopes) || scopes.length !== 1 || scopes[0] !== METADATA_SCOPE) {
+  const access = credentialAccess(scopes);
+  if (access === null || (access === "debug" && !debug)) {
     return stop("verification_failed", "scope_mismatch");
   }
   if (!isObject(body.content) || body.content.included !== false) {
     return stop("verification_failed", "content_access_granted");
   }
-  return { ok: true };
+  return { ok: true, access, scopes: [...scopes].sort() };
 }
 
 // A start key's workspace document: the same identity checks as
-// checkWorkspace, and exactly the scopes Debug and the start grant.
+// checkWorkspace, and Debug with the start grant (other workflow permissions
+// may come with it; Replay may not).
 export function checkStartWorkspace(body, { profile, workspaceId }) {
   const identity = checkWorkspace({ ...body, access: { scopes: [METADATA_SCOPE] } }, { profile, workspaceId });
   if (!identity.ok) return identity;
   const scopes = body.access?.scopes;
-  if (
-    !Array.isArray(scopes) ||
-    scopes.length !== EXPERIMENT_START_KEY_SCOPES.length ||
-    !EXPERIMENT_START_KEY_SCOPES.every((scope) => scopes.includes(scope))
-  ) {
+  if (credentialAccess(scopes) !== "debug" || !EXPERIMENT_START_KEY_SCOPES.every((scope) => scopes.includes(scope))) {
     return stop("permission_denied", "experiment_start_not_granted");
   }
-  return { ok: true, scopes: [...scopes].sort() };
+  return { ok: true, access: "debug", scopes: [...scopes].sort() };
 }
 
 // A start key's capabilities document: the same identity checks as
@@ -497,7 +515,9 @@ export function checkStartCapabilities(body, { profile, workspaceId }) {
   return { ok: true };
 }
 
-export function checkCapabilities(body, { profile, workspaceId }) {
+// access is the credential's ("metadata" or "debug"). A Debug credential is
+// offered content and starts by design; the read commands never use them.
+export function checkCapabilities(body, { profile, workspaceId, access = "metadata" }) {
   if (body.schema_version !== AGENT_CONTRACT_VERSION || !isObject(body.provenance) || !isObject(body.agent)) {
     return stop("verification_failed", "capabilities_response_invalid");
   }
@@ -509,6 +529,10 @@ export function checkCapabilities(body, { profile, workspaceId }) {
   }
   for (const entry of Object.values(body.agent)) {
     if (!isObject(entry)) return stop("verification_failed", "capabilities_response_invalid");
+    if (access !== "metadata" && entry.required_scope === "agent:replay" && entry.available !== false) {
+      return stop("verification_failed", "scope_mismatch");
+    }
+    if (access !== "metadata") continue;
     const sensitive =
       entry.content !== false ||
       entry.privacy_class !== "metadata" ||
