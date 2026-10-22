@@ -14,7 +14,7 @@ test("help works offline in text and JSON form", async () => {
   assert.match(text.stdout, /doctor/);
   assert.equal(text.stderr, "");
 
-  const doctorHelp = await runCli(["help", "doctor"], { offline: true });
+  const doctorHelp = await runCli(["help", "doctor", "--advanced"], { offline: true });
   assert.equal(doctorHelp.code, 0);
   assert.match(doctorHelp.stdout, /--timeout-ms/);
 
@@ -82,7 +82,7 @@ test("help works offline in text and JSON form", async () => {
 });
 
 test("login and logout help works offline and states what is not done", async () => {
-  for (const args of [["help", "login"], ["login", "--help"]]) {
+  for (const args of [["help", "login", "--advanced"], ["login", "--help", "--advanced"]]) {
     const run = await runCli(args, { offline: true });
     assert.equal(run.code, 0);
     assert.equal(run.stderr, "");
@@ -94,7 +94,7 @@ test("login and logout help works offline and states what is not done", async ()
     assert.match(run.stdout, /--no-browser/);
     assert.match(run.stdout, /--reconnect/);
   }
-  const logout = await runCli(["help", "logout"], { offline: true });
+  const logout = await runCli(["help", "logout", "--advanced"], { offline: true });
   assert.equal(logout.code, 0);
   assert.match(logout.stdout, /metergraph logout/);
   assert.match(logout.stdout, /code 13/);
@@ -103,7 +103,7 @@ test("login and logout help works offline and states what is not done", async ()
 });
 
 test("skill help works offline and states what is not done", async () => {
-  for (const args of [["help", "skill"], ["skill", "--help"], ["skill", "install", "--help"]]) {
+  for (const args of [["help", "skill", "--advanced"], ["skill", "--help", "--advanced"]]) {
     const run = await runCli(args, { offline: true });
     assert.equal(run.code, 0);
     assert.equal(run.stderr, "");

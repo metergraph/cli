@@ -511,7 +511,8 @@ test("Debug status derives content access from available content capabilities", 
 });
 
 test("experiment help and reference describe Debug reads and all workflow permissions", async () => {
-  const run = await runCli(["help", "experiments"]);
+  // Connection settings such as --agent-token-file are in the advanced help.
+  const run = await runCli(["help", "experiments", "--advanced"]);
   assert.equal(run.code, 0, run.stdout);
   assert.match(run.stdout, /For list, estimate and get: a key with the Metadata or Debug role/);
   const reference = fs.readFileSync(new URL("../docs/reference.md", import.meta.url), "utf8");

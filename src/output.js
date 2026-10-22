@@ -1,3 +1,4 @@
+import { actionHelpData, displayOptions } from "./action-help.js";
 import { PRICING_OPTIONS } from "./pricing-args.js";
 import {
   CONNECTION_GUIDE_URL,
@@ -162,7 +163,7 @@ const LOGIN_OPTIONS = [
     name: "--runtime",
     value: "RUNTIME",
     summary:
-      "Required. Where this terminal runs, not which Metergraph service. local: your own machine, " +
+      "Required for scripts; inferred as local in an interactive local terminal. Where this terminal runs, not which Metergraph service. local: your own machine, " +
       "including for the hosted service. cloud, cloud-no-shell: a cloud sandbox; get the connection guide.",
   },
   { name: "--url", value: "ORIGIN", summary: `Origin to sign in to. Default ${DEFAULT_ORIGIN}.` },
@@ -510,8 +511,8 @@ function optionLines(options, minimum) {
   return options.map((option, index) => `  ${flags[index].padEnd(width)}${option.summary}`);
 }
 
-export function helpData(topic) {
-  return {
+export function helpData(topic, action = null) {
+  const data = {
     topic,
     usage: [
       "metergraph --help [--json]",
@@ -587,13 +588,13 @@ export function helpData(topic) {
         name: "setup",
         summary: "Guide browser sign in and workspace choice, approve an ingest-only key, and install the selected client skill. Does not verify application traffic.",
         options: [
-          { name: "--runtime", value: "RUNTIME", summary: "Required unless a person runs setup at a terminal (then local). local only; other runtimes get a handoff." },
+          { name: "--runtime", value: "RUNTIME", summary: "Local terminal: inferred automatically. Scripts: required. Other runtimes get a handoff." },
           { name: "--url", value: "ORIGIN", summary: "Deployment origin. Defaults to an existing project binding, else the hosted origin." },
           { name: "--workspace", value: "UUID", summary: "Expected workspace; the browser must approve this exact workspace." },
           { name: "--project", value: "DIR", summary: "Project directory. Default: current directory." },
           CONFIG_DIR_OPTION,
           { name: "--env-file", value: "FILE", summary: "Project-relative env file. Default: .env." },
-          { name: "--client", value: "CLIENT", summary: "Install the bundled skill for codex, claude or cursor." },
+          { name: "--client", value: "CLIENT", summary: "codex, claude or cursor. A local interactive setup asks when omitted." },
           { name: "--skip-skill", value: null, summary: "Explicitly leave client skill installation pending." },
           { name: "--timeout-ms", value: "N", summary: "Time to wait for browser approval." },
           { name: "--signup", value: null, summary: "Start at hosted sign up when the project needs login." },
@@ -645,12 +646,34 @@ export function helpData(topic) {
       meaning: EXIT_CODE_MEANINGS[outcome],
     })),
   };
+  if (action) data.action = { name: action, ...actionHelpData(topic, action, data.commands) };
+  return data;
 }
 
-export function helpText(topic, style = PLAIN) {
+export function helpText(topic, style = PLAIN, action = null, advanced = false) {
   const lines = [];
+  if (action) {
+    const entry = actionHelpData(topic, action, helpData(topic).commands);
+    if (entry) return formatHelp([
+      `Usage: ${entry.usage}`, "", entry.summary, "", "Examples:",
+      ...entry.examples.map(example => `  ${example}`), "", "Options:",
+      ...optionLines(displayOptions(entry.options, topic, action, advanced), 20), "", entry.note, "",
+      ...(advanced ? [] : [`Connection settings: metergraph ${topic} ${action} --help --advanced`]),
+    ], style);
+  }
+  if (topic === "exit-codes") {
+    lines.push("Exit codes:", "", "For scripts. Human output describes the result and what to do next.", "");
+    for (const [outcome, code] of Object.entries(EXIT_CODES)) {
+      lines.push(`  ${String(code).padEnd(4)}${outcome}`, ...paragraph(style, EXIT_CODE_MEANINGS[outcome], "      "), "");
+    }
+    return formatHelp(lines, style);
+  }
+  if (topic === "agents") return formatHelp([
+    "Connect a coding agent", "", ...AGENT_PATH_HELP, "", ...AGENT_APPROVAL_HELP,
+    "", 'Use --json for structured results. Run "metergraph help exit-codes" for scripting outcomes.',
+  ], style);
   if (topic === "pricing") {
-    return `Usage: metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]
+    return formatHelp(`Usage: metergraph pricing models|lookup|calculate|cost|history|market [options] [--json]
 
 Public catalog prices. No account, project or token is required.
 models  [--model ID] [--provider ID | --channel ID] [--region ID] [--limit 1..100]
@@ -684,7 +707,7 @@ Public API: GET /v1/pricing/models; POST /v1/pricing/lookup and /calculate.
 No credentials, traces, prompts or responses are loaded from project files.
 The CLI constructs metadata-only provider-format traces from the supplied counts.
 See docs/pricing.md for the supported contract, limitations and reference previews.
-`;
+`.split("\n"), style);
   }
   if (topic === "doctor") {
     lines.push(
@@ -882,47 +905,110 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "Discovery stays pending until the client itself loads the skills.",
     );
   } else {
-    lines.push(
-      `metergraph ${VERSION} (preview)`,
-      "",
-      "Usage:",
-      "  metergraph --help [--json]       Show this help",
-      "  metergraph --version [--json]    Show the CLI version",
-      "  metergraph doctor [options]      Check a Metergraph service, read only",
-      "  metergraph skill install|update  Install or update the agent skill in a project",
-      "  metergraph skills install|update|list  Workflow skills, such as model swap",
-      "  metergraph login [options]       Sign in and bind a project to a workspace",
-      "  metergraph logout [options]      Revoke and remove a project's sign in",
-      "  metergraph setup [options]       Approve and write a private ingest key",
-      "  metergraph verify [options]      Find one exact processed trace",
-      "  metergraph status [options]      Show configured, reachable and verified state",
-      "  metergraph context [options]     Show the verified workspace",
-      "  metergraph capabilities [opts]   Show the agent reads offered to this grant",
-      "  metergraph usage [options]       Daily usage per route, Metadata only",
-      "  metergraph routes [options]      Routes and evaluation contract versions",
-      "  metergraph traces [options]      One page of trace metadata",
-      "  metergraph experiments list|estimate|start|get  Replay a workload on other models",
-      "  metergraph tools list|call       Any Agent Access tool this credential can use",
-      "  metergraph pricing <action>      Public lookup, cost, history and market board",
-      "",
-      'Run "metergraph help doctor" for doctor options.',
-      'Run "metergraph help skill" for skill options.',
-      'Run "metergraph help skills" for workflow skill options.',
-      'Run "metergraph help login" or "metergraph help logout" for sign in options.',
-      'Run "metergraph help verify" for exact-trace verification options.',
-      'Run "metergraph help COMMAND" for status, context, capabilities, usage, routes or traces.',
-      'Run "metergraph help experiments" for experiment options.',
-      'Run "metergraph help tools" for tool options.',
-      "",
-      ...AGENT_PATH_HELP,
-    );
+    return rootHelp(style);
   }
-  lines.push("", "Exit codes:");
-  for (const [outcome, code] of Object.entries(EXIT_CODES)) {
-    lines.push(`  ${String(code).padEnd(3)}${outcome.padEnd(25)}${style.dim(EXIT_CODE_MEANINGS[outcome])}`);
+  // Reference material is opt-in; everyday help stays focused on this command.
+  return commandHelp(topic, lines, style, advanced);
+}
+
+function commandHelp(topic, lines, style, advanced) {
+  const optionsAt = lines.indexOf("Options:");
+  if (optionsAt < 0) return formatHelp(lines, style);
+  const optionsEnd = lines.indexOf("", optionsAt + 1);
+  const usageEnd = lines.indexOf("");
+  const examples = {
+    setup: ["metergraph setup", "metergraph setup --runtime local --client codex --json --no-browser"],
+    login: ["metergraph login", "metergraph login --runtime local --no-browser"],
+    logout: ["metergraph logout"], doctor: ["metergraph doctor"],
+    verify: ["metergraph verify --trace-id TRACE_ID --since START_ISO_TIME --until END_ISO_TIME"],
+    status: ["metergraph status"], context: ["metergraph context"], capabilities: ["metergraph capabilities"],
+    usage: ["metergraph usage --days 7"], routes: ["metergraph routes"], traces: ["metergraph traces --limit 10"],
+    skill: ["metergraph skill install --client codex"], skills: ["metergraph skills list"],
+    experiments: ["metergraph experiments list", "metergraph experiments estimate --help"],
+  }[topic] ?? [];
+  const notes = lines.slice(usageEnd + 1, optionsAt);
+  const command = helpData(topic).commands.find(entry => entry.name === topic);
+  const options = command ? ["Options:", ...optionLines(displayOptions(command.options, topic, null, advanced), 22)]
+    : lines.slice(optionsAt, optionsEnd < 0 ? lines.length : optionsEnd);
+  const synopsis = {
+    setup: "metergraph setup [--client CLIENT | --skip-skill] [options]",
+    login: "metergraph login [--runtime local] [options]",
+    logout: "metergraph logout [options]",
+    verify: "metergraph verify (--trace-id ID | --request-id ID) --since TIME --until TIME [options]",
+    ...Object.fromEntries(READ_HELP.map(entry => [entry.name, `metergraph ${entry.name} [options]`])),
+  }[topic];
+  return formatHelp([
+    ...(synopsis ? [`Usage: ${synopsis}`] : lines.slice(0, usageEnd)), "", "Examples:", ...examples.map(example => `  ${example}`),
+    ...(topic === "setup" || topic === "login" ? ["", "Local terminals guide missing choices. Scripts require explicit flags.",
+      "With --json --no-browser, a step that needs browser approval exits 18 (action_required) with the URL in " +
+      "data.next_action.url; approve it, then run the same command again."] : []),
+    "", ...options,
+    ...(advanced ? ["", "Details", ...notes, ...lines.slice(optionsEnd < 0 ? lines.length : optionsEnd)]
+      : ["", `Connection settings and details: metergraph ${topic} --help --advanced`]),
+  ], style);
+}
+
+function rootHelp(style) {
+  const groups = [
+    ["Get started", [
+      ["setup", "Connect your app and install an agent skill"],
+      ["login", "Sign in to a workspace"],
+      ["status", "Check this project's connection"],
+    ]],
+    ["Explore", [
+      ["usage", "View costs and token usage"],
+      ["traces", "Browse trace metadata"],
+      ["routes", "List routes and evaluation contracts"],
+      ["experiments", "Estimate and run model comparisons"],
+      ["tools", "List and call the tools your coding agent can use"],
+      ["pricing", "Look up public model prices; no account needed"],
+    ]],
+    ["Manage", [
+      ["verify", "Verify one processed trace"],
+      ["doctor", "Check service health"],
+      ["context", "Show the connected workspace"],
+      ["capabilities", "Show available workspace reads"],
+      ["skill", "Install or update the setup skill"],
+      ["skills", "Install, update or list workflow skills"],
+      ["logout", "Sign out of this project"],
+    ]],
+  ];
+  const lines = [style.bold("Metergraph") + " " + style.dim(`${VERSION} · preview`),
+    "Understand your AI usage and compare models.", "", "Usage: metergraph <command> [options]", ""];
+  for (const [title, commands] of groups) {
+    lines.push(section(style, title), ...fields(style, commands), "");
   }
-  // Section labels ("Usage:", "Options:", "Exit codes:") in bold.
-  return `${lines.map((line) => line.replace(/^(Usage|Options|Exit codes):/, (label) => style.bold(label))).join("\n")}\n`;
+  lines.push(section(style, "Try it"),
+    "  metergraph setup --runtime local --client codex",
+    "  metergraph pricing models --limit 10", "",
+    'Run "metergraph <command> --help" for options and examples.',
+    'Use --json for scripts; --version to show the version.',
+    'Scripting reference: metergraph help exit-codes.',
+    'Connecting a cloud agent? Run "metergraph help agents".');
+  return formatHelp(lines, style);
+}
+
+function formatHelp(lines, style) {
+  return render(lines.flatMap((line) => {
+    if (!line) return [""];
+    if (line.length <= style.width && !/^(Usage|Options|Examples|Exit codes):/.test(line)) return [line];
+    if (/^(Usage|Options|Examples|Exit codes):/.test(line)) {
+      const [first, ...rest] = paragraph(style, line, "");
+      return [style.bold(first), ...rest];
+    }
+    // Preserve option and command columns, with a hanging indent on small terminals.
+    const row = /^(  \S.*?) {2,}(\S.*)$/.exec(line);
+    if (row && Number.isFinite(style.width)) {
+      const prefix = row[1] + "  ";
+      if (prefix.length > style.width / 2) {
+        return [row[1], ...paragraph(style, row[2], "    ")];
+      }
+      const wrapped = paragraph(style, row[2], " ".repeat(prefix.length));
+      return [prefix + wrapped[0].trimStart(), ...wrapped.slice(1)];
+    }
+    return paragraph(style, line.trimStart(), line.match(/^ */)[0]);
+  }));
+
 }
 
 export function skillText(result, message, style = PLAIN) {

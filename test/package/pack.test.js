@@ -33,6 +33,7 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
   "package.json",
+  "src/action-help.js",
   "src/agent-key.js",
   "src/approval-handoff.js",
   "src/args.js",

@@ -30,6 +30,7 @@ import {
   canAsk,
   commandLine,
   fillSetupArgv,
+  fillLoginArgv,
   offerAgentAccess,
   terminalPrompter,
 } from "./setup-interactive.js";
@@ -64,7 +65,12 @@ async function run(argv, { stdout, stderr, stdin }) {
   let parsed = parseArgs(argv);
   const style = createStyle(stdout);
   const say = (...lines) => stdout.write(lines.map((line) => `${line}\n`).join(""));
-  const asking = canAsk(argv, { stdin, stdout });
+  const asking = canAsk(argv, { stdin, stdout, stderr });
+
+  if (asking && parsed.command === "login") {
+    argv = fillLoginArgv(argv);
+    parsed = parseArgs(argv);
+  }
 
   // A person at a terminal is asked for what setup is missing; the answers
   // become flags and go through the same parsing as a script's.
@@ -96,13 +102,20 @@ async function run(argv, { stdout, stderr, stdin }) {
       message: parsed.message,
     });
     if (parsed.json) stdout.write(toJsonLine(result));
-    else stderr.write(`${createStyle(stderr).red("Error:")} ${parsed.message}\n`);
+    else {
+      const errorStyle = createStyle(stderr);
+      const [first, ...rest] = paragraph(errorStyle, `Error: ${parsed.message}`, "");
+      const help = parsed.command && parsed.command !== "help"
+        ? `metergraph ${parsed.command} --help` : "metergraph --help";
+      stderr.write(render([first.replace(/^Error:/, errorStyle.red("Error:")), ...rest,
+        "", ...steps(errorStyle, [["Help", help]])]));
+    }
     return result;
   }
 
   if (parsed.command === "help") {
-    const result = envelope({ command: "help", outcome: "ok", data: helpData(parsed.topic) });
-    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic, style));
+    const result = envelope({ command: "help", outcome: "ok", data: helpData(parsed.topic, parsed.action) });
+    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic, style, parsed.action, parsed.advanced));
     return result;
   }
 

@@ -1,5 +1,3 @@
-import { EXIT_CODES } from "./constants.js";
-
 // Presentation for human (non --json) output: a status headline, aligned
 // fields and next steps. Color is used only when the stream is a terminal
 // and NO_COLOR is unset (https://no-color.org); FORCE_COLOR turns it on.
@@ -42,10 +40,10 @@ export function toneFor(outcome) {
   return "fail";
 }
 
-export function headline(style, tone, title, outcome = null) {
+export function headline(style, tone, title) {
   const [icon, color] = TONES[tone];
-  let line = `${style[color](icon)} ${style.bold(title)}`;
-  if (outcome !== null && outcome !== "ok") line += `  ${style.dim(`(${outcome}, exit ${EXIT_CODES[outcome]})`)}`;
+  const line = `${style[color](icon)} ${style.bold(title)}`;
+  // Machine outcomes and numeric codes belong to JSON and the scripting reference.
   return line;
 }
 
@@ -64,7 +62,16 @@ export function workspaceShown(workspace) {
 export function fields(style, rows, indent = "  ") {
   const shown = rows.filter(([, value]) => value !== null && value !== undefined);
   const width = Math.max(0, ...shown.map(([label]) => label.length));
-  return shown.map(([label, value]) => `${indent}${style.dim(label.padEnd(width))}  ${value}`);
+  return shown.flatMap(([label, value]) => {
+    if (!Number.isFinite(style.width)) return [`${indent}${style.dim(label.padEnd(width))}  ${value}`];
+    const prefix = `${indent}${label.padEnd(width)}  `;
+    if (prefix.length > style.width / 2) {
+      return [`${indent}${style.dim(label)}`, ...paragraph(style, value, indent + "  ")];
+    }
+    const wrapped = paragraph(style, value, " ".repeat(prefix.length));
+    if (!wrapped.length) return [`${indent}${style.dim(label.padEnd(width))}  `];
+    return [`${indent}${style.dim(label.padEnd(width))}  ${wrapped[0].trimStart()}`, ...wrapped.slice(1)];
+  });
 }
 
 // Indents prose and wraps it to style.width.
@@ -89,7 +96,15 @@ export function steps(style, rows) {
   const shown = rows.filter(([, value]) => value !== null && value !== undefined);
   const width = Math.max(0, ...shown.map(([label]) => label.length));
   return shown.flatMap(([label, value]) => {
-    if (label) return [`${style.cyan("→")} ${label.padEnd(width)}  ${value}`];
+    if (label) {
+      if (!Number.isFinite(style.width)) return [`${style.cyan("→")} ${label.padEnd(width)}  ${value}`];
+      const prefix = `→ ${label.padEnd(width)}  `;
+      if (prefix.length > style.width / 2) {
+        return [`${style.cyan("→")} ${label}`, ...paragraph(style, value, "  ")];
+      }
+      const wrapped = paragraph(style, value, " ".repeat(prefix.length));
+      return [`${style.cyan("→")} ${label.padEnd(width)}  ${wrapped[0]?.trimStart() ?? ""}`, ...wrapped.slice(1)];
+    }
     // Unlabeled steps are prose: wrap them with a hanging indent.
     const [first, ...rest] = paragraph(style, value, "  ");
     return [`${style.cyan("→")} ${first.trimStart()}`, ...rest];

@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 
+import { parseArgs } from "./args.js";
 import { resolveProject } from "./auth-binding.js";
 import { runDoctor } from "./doctor.js";
 import { classifyEnvironment, handoffPages, shellArg } from "./environment.js";
@@ -50,8 +51,18 @@ const WORKSPACE_QUESTIONS = {
   oss: "Workspace ID",
 };
 
-export function canAsk(argv, { stdin, stdout, env = process.env }) {
-  return !argv.includes("--json") && Boolean(stdin?.isTTY) && Boolean(stdout?.isTTY) && !env.CI;
+export function canAsk(argv, { stdin, stdout, stderr = stdout, env = process.env }) {
+  return !argv.includes("--json") && Boolean(stdin?.isTTY) && Boolean(stdout?.isTTY)
+    && Boolean(stderr?.isTTY) && !classifyEnvironment(env).remote;
+}
+
+// Login needs no client or deployment questions. Only supply the local runtime
+// after the rest of the command validates; callers gate this on canAsk.
+export function fillLoginArgv(argv) {
+  const parsed = parseArgs(argv);
+  if (parsed.command !== "login" || parsed.code !== "missing_runtime") return argv;
+  const candidate = [...argv, "--runtime", "local"];
+  return parseArgs(candidate).ok ? candidate : argv;
 }
 
 // Questions on the terminal. ask resolves with the trimmed answer, or null
@@ -145,7 +156,10 @@ export async function fillSetupArgv(argv, {
   }
 
   if (!has("--client") && !has("--skip-skill")) {
-    const client = await choose(ask, say, "Install the Metergraph skill for which coding agent?", CLIENTS, "claude");
+    const client = await choose(ask, say, "Install the Metergraph skill for which coding agent?", CLIENTS, "claude", {
+      ...Object.fromEntries(CLIENTS.map(([value, label]) => [label.toLowerCase(), value])),
+      "skip skill installation": null,
+    });
     if (client === undefined) return null;
     if (client === null) added.push("--skip-skill");
     else added.push("--client", client);
@@ -167,13 +181,14 @@ function valueOf(argv, flag) {
 
 // A numbered menu. Resolves with the chosen value, or undefined on cancel
 // (null is a valid choice: no client).
-async function choose(ask, say, question, options, fallback) {
+async function choose(ask, say, question, options, fallback, aliases = {}) {
   say("", question);
   options.forEach(([, label], index) => say(`  ${index + 1}) ${label}`));
   const fallbackIndex = options.findIndex(([value]) => value === fallback) + 1;
   for (;;) {
     const answer = await ask(`Choose 1-${options.length} [${fallbackIndex}]: `);
     if (answer === null) return undefined;
+    if (Object.hasOwn(aliases, answer.toLowerCase())) return aliases[answer.toLowerCase()];
     const index = answer === "" ? fallbackIndex : Number(answer);
     if (Number.isInteger(index) && index >= 1 && index <= options.length) return options[index - 1][0];
     say(`Enter a number from 1 to ${options.length}.`);
