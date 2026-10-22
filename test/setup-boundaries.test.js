@@ -245,6 +245,9 @@ test("a copied public setup route cannot send an existing token to a different s
   fs.writeFileSync(stateFile, JSON.stringify(state));
   fs.unlinkSync(path.join(box.project, ".metergraph/project.json"));
   const run = await cli(box, route(attacker));
+  const token = env.toString().match(/^METERGRAPH_APP_TOKEN=(.+)$/m)[1];
+  assert.equal(attacker.requests.some((request) => request.headers.authorization === `Bearer ${token}`), false,
+    "the existing ingest token must never reach the substituted origin");
   assert.equal(run.result.error.reason, "ingest_url_mismatch");
   assert.equal(signInRequests(attacker).length, 0);
   assert.deepEqual(read(box, ".env"), env);
