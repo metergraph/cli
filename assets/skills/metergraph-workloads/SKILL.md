@@ -8,19 +8,53 @@ description: Choose which Metergraph workload to analyze - list classified workl
 The goal is one classified workload, its exact `selection_reference`, and a
 one-sentence reason it was chosen.
 
-## 0. Confirm the connection
+## 0. Discover what this agent can use
 
-If this conversation has not already confirmed the workspace, call
-`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
-anything else. Say which workspace you are connected to in one line, and plan
-only with the tools the capabilities advertise.
+Skip this when the conversation has already done it. The `metergraph` CLI and
+the Agent Access MCP server reach the same tools with the same key. Use
+whichever this agent has, and never tell the person the other one is missing.
+
+1. If `metergraph --help` lists `tools`, run `metergraph status --json` and
+   `metergraph capabilities --json`, then `metergraph tools list --json`.
+2. Otherwise, if Metergraph MCP tools are available, call
+   `metergraph_get_workspace_context`, then `metergraph_get_capabilities`.
+   Say nothing about the CLI.
+3. If the CLI is installed without `tools` and there are no Metergraph MCP
+   tools, check `npx --yes metergraph-cli@latest --help`. If it lists
+   `tools`, use it as the prefix. If it does not, these stages need the
+   Metergraph MCP connection: set it up with the `metergraph` skill and keep
+   using the CLI for the reads it has. Do not tell the person to upgrade the
+   CLI for `tools` unless a release's help lists it.
+4. If one path cannot read the intended workspace, use the other. Use the
+   `metergraph` skill for setup only when neither can.
+
+Say in one line which workspace (name and slug, never its ID) and deployment
+you reached, and stop if it is not the one the person means. Plan only with
+the tools listed. The steps below name each tool once. From the CLI, call one
+as `metergraph tools call <tool> --args '<json object>' --json` and read
+`data.result`. A tool that writes, starts work or calls a provider (annotation
+`readOnlyHint: false` or `openWorldHint: true`) also needs `--yes`: add it
+only when this skill's approval rule for that exact call is met. Exit code 18
+with reason `confirmation_required` means `--yes` was missing; ask the person.
+
+Name missing access by the job it does. **Read access** is the Metadata role
+(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
+**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
+previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
+`metergraph status --json` say which this key has (`available`, and the
+scopes still `missing`); over MCP, the capabilities' `available` flags do.
+Only a workspace owner grants loop access; **Loop access** in
+`metergraph-model-swap` says how on each deployment.
 
 ## 1. Read what exists
 
-1. `metergraph_list_classified_workloads` with a small limit (10). Each item
-   has a `display_name`, `classified_sample_count` and a `selection_reference`
-   of `source_run_id`, `pattern_id` and `pattern_set_version`. Keep the
-   reference exactly as returned. The name is a label.
+1. `metergraph_list_classified_workloads` with a small limit (10); from the
+   CLI, `metergraph tools call metergraph_list_classified_workloads --args '{"limit": 10}' --json`.
+   Each item has a `display_name`, `classified_sample_count` and a
+   `selection_reference` of `source_run_id`, `pattern_id` and
+   `pattern_set_version`. Keep the reference exactly as returned. The name is
+   a label.
 2. `metergraph_list_routes` and `metergraph_get_usage` with `days: 30`. These
    give cost, calls, tokens, latency and errors per route per UTC day, plus
    each route's `constraints` and `replay_eligible_calls`.
@@ -75,10 +109,39 @@ samples**. Below that it completes with `no_eligible_workloads`; the fix is
 more traffic, not a rerun. `stale_checkpoint` means the classification is
 older than the current window.
 
-## 5. When nothing is classified yet
+## 5. When nothing is classified yet, or the traffic has changed
 
 An empty list with `classification_pending` or `no_traces` means classification
-has not run. No agent tool starts classification on its own. Tell the person:
+has not run. Metergraph classifies on its own soon after the first usable
+traces and then about once a day, so usually the right move is to wait and
+list again.
+
+`metergraph_start_classification` queues a classification-only run now. It
+never analyzes or generates a report. Call it only when one of these holds,
+never as a routine step before every analysis:
+
+- the list is empty with `classification_pending` and the person wants to go
+  on now rather than wait;
+- the person says their traffic has changed (a new feature, route or prompt)
+  since the classification shown, or `stale_checkpoint` says the
+  classification is older than the current window.
+
+It needs **Allow analysis starts** (`agent:analysis-run`) and is listed only
+when the key has it. It sends captured content to the configured provider and
+costs a small amount, so say so in one line and get a yes before the first
+call. Pass a fresh `request_key` and reuse it if you retry the same request.
+The answers mean:
+
+- `analysis_active`: a run is already going. Follow that `run_id` instead.
+- `precondition_failed` with `too_few_classifiable_traces`: fewer usable
+  traces than `minimum_traces`. The fix is more traffic; do not retry.
+- `request.replayed: true`: this key already started that run. Follow it.
+
+Follow the returned run with `metergraph_get_analysis_run` until it reports the
+classification complete or failed, then call
+`metergraph_list_classified_workloads` and continue from step 1.
+
+Without the tool, tell the person:
 
 1. Open the **Opportunities** page in the Metergraph app and choose **Find
    opportunities**.

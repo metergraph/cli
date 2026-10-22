@@ -31,14 +31,18 @@ lists `setup`; otherwise state that the fallback fetches the latest released CLI
 use `npx --yes metergraph-cli@latest` as the prefix. Run only:
 
 ```sh
-metergraph setup --runtime cloud --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --skip-skill --json
+metergraph setup --runtime cloud --deployment customer-local --url http://localhost:8080 --workspace acme-prod --skip-skill --json
 ```
 
 Relay its `data.next_action.kind: "run_on_customer_machine"` handoff and tell
-the person to run this skill on their own machine. The placeholder workspace is
-intentional: the runtime check refuses before making a request or writing a
-file. When an SSH, cloud or CI marker is set, even `--runtime local` is refused
-with reason `run_on_local_machine` and the same handoff. Valid runtimes are
+the person to run this skill on their own machine. The placeholder workspace
+`acme-prod` is intentional: the runtime check refuses before making a request
+or writing a file. A CLI that accepts only a workspace ID rejects the slug
+first (`invalid_workspace`); then pass the placeholder ID
+`11111111-1111-4111-8111-111111111111` instead. It names no workspace, so do
+not present it as one. When an SSH, cloud or CI marker is set, even
+`--runtime local` is refused with reason `run_on_local_machine` and the same
+handoff. Valid runtimes are
 `local`, `cloud` and `cloud-no-shell`. Never expose localhost to the remote
 session.
 
@@ -66,9 +70,10 @@ bundle_dir="$(docker inspect --format '{{ index .Config.Labels "com.docker.compo
 (cd "$bundle_dir" && ./bin/status)
 ```
 
-Do not inspect container environment. Read the workspace ID from the
-`workspace` check and skip to **Run setup**. If the directory cannot be found,
-ask for the workspace ID from Settings. If nothing listens on 8080, continue.
+Do not inspect container environment. Read the workspace from the
+`workspace` check, keeping its ID to yourself, and skip to **Run setup**. If
+the directory cannot be found, ask for the workspace slug from the app's
+Settings page. If nothing listens on 8080, continue.
 If anything else owns it, stop and ask; never stop or reconfigure it.
 
 Use `~/metergraph/<version>` and set
@@ -230,8 +235,9 @@ An image-pull failure usually means login is missing or expired. On other
 failure, read only the log named by `./bin/start` and `./bin/status`; never read
 rendered Compose configuration or container environment. On password
 authentication failure with `local_pgdata`, stop and ask for its matching
-`.env`. Never delete data. Read the workspace ID and suggested command from the
-status JSON's `workspace` check. The service listens only on localhost:8080.
+`.env`. Never delete data. Read the workspace and suggested command from the
+status JSON's `workspace` check; do not show the workspace ID to the person.
+The service listens only on localhost:8080.
 
 ## Run setup
 
@@ -240,12 +246,14 @@ its help lists `setup`; otherwise state that `npx --yes metergraph-cli@latest`
 fetches the latest released CLI and use it as the prefix. Run with `--json`:
 
 ```sh
-metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --confirm-prerequisites --client <client> --json
+metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace <slug> --confirm-prerequisites --client <client> --json
 ```
 
-Replace the example UUID and client only. Setup writes an ingest key to the
-application `.env`, installs the skill and requests Metadata access only; never
-print that file. Setup opens the deployment's browser consent page and waits;
+Fill in the workspace slug and client only. A CLI that accepts only a
+workspace ID rejects the slug (`invalid_workspace`); then pass the ID from the
+status JSON's `workspace` check (its suggested command has it) yourself,
+without showing it. Setup writes an ingest key to the application `.env`,
+installs the skill and requests Metadata access only; never print that file. Setup opens the deployment's browser consent page and waits;
 the person signs in as the local admin and completes two approvals. If the
 browser cannot open, follow the `metergraph` skill's guidance for handing the
 person the approval URL. Continue until `data.status` is `ok`. For
@@ -267,6 +275,51 @@ They may instead use their own editor. Never use `cat`, `grep` or any other
 command that prints `.env`, particularly with `!`, because `!` output lands in
 the transcript. A new configuration keeps `admin@example.com` as the email.
 
+## Give the agent loop access
+
+Setup leaves the agent with read access (Metadata). Writing evaluations or
+starting analyses needs a coding-agent key with the Debug role and workflow
+permissions; all four grants below together are loop access, which the
+model-swap loop uses. A newer CLI's setup JSON says so in `data.agent_access`, whose
+`offer.command` is the command below. Never sign in as the admin for this, read the admin password, or
+ask the person to give it to you.
+
+If `bin/agent-key` exists in the bundle directory, it issues the key with no
+sign in. It runs in the stack's one-shot bootstrap container, attributes the
+key to the local admin, writes the token only to the private file named by
+`--write-to` (mode 0600) and never prints it. First tell the person what each
+grant allows: the Debug role reads captured prompts and responses;
+`--allow-evaluation-writes` saves evaluation drafts and assignments;
+`--allow-evaluation-previews` tests drafts, and a provider-backed preview also
+needs their egress consent and budget; `--allow-analysis-starts` queues
+analyses that send captured content to their model provider and spend money on
+their account. Ask which they want, then offer the command with only those
+flags, for them to run in their own terminal:
+
+```sh
+cd <bundle_dir>
+./bin/agent-key create --write-to ~/.config/metergraph/agent.env \
+  --role debug --allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts
+```
+
+Fill in the absolute bundle directory. You may run it yourself only after
+they say yes to that exact access, adding `--yes`, which the command needs
+outside a terminal. Never add a role or permission they did not agree to.
+Keep the file outside every project: do not name the project's `.env` or a
+path inside the bundle, and never open, `cat`, source or print the file. The
+person loads it in the shell that starts the agent
+(`. ~/.config/metergraph/agent.env`) and restarts the agent. The CLI reads
+`METERGRAPH_AGENT_TOKEN` from that shell, and an MCP configuration names
+`METERGRAPH_AGENT_TOKEN`, never the token, as the bundle README's "Let your
+coding agent run analyses" section shows. To change access, rerun `create`
+with `--replace`. `./bin/agent-key list` and
+`./bin/agent-key revoke <key-id>` review and remove keys without showing a
+token.
+
+Without `bin/agent-key` (an older bundle), the person signs in to the
+dashboard themselves and creates the key on the Keys page, following the same
+README section.
+
 ## Recovery and stopping
 
 | State | Action |
@@ -278,6 +331,7 @@ the transcript. A new configuration keeps `admin@example.com` as the email.
 | `local_pgdata` lacks its matching `.env` | Stop and find prior configuration; never remove it |
 | Startup fails | Use status and only the named log; preserve secrets and data |
 | Setup returns a handoff | Relay exact status/next action; do not report success |
+| `bin/agent-key` refuses or the person declines | Change nothing; never fall back to the admin password |
 
 To stop later, follow the bundle README's `stop`. Prefer it over `down`, which
 loses raw payloads in local object storage. Never use `down --volumes`.

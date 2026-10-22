@@ -8,12 +8,44 @@ description: Refine and rerun a Metergraph model-swap analysis after the person 
 A rerun is a new run with one deliberate change. The earlier run, report and
 eval revision stay as they are.
 
-## 0. Confirm the connection
+## 0. Discover what this agent can use
 
-If this conversation has not already confirmed the workspace, call
-`metergraph_get_workspace_context`, then `metergraph_get_capabilities`, before
-anything else. Say which workspace you are connected to in one line, and plan
-only with the tools the capabilities advertise.
+Skip this when the conversation has already done it. The `metergraph` CLI and
+the Agent Access MCP server reach the same tools with the same key. Use
+whichever this agent has, and never tell the person the other one is missing.
+
+1. If `metergraph --help` lists `tools`, run `metergraph status --json` and
+   `metergraph capabilities --json`, then `metergraph tools list --json`.
+2. Otherwise, if Metergraph MCP tools are available, call
+   `metergraph_get_workspace_context`, then `metergraph_get_capabilities`.
+   Say nothing about the CLI.
+3. If the CLI is installed without `tools` and there are no Metergraph MCP
+   tools, check `npx --yes metergraph-cli@latest --help`. If it lists
+   `tools`, use it as the prefix. If it does not, these stages need the
+   Metergraph MCP connection: set it up with the `metergraph` skill and keep
+   using the CLI for the reads it has. Do not tell the person to upgrade the
+   CLI for `tools` unless a release's help lists it.
+4. If one path cannot read the intended workspace, use the other. Use the
+   `metergraph` skill for setup only when neither can.
+
+Say in one line which workspace (name and slug, never its ID) and deployment
+you reached, and stop if it is not the one the person means. Plan only with
+the tools listed. The steps below name each tool once. From the CLI, call one
+as `metergraph tools call <tool> --args '<json object>' --json` and read
+`data.result`. A tool that writes, starts work or calls a provider (annotation
+`readOnlyHint: false` or `openWorldHint: true`) also needs `--yes`: add it
+only when this skill's approval rule for that exact call is met. Exit code 18
+with reason `confirmation_required` means `--yes` was missing; ask the person.
+
+Name missing access by the job it does. **Read access** is the Metadata role
+(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
+**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
+previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
+`metergraph status --json` say which this key has (`available`, and the
+scopes still `missing`); over MCP, the capabilities' `available` flags do.
+Only a workspace owner grants loop access; **Loop access** in
+`metergraph-model-swap` says how on each deployment.
 
 ## 1. Recover where the loop is
 
@@ -53,6 +85,15 @@ save the new revision first, as in `metergraph-evals`), then start. Then call `m
 - the same `pinned_workload`, unless the workload itself changed;
 - `rerun_of_run_id` set to the previous run ID;
 - `reference_binding_id` when reference cases were bound.
+
+Starting needs loop access. If it is missing, say what to grant, as
+`metergraph-analyze` describes; until it is granted, the person can start the
+rerun from the analysis page in the app. From the CLI, `--yes` stands for the
+new confirmation and nothing earlier:
+
+```sh
+metergraph tools call metergraph_start_analysis --args '{"request_key": "rerun-<pattern_id>-<yyyymmdd>-<n>", "pinned_workload": <selection_reference>, "rerun_of_run_id": "<previous run_id>"}' --yes --json
+```
 
 Poll and read the report as in `metergraph-analyze` and `metergraph-report`.
 

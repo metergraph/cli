@@ -14,18 +14,27 @@ traffic distinct.
 
 ## Establish the deployment and workspace
 
-For hosted MeterGraph, connect with OAuth. No operator-issued key is needed.
-Add the hosted endpoint as an HTTP MCP server with no credential or headers,
-for example `claude mcp add --transport http metergraph
-https://app.metergraph.dev/v1/agent/mcp`. Then use the client's own
-authentication step (in Claude Code, `/mcp`, choose `metergraph`, then
-Authenticate). The human completes browser sign-in and consent in the browser,
-in the workspace they intend to use, and confirms the workspace shown on the
-consent page. The consent page names the requested role; a client following
-the server's challenge requests Metadata. If the client cannot
-complete OAuth, or the user needs retained content or replay, describe the
-Keys-page scoped connection as a manual alternative and obtain the user's
-choice. Never silently fall back to a key.
+For hosted MeterGraph from an agent with a shell (Claude Code, Codex or
+Cursor on the person's machine), connect through the `metergraph` CLI:
+`metergraph setup` for a new project or `metergraph login` for an existing
+workspace, run as the `metergraph` skill routes them. No operator-issued key
+is needed. The human completes browser sign-in and consent in the workspace
+they intend to use, and confirms the workspace shown on the consent page,
+which grants read access (Metadata). No MCP server is needed on this path.
+
+For a client without a shell (Claude Desktop, ChatGPT), or when the person
+prefers MCP, connect over MCP as the `metergraph` skill routes that client. A
+hosted MCP client that supports OAuth adds the endpoint as an HTTP MCP server
+with no credential or headers, for example
+`claude mcp add --transport http metergraph https://app.metergraph.dev/v1/agent/mcp`,
+then uses its own authentication step (in Claude Code, `/mcp`, choose
+`metergraph`, then Authenticate). The consent page names the requested role;
+a client following the server's challenge requests Metadata.
+
+Either way, if sign-in cannot complete where the agent runs, or the user needs
+retained content or replay, describe the Keys-page scoped connection as a
+manual alternative and obtain the user's choice. Never silently fall back to a
+key.
 
 For the first application trace, check the installed Metergraph CLI's version
 and help before naming commands. `metergraph-cli@0.1.0` has `doctor` and project
@@ -48,18 +57,26 @@ Compose stack. First boot may ingest a demo trace, which is synthetic evidence.
 
 ## Connect the coding client
 
-For hosted OAuth, the connection is the URL-only server added above. For a
-keyed or customer-local connection, reuse the Keys page's client-specific
-instructions, documented in
-https://www.metergraph.dev/docs/guides/agent-access/. The endpoint is
-`<origin>/v1/agent/mcp`; the stdio bridge is `metergraph-mcp` with
-`METERGRAPH_URL` and `METERGRAPH_AGENT_TOKEN` in its environment. Verify
-`tools/list`, then `metergraph_get_workspace_context` and
-`metergraph_get_capabilities`. Record the selected origin separately: `managed` identifies the hosted profile
-and does not distinguish staging from production. Match the returned workspace ID and deployment
-to the user's selection before reading traces. Capabilities and required scopes
+For hosted sign-in, the connection is the CLI's saved sign-in, or the
+URL-only MCP server added above. For a keyed or customer-local connection,
+reuse the Keys page's client-specific instructions, documented in
+https://www.metergraph.dev/docs/guides/agent-access/. On the customer-local
+bundle, `bin/agent-key` can issue the key instead; see
+`metergraph-local-bundle`. The key goes in `METERGRAPH_AGENT_TOKEN`, which
+the CLI reads from the shell that starts the agent. For MCP, the endpoint is
+`<origin>/v1/agent/mcp`, and the stdio bridge is `metergraph-mcp` with
+`METERGRAPH_URL` and `METERGRAPH_AGENT_TOKEN` in its environment.
+
+Verify on whichever path the agent uses. From the CLI:
+`metergraph status --json` and `metergraph capabilities --json`, plus
+`metergraph tools list --json` when its help lists `tools`. Over MCP: `tools/list`, then
+`metergraph_get_workspace_context` and `metergraph_get_capabilities`. Record
+the selected origin separately: `managed` identifies the hosted profile and
+does not distinguish staging from production. Match the returned workspace
+(by name and slug; compare IDs yourself, never show them) and deployment to
+the user's selection before reading traces. Capabilities and required scopes
 from this connection are authoritative. Do not infer write authority from
-`agent:read` or provider authority from a healthy MCP connection.
+`agent:read` or provider authority from a healthy connection.
 
 Keep these credentials separate:
 
@@ -67,7 +84,7 @@ Keep these credentials separate:
 | --- | --- | --- |
 | Registry pull credential | Image registry only | Obtain/refresh through the supported distribution channel |
 | Ingest credential | Application SDK or supported import connector | Create an ingest key for the selected workspace |
-| Agent Access credential | Coding client's supported OAuth/secret configuration | Sign in/consent or create a scoped connection |
+| Agent Access credential | CLI sign-in or `METERGRAPH_AGENT_TOKEN`, or the client's OAuth/secret MCP configuration | Sign in/consent or create a scoped connection |
 | Model-provider credential | Deployment's supported runner/provider configuration | Set the provider key and approve paid execution |
 
 Never ask for secrets in chat, commit them, put them in a shared MCP file or
@@ -99,12 +116,19 @@ connection, paid eval rule or provider invocation just to manufacture proof.
 
 ## Verify and hand off
 
+Read through the CLI or MCP, whichever the agent connected with. From the
+CLI, call a tool named below as
+`metergraph tools call <tool> --args '<json object>' --json` when
+`metergraph --help` lists `tools`.
+
 1. Read bounded `metergraph_get_ingestion_health` if available. Preserve pending,
    processed and failed states and receive/process timestamps. Counts apply to
    a workspace window; they do not identify the batch that contains one trace.
-2. Read bounded `metergraph_query_traces` in the same workspace/time window and
-   locate the exact application/import trace ID. Continue bounded pagination
-   when advertised. An empty page is a setup state, not proof of no ingestion.
+2. Confirm the exact application/import trace ID with `metergraph verify`
+   when the installed CLI lists it, or read bounded `metergraph_query_traces`
+   in the same workspace/time window and locate the trace. Continue bounded
+   pagination when advertised. An empty page is a setup state, not proof of no
+   ingestion.
 3. If the user permits a content-class read and `trace_content` is available,
    inspect one `metergraph_get_trace` for retained usable input/output and capture
    warnings. Record availability and omissions, never the content in setup logs.
@@ -124,10 +148,10 @@ is a bounded usage read, not a trace scan: `metergraph usage --group-by route
 remote or CI agent reads with the coding-agent Metadata key path in the
 `metergraph` skill, never with the application's ingest key.
 
-Verify the named trace through the connected client's advertised MCP tools,
-with an explicit source label and the same workspace/deployment before and
-after any permitted content read. The older trace-debug contract has no
-workspace envelope, so confirm its tenant-bound connection separately. Trace
+Verify the named trace with `metergraph verify` or the trace tools the agent
+can call, with an explicit source label and the same workspace/deployment
+before and after any permitted content read. The older trace-debug contract
+has no workspace envelope, so confirm its tenant-bound connection separately. Trace
 discovery is not analysis readiness. Keep retained content out of setup reports.
 
 ## Recovery
@@ -137,7 +161,7 @@ discovery is not analysis readiness. Keep retained content out of setup reports.
 | Signup, sign-in or OAuth consent required | Hand the browser step to the human, then reconnect and verify workspace identity |
 | Registry access expired/denied | Refresh the pull credential through the supported distribution channel, repeat registry login, retain local data |
 | Local startup or bootstrap failure | Inspect `bin/status` and the bundle's named logs/readiness checks; follow its recovery instructions |
-| Runner unavailable | Use the bundle's runner health instructions; do not claim MCP health proves analysis readiness |
+| Runner unavailable | Use the bundle's runner health instructions; do not claim a healthy agent connection proves analysis readiness |
 | Empty data | Check application environment, correct ingest destination/key, flush/import window and worker status; exclude demos/mocks |
 | Received but pending/failed | Inspect ingestion failure classes and the existing retry/recovery flow before changing instrumentation |
 | Missing/retained content unavailable | Explain capture policy, retention and omission; collect a new permitted application trace |
@@ -152,8 +176,9 @@ separately authorized workflow. Packaging this skill belongs to the distribution
 workflow; this source does not assert that plugin OAuth/configuration or hosted
 onboarding has already shipped.
 
-Use the public skill's current client/runtime/deployment table at
-https://www.metergraph.dev/SKILL.md. An unimplemented cloud/OAuth client path
+Use the public `metergraph` skill (https://www.metergraph.dev/SKILL.md) for
+the client, runtime and deployment route: the CLI for agents with a shell, MCP
+for clients without one. A cloud or OAuth client path that skill does not list
 is blocked even if server code exists. Query an exact SDK trace ID, or resolve a
 provider request ID only when that argument is advertised. Ambiguous request IDs
 need confirmation from the application; never select the first match. Preserve
