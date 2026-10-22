@@ -873,7 +873,7 @@ test("invalid read arguments and credential arguments exit 2 without echo or req
 
 test("read command help works offline and states what is not done", async () => {
   for (const command of ["status", "context", "capabilities", "usage", "routes", "traces"]) {
-    for (const args of [["help", command], [command, "--help"]]) {
+    for (const args of [["help", command, "--advanced"], [command, "--help", "--advanced"]]) {
       const run = await runCli(args, { offline: true });
       assert.equal(run.code, 0);
       assert.equal(run.stderr, "");

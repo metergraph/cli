@@ -45,7 +45,7 @@ import { groupedRequest, hasUnsafeText, isCursor, isSafeFilter, readQuery } from
 
 export const READ_COMMANDS = Object.freeze(["status", "context", "capabilities", "usage", "routes", "traces"]);
 const COMMANDS = new Set(["pricing", "doctor", "help", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
-const HELP_TOPICS = new Set(["pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
+const HELP_TOPICS = new Set(["agents", "exit-codes", "pricing", "doctor", "skill", "skills", "login", "logout", "setup", "verify", "experiments", ...READ_COMMANDS]);
 export const EXPERIMENT_ACTIONS = Object.freeze(["list", "estimate", "start", "get"]);
 const SKILL_ACTIONS = new Set(["install", "update"]);
 const SKILLS_ACTIONS = new Set(["install", "update", "list"]);
@@ -156,9 +156,19 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function parseArgs(argv) {
   const json = argv.includes("--json");
 
-  if (argv.includes("--help") || argv.includes("-h")) {
-    const topic = argv.find((arg) => HELP_TOPICS.has(arg)) ?? null;
-    return { ok: true, command: "help", topic, json };
+  const helpCommand = argv.find(arg => arg !== "--json") === "help";
+  if (argv.includes("--help") || argv.includes("-h") || helpCommand) {
+    const parts = argv.filter(arg => !["--json", "--help", "-h", "--advanced"].includes(arg));
+    if (parts[0] === "help") parts.shift();
+    const topic = HELP_TOPICS.has(parts[0]) ? parts[0] : null;
+    const actions = { pricing: PRICING_ACTIONS, experiments: EXPERIMENT_ACTIONS,
+      skill: [...SKILL_ACTIONS], skills: [...SKILLS_ACTIONS] };
+    const action = actions[topic]?.includes(parts[1]) ? parts[1] : null;
+    if (helpCommand && (parts.length > (action ? 2 : topic ? 1 : 0))) {
+      return { ok: false, command: "help", json, code: "unknown_help_topic", outcome: "invalid_input",
+        message: 'Unknown help topic. Run "metergraph --help" for commands.' };
+    }
+    return { ok: true, command: "help", topic, ...(action ? { action } : {}), ...(argv.includes("--advanced") ? { advanced: true } : {}), json };
   }
 
   let command = null;

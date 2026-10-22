@@ -7,5 +7,5 @@ import { main } from "../src/cli.js";
 process.stdout.on("error", () => {});
 
 const argv = process.argv.slice(2);
-const io = { stdout: process.stdout, stderr: process.stderr };
+const io = { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr };
 process.exitCode = handsOff(argv) ? await handOff(argv, io) : await main(argv, io);

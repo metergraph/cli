@@ -151,7 +151,28 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |
 | `skills install`, `skills update`, `skills list` | Install, update or list the workflow skills, such as the model-swap loop | No |
 
-`metergraph help COMMAND` lists a command's options. The
+Run `metergraph` for a grouped command menu and quick-start examples.
+`metergraph COMMAND --help` (or `metergraph help COMMAND`) lists that command's options.
+For command groups, narrow the help to an action: `metergraph pricing lookup --help`,
+`metergraph experiments estimate --help`, or `metergraph help skills list`.
+Add `--advanced` to show connection settings and operational details, for example
+`metergraph experiments get --help --advanced`. JSON help keeps the full option catalog.
+
+In a local interactive terminal, run `metergraph setup`: the CLI uses the local
+runtime and asks whether to install a skill for Codex, Claude Code or Cursor, or
+skip it. `metergraph login` also infers the local runtime. Browser approval still
+controls workspace access and ingest-key creation. Ctrl+C or end-of-input at the
+client choice cancels before setup runs. JSON, redirected streams, CI, SSH and
+cloud workspaces never prompt; supply `--runtime local` and `--client CLIENT` or
+`--skip-skill` explicitly where setup is supported.
+
+`metergraph help agents` covers local and cloud agent connections;
+`metergraph help exit-codes` is the offline scripting reference. Human status
+headlines describe the result without internal outcome names or numeric codes.
+`--json` retains the stable envelope, including `outcome` and `exit_code`.
+Color follows terminal detection and `NO_COLOR`; piped output stays plain.
+
+The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and
 writes, and full JSON examples.
 

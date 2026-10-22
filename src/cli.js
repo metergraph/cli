@@ -1,3 +1,4 @@
+import { interactiveArgs } from "./interactive.js";
 import { runPricing } from "./pricing.js";
 import { pricingText, pricingHtml } from "./pricing-output.js";
 import { READ_COMMANDS, parseArgs } from "./args.js";
@@ -23,19 +24,25 @@ import { readMessage, readText } from "./read-output.js";
 import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
 import { containsKnownCredential, preflightNonHostedSetup, prerequisiteGuide, resumeNonHostedRoute } from "./setup-deployment.js";
-import { VERSION } from "./constants.js";
+import { EXIT_CODES, VERSION } from "./constants.js";
 import { createStyle, fields, headline, paragraph, render, steps, toneFor } from "./style.js";
 import { runVerify } from "./verify.js";
 import { verifyMessage, verifyText } from "./verify-output.js";
 
 // Runs one command and resolves with the exit code. With --json, stdout gets
 // exactly one JSON line and stderr stays empty. Without it, results go to
-// stdout and usage or internal errors go to stderr. Never reads stdin.
-export async function main(argv, { stdout, stderr }) {
+// stdout and usage or internal errors go to stderr. Setup prompts only in a local
+// terminal.
+export async function main(argv, { stdout, stderr, stdin, env, choose }) {
   const json = argv.includes("--json");
   let result;
   try {
-    result = await run(argv, { stdout, stderr });
+    const prepared = await interactiveArgs(argv, { stdin, stdout, stderr, env, choose });
+    if (prepared === null) {
+      stderr.write("Setup cancelled. Nothing was changed.\n");
+      return EXIT_CODES.cancelled;
+    }
+    result = await run(prepared, { stdout, stderr });
   } catch {
     result = envelope({
       command: null,
@@ -61,13 +68,22 @@ async function run(argv, { stdout, stderr }) {
       message: parsed.message,
     });
     if (parsed.json) stdout.write(toJsonLine(result));
-    else stderr.write(`${createStyle(stderr).red("Error:")} ${parsed.message}\n`);
+    else {
+      const errorStyle = createStyle(stderr);
+      const [first, ...rest] = paragraph(errorStyle, `Error: ${parsed.message}`, "");
+      const help = parsed.command && parsed.command !== "help"
+        ? `metergraph ${parsed.command} --help` : "metergraph --help";
+      stderr.write(render([
+        first.replace(/^Error:/, errorStyle.red("Error:")), ...rest,
+        "", ...steps(errorStyle, [["Help", help]]),
+      ]));
+    }
     return result;
   }
 
   if (parsed.command === "help") {
-    const result = envelope({ command: "help", outcome: "ok", data: helpData(parsed.topic) });
-    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic, style));
+    const result = envelope({ command: "help", outcome: "ok", data: helpData(parsed.topic, parsed.action) });
+    stdout.write(parsed.json ? toJsonLine(result) : helpText(parsed.topic, style, parsed.action, parsed.advanced));
     return result;
   }
 

@@ -82,7 +82,8 @@ test("terminal mode reports auth required and points at the connection guide", a
     const run = await runCli(["doctor", "--url", server.origin]);
     assert.equal(run.code, 3);
     assert.equal(run.stderr, "");
-    assert.match(run.stdout, /\(authentication_required, exit 3\)/);
+    assert.match(run.stdout, /Service is reachable and requires sign in/);
+    assert.doesNotMatch(run.stdout, /exit 3/);
     assert.match(run.stdout, /No workspace is connected/);
     assert.ok(run.stdout.includes(GUIDE_URL));
     assertNoLeak(assert, run.stdout, run.stderr);

@@ -310,7 +310,7 @@ test("tampered bundled pack assets are detected before any write", async () => {
 });
 
 test("skills help works offline and names what it does not do", async () => {
-  for (const args of [["help", "skills"], ["skills", "--help"]]) {
+  for (const args of [["help", "skills", "--advanced"], ["skills", "--help", "--advanced"]]) {
     const run = await runCli(args, { offline: true });
     assert.equal(run.code, 0);
     assert.match(run.stdout, /metergraph skills install --client CLIENT \[--runtime RUNTIME\]/);
