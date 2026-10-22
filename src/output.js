@@ -300,7 +300,7 @@ const EXPERIMENTS_OPTIONS = [
     name: "--agent-token-file",
     value: "PATH",
     summary:
-      "Private (0600) file holding a coding-agent key. For list, estimate and get: a key with Metadata access. " +
+      "Private (0600) file holding a coding-agent key. For list, estimate and get: a key with the Metadata or Debug role. " +
       "For start: a key with Debug access and Allow analysis starts, used for that one request.",
   },
   JSON_OPTION,

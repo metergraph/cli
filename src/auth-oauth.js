@@ -549,6 +549,9 @@ export function checkCapabilities(body, { profile, workspaceId, access = "metada
   }
   for (const entry of Object.values(body.agent)) {
     if (!isObject(entry)) return stop("verification_failed", "capabilities_response_invalid");
+    if (access !== "metadata" && entry.required_scope === "agent:replay" && entry.available !== false) {
+      return stop("verification_failed", "scope_mismatch");
+    }
     if (access !== "metadata") continue;
     const sensitive =
       entry.content !== false ||

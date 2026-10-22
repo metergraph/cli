@@ -451,3 +451,13 @@ test("Debug discovery refuses metadata that omits the requested base scope", asy
     });
   }
 });
+
+test("Debug capabilities refuse Replay scopes even on an unfamiliar capability", () => {
+  for (const name of ["trace_replay", "future_replay"]) {
+    const doc = capabilitiesDocument(PROVENANCE, { start: true });
+    doc.agent[name] = { ...doc.agent.trace_replay, available: true };
+    assert.equal(checkCapabilities(doc, { ...CONTEXT, access: "debug" }).reason, "scope_mismatch");
+    doc.agent[name].available = false;
+    assert.deepEqual(checkCapabilities(doc, { ...CONTEXT, access: "debug" }), { ok: true });
+  }
+});

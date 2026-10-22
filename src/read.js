@@ -497,7 +497,7 @@ function statusData(ctx, notices, outcome, options) {
       agent === null ? null : Object.fromEntries(CAPABILITY_NAMES.map((name) => [name, agent[name]?.available ?? null])),
     // Whether this credential may read content through Agent Access. The
     // read commands never do, whatever it allows.
-    content_access: ctx.access === "debug",
+    content_access: agent !== null && Object.values(agent).some((entry) => entry?.available === true && entry.content === true),
     access: accessFor(ctx),
     application_traffic_verified: false,
     notices: [...notices].sort(),
