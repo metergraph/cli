@@ -19,6 +19,7 @@ import {
 import { runRead } from "./read.js";
 import { runExperimentStart } from "./experiments.js";
 import { experimentsMessage, experimentsText } from "./experiments-output.js";
+import { toolsMessage, toolsText } from "./tools-output.js";
 import { readMessage, readText } from "./read-output.js";
 import { listSkillPack, runSkill, runSkillPack } from "./skill.js";
 import { runSetup } from "./setup.js";
@@ -220,6 +221,21 @@ async function run(argv, { stdout, stderr, stdin }) {
       message: outcome === "ok" ? null : message,
     });
     stdout.write(parsed.json ? toJsonLine(result) : experimentsText(result, message, style, parsed.action));
+    return result;
+  }
+
+  if (parsed.command === "tools") {
+    // Any Agent Access tool, through runRead's verified session (tools.js).
+    const { outcome, reason, data } = await runRead(parsed);
+    const message = toolsMessage(outcome, reason);
+    const result = envelope({
+      command: `tools ${parsed.action}`,
+      outcome,
+      reason,
+      data,
+      message: outcome === "ok" ? null : message,
+    });
+    stdout.write(parsed.json ? toJsonLine(result) : toolsText(result, message, style, parsed.action));
     return result;
   }
 

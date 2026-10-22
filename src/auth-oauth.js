@@ -36,6 +36,7 @@ const MAX_EXPIRES_IN = 366 * 24 * 60 * 60;
 // metadata and in the setup discovery document. Without it the CLI registers
 // a new public client for each sign in, as servers without the field expect.
 export const CLI_CLIENT_ID_FIELD = "metergraph_cli_client_id";
+export const WORKSPACE_HINT_FIELD = "metergraph_workspace_hint_supported";
 
 // The access token claim that names the workspace the grant is for. The
 // claim is a sanity check only; the CLI does not verify token signatures.
@@ -62,7 +63,7 @@ const stop = (outcome, reason) => ({ ok: false, outcome, reason });
 // fixed path on this origin. A server that does not advertise the Metadata
 // scope, S256 or public clients is unsupported; there is no fallback to
 // another scope.
-export async function discover(origin, signal) {
+export async function discover(origin, signal, baseScope = METADATA_SCOPE) {
   const expected = endpointsFor(origin);
 
   const prm = await fetchMetadata(origin, [
@@ -81,6 +82,9 @@ export async function discover(origin, signal) {
   }
   if (resource.scopes_supported !== undefined && !includes(resource.scopes_supported, METADATA_SCOPE)) {
     return stop("unsupported", "metadata_scope_unsupported");
+  }
+  if (resource.scopes_supported !== undefined && !includes(resource.scopes_supported, baseScope)) {
+    return stop("unsupported", "debug_scope_unsupported");
   }
   if (resource.bearer_methods_supported !== undefined && !includes(resource.bearer_methods_supported, "header")) {
     return stop("unsupported", "oauth_metadata_invalid");
@@ -105,6 +109,7 @@ export async function discover(origin, signal) {
   if (!includes(server.scopes_supported, METADATA_SCOPE)) {
     return stop("unsupported", "metadata_scope_unsupported");
   }
+  if (!includes(server.scopes_supported, baseScope)) return stop("unsupported", "debug_scope_unsupported");
   if (!includes(server.code_challenge_methods_supported, "S256")) return stop("unsupported", "pkce_unsupported");
   if (!includes(server.token_endpoint_auth_methods_supported, "none")) {
     return stop("unsupported", "public_client_unsupported");
@@ -130,6 +135,9 @@ export async function discover(origin, signal) {
     endpoints: expected,
     requireIss: server.authorization_response_iss_parameter_supported === true,
     offeredClientId: offered,
+    // The consent page can match a workspace the person named by slug or
+    // name, and offers approval for that workspace alone.
+    workspaceHint: server[WORKSPACE_HINT_FIELD] === true,
   };
 }
 
@@ -145,9 +153,9 @@ export function offeredClientId(doc) {
 // The client for one sign in: the pre-registered client the service offered,
 // or a newly registered one when it offered none. The offered client accepts
 // the loopback redirect on any port, so it needs no registration request.
-export async function clientFor(endpoints, offered, redirectUri, signal) {
+export async function clientFor(endpoints, offered, redirectUri, signal, scopes = [METADATA_SCOPE]) {
   if (offered !== null) return { ok: true, clientId: offered };
-  return register(endpoints, redirectUri, signal);
+  return register(endpoints, redirectUri, signal, scopes);
 }
 
 async function fetchMetadata(origin, paths, signal) {
@@ -172,7 +180,7 @@ function includes(list, value) {
 // Dynamic client registration for a public client bound to one exact
 // loopback redirect. A response that carries a client secret, a different
 // redirect or another authentication method is refused.
-export async function register(endpoints, redirectUri, signal) {
+export async function register(endpoints, redirectUri, signal, scopes = [METADATA_SCOPE]) {
   const response = await send(endpoints.origin, AUTH_PATHS.registration, {
     method: "POST",
     signal,
@@ -183,7 +191,7 @@ export async function register(endpoints, redirectUri, signal) {
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
-      scope: METADATA_SCOPE,
+      scope: scopes.join(" "),
     },
   });
   const failure = failureOf(response);
@@ -237,13 +245,18 @@ export function newPkce() {
 // also approve the first ingest key for a new setup family. The service
 // returns that receipt next to the code; it is redeemed separately with its
 // own PKCE verifier.
-export function authorizationUrl(endpoints, { clientId, redirectUri, state, challenge, signup, ingestSetup = null }) {
+// scopes is the access asked for: Metadata, or Debug with the chosen workflow
+// permissions. workspaceHint, when given, is the workspace the person named,
+// sent only to a service that advertises it.
+export function authorizationUrl(endpoints, {
+  clientId, redirectUri, state, challenge, signup, ingestSetup = null, scopes = [METADATA_SCOPE], workspaceHint = null,
+}) {
   const url = new URL(endpoints.authorization);
   url.search = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: METADATA_SCOPE,
+    scope: scopes.join(" "),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -253,6 +266,7 @@ export function authorizationUrl(endpoints, { clientId, redirectUri, state, chal
       ingest_setup_family_id: ingestSetup.familyId,
       ingest_setup_code_challenge: ingestSetup.challenge,
     }),
+    ...(workspaceHint === null ? {} : { workspace_hint: workspaceHint }),
   }).toString();
   if (!signup) return url.href;
   const entry = new URL(`${endpoints.origin}${AUTH_PATHS.signup}`);
@@ -262,7 +276,7 @@ export function authorizationUrl(endpoints, { clientId, redirectUri, state, chal
 
 // Exchanges an authorization code. Codes are single use, so there is never
 // a retry.
-export async function exchangeCode(endpoints, { clientId, redirectUri, code, verifier }, signal) {
+export async function exchangeCode(endpoints, { clientId, redirectUri, code, verifier, scopes = [METADATA_SCOPE] }, signal) {
   const response = await send(endpoints.origin, AUTH_PATHS.token, {
     method: "POST",
     signal,
@@ -280,13 +294,13 @@ export async function exchangeCode(endpoints, { clientId, redirectUri, code, ver
   if (failure !== null) return { ok: false, ...failure };
   if (response.status === 400 || response.status === 401) return stop("authorization_failed", "code_rejected");
   if (response.status !== 200) return stop("unsupported", "unexpected_status");
-  return validateGrant(parseJsonObject(response), endpoints, clientId, { requireRefresh: true });
+  return validateGrant(parseJsonObject(response), endpoints, clientId, { requireRefresh: true, scopes });
 }
 
 // Refreshes a grant once. The result says whether the refresh token may have
 // been consumed without the CLI learning its replacement (ambiguous), so the
 // caller never retries with it.
-export async function refreshGrant(endpoints, { clientId, refreshToken }, signal) {
+export async function refreshGrant(endpoints, { clientId, refreshToken, scopes = [METADATA_SCOPE] }, signal) {
   const response = await send(endpoints.origin, AUTH_PATHS.token, {
     method: "POST",
     signal,
@@ -296,7 +310,7 @@ export async function refreshGrant(endpoints, { clientId, refreshToken }, signal
       refresh_token: refreshToken,
       client_id: clientId,
       resource: endpoints.resource,
-      scope: METADATA_SCOPE,
+      scope: scopes.join(" "),
     },
   });
   if (response.kind === "error" && !response.sent) {
@@ -314,16 +328,17 @@ export async function refreshGrant(endpoints, { clientId, refreshToken }, signal
   if (response.kind !== "response" || response.status !== 200 || response.tooLarge) {
     return { ok: false, outcome: "login_required", reason: "refresh_interrupted", ambiguous: true };
   }
-  const result = validateGrant(parseJsonObject(response), endpoints, clientId, { requireRefresh: false });
+  const result = validateGrant(parseJsonObject(response), endpoints, clientId, { requireRefresh: false, scopes });
   // A 200 that cannot be used may still have rotated the refresh token.
   return result.ok ? result : { ...result, ambiguous: true };
 }
 
-// Accepts only a Bearer grant for exactly the Metadata scope with bounded,
-// non-empty tokens and an expiry. The access token claims must name this
-// issuer, resource and client and one workspace. These are sanity checks on
-// what the server said, not a signature check.
-export function validateGrant(body, endpoints, clientId, { requireRefresh }) {
+// Accepts only a Bearer grant for exactly the scopes asked for (Metadata, or
+// Debug with the chosen workflow permissions) with bounded, non-empty tokens and an expiry. The
+// access token claims must name this issuer, resource and client and one
+// workspace. These are sanity checks on what the server said, not a
+// signature check.
+export function validateGrant(body, endpoints, clientId, { requireRefresh, scopes = [METADATA_SCOPE] }) {
   if (body === null) return stop("verification_failed", "token_response_invalid");
   if (typeof body.token_type !== "string" || body.token_type.toLowerCase() !== "bearer") {
     return stop("verification_failed", "token_type_invalid");
@@ -342,9 +357,7 @@ export function validateGrant(body, endpoints, clientId, { requireRefresh }) {
   if (!Number.isInteger(body.expires_in) || body.expires_in < 1 || body.expires_in > MAX_EXPIRES_IN) {
     return stop("verification_failed", "token_response_invalid");
   }
-  if (typeof body.scope !== "string" || body.scope !== METADATA_SCOPE) {
-    return stop("verification_failed", "scope_mismatch");
-  }
+  if (!sameScopes(body.scope, scopes)) return stop("verification_failed", "scope_mismatch");
 
   const claims = decodeClaims(body.access_token);
   if (claims === null) return stop("verification_failed", "token_claims_invalid");
@@ -352,7 +365,7 @@ export function validateGrant(body, endpoints, clientId, { requireRefresh }) {
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!audience.includes(endpoints.resource)) return stop("verification_failed", "resource_mismatch");
   if (claims.client_id !== clientId) return stop("verification_failed", "client_mismatch");
-  if (claims.scope !== undefined && claims.scope !== METADATA_SCOPE) {
+  if (claims.scope !== undefined && !sameScopes(claims.scope, scopes)) {
     return stop("verification_failed", "scope_mismatch");
   }
   const tenant = normalizeUuid(claims[TENANT_CLAIM]);
@@ -371,6 +384,13 @@ export function validateGrant(body, endpoints, clientId, { requireRefresh }) {
       tenant,
     },
   };
+}
+
+// Whether a space-separated scope string names exactly these scopes.
+export function sameScopes(value, scopes) {
+  if (typeof value !== "string") return false;
+  const given = value.split(" ");
+  return given.length === scopes.length && new Set(given).size === given.length && scopes.every((scope) => given.includes(scope));
 }
 
 function decodeClaims(token) {

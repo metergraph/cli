@@ -16,6 +16,8 @@ import { parseJsonObject } from "./http.js";
 import {
   readQuery,
   groupedRequest,
+  workspaceLabel,
+  workspacePinned,
   READ_ENVIRONMENTS,
   CAPABILITY_NAMES,
   capabilitySummary,
@@ -28,6 +30,7 @@ import {
 import { compareReports, priorWindow, rankReport } from "./usage-aggregates.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 import { experimentNextAction, experimentRead } from "./experiments.js";
+import { readArguments, toolsNextAction, toolsRead } from "./tools.js";
 import { agentKeyAction, classifyEnvironment, handoffPages } from "./environment.js";
 
 // The read commands: status, context, capabilities, usage, routes and traces.
@@ -72,6 +75,8 @@ export async function runRead(options) {
     // The credential's access ("metadata" or "debug") and scopes, once verified.
     access: null,
     scopes: [],
+    // The verified workspace's slug and name, for output. Never its ID.
+    workspaceLabel: { slug: null, name: null },
     verifiedWorkspace: null,
     capabilities: null,
   };
@@ -93,6 +98,8 @@ export async function runRead(options) {
     if (holdsKnown(data, known)) {
       notices.clear();
       ctx.reason = "credential_in_metadata_response";
+      // The workspace's name or slug may be what echoed the credential.
+      ctx.workspaceLabel = { slug: null, name: null };
       return {
         outcome: "verification_failed",
         reason: "credential_in_metadata_response",
@@ -113,6 +120,11 @@ export async function runRead(options) {
   };
 
   try {
+    if (options.command === "tools" && options.action === "call") {
+      const args = readArguments(options.tool);
+      if (!args.ok) return end(args.outcome, args.reason);
+      options = { ...options, toolArguments: args };
+    }
     const root = resolveProject(options.project);
     const configDir = resolveConfigDir(options.configDir);
     const found = readBinding(root);
@@ -199,11 +211,17 @@ export async function runRead(options) {
     ctx.profile = session.session.profile;
     ctx.access = session.session.access;
     ctx.scopes = session.session.scopes;
+    known = session.knownCredentials;
+    ctx.workspaceLabel = workspaceLabel(session.documents.workspace?.workspace);
+    // A workspace named by slug or name is checked against the verified one.
+    if (target.workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, target.workspaceText)) {
+      return end("verification_failed", "workspace_context_mismatch");
+    }
     if (ctx.workspaceId === null) {
       ctx.workspaceId = session.session.workspaceId;
-      notices.add("workspace_not_pinned");
+      if (target.workspaceText === null) notices.add("workspace_not_pinned");
+      else ctx.intendedWorkspace = ctx.workspaceId;
     }
-    known = session.knownCredentials;
     ctx.authenticated = true;
     const { documents } = session;
 
@@ -225,6 +243,15 @@ export async function runRead(options) {
       return end("ok", null, context.value);
     }
     if (options.command === "capabilities") return end("ok", null, capabilities.value);
+    if (options.command === "tools") {
+      const tools = await toolsRead(session.session, options, limit.signal);
+      if (!tools.ok) {
+        if (ctx.credential === "agent_key" && tools.reason === "access_revoked") tools.reason = "agent_key_rejected";
+        const settled = ["refused", "unconfirmed", "action_required"].includes(tools.outcome) ? tools : settle(tools);
+        return end(settled.outcome, settled.reason, tools.report);
+      }
+      return end("ok", null, tools.value);
+    }
     if (options.command === "experiments") {
       const read = await experimentRead(session.session, options, ctx, documents, limit.signal, notices);
       if (!read.ok) {
@@ -364,7 +391,7 @@ export function holdsKnown(value, known) {
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
-function retryAfterOf(response) {
+export function retryAfterOf(response) {
   const header = response.headers["retry-after"];
   const seconds = typeof header === "string" && RETRY_AFTER.test(header.trim()) ? Number(header.trim()) : null;
   return seconds !== null && seconds <= 86400 ? seconds : null;
@@ -418,7 +445,7 @@ async function fetchRead(session, path, query, signal) {
 function readData(ctx, report, notices, outcome, options, extra = {}) {
   return {
     origin: ctx.origin,
-    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
+    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId, ...ctx.workspaceLabel },
     deployment_profile: ctx.profile,
     environment: ctx.environment.kind,
     credential: ctx.credential,
@@ -428,6 +455,8 @@ function readData(ctx, report, notices, outcome, options, extra = {}) {
     retry_after_seconds: outcome === "rate_limited" || report?.retry_after_seconds !== undefined
       ? report?.retry_after_seconds ?? null : null,
     ...(options.command === "experiments" ? { refusal: outcome === "refused" ? report?.refusal ?? null : null } : {}),
+    // A tool's own error document, as the service returned it.
+    ...(options.command === "tools" ? { tool_error: outcome === "refused" ? report?.tool_error ?? null : null } : {}),
     notices: [...notices].sort(),
     next_action: nextAction(outcome, ctx, options, extra),
   };
@@ -459,6 +488,9 @@ function statusData(ctx, notices, outcome, options) {
         ctx.verifiedWorkspace === null || ctx.intendedWorkspace === null
           ? null
           : ctx.verifiedWorkspace === ctx.intendedWorkspace,
+      // The verified workspace's slug and name, which output shows instead
+      // of either ID.
+      ...ctx.workspaceLabel,
     },
     scopes: ctx.authenticated ? ctx.scopes : [],
     capabilities:
@@ -505,6 +537,8 @@ function nextAction(outcome, ctx, options, { grouped = false, report = null } = 
   if (outcome === "rate_limited") return { kind: "retry_later", message: "Wait, then run the same command again." };
   const experiment = experimentNextAction(outcome, ctx, options, report);
   if (experiment !== undefined) return experiment;
+  const tool = toolsNextAction(ctx, options);
+  if (tool !== undefined) return tool;
   if (reason === "usage_aggregates_unavailable" || (grouped && reason === "endpoint_unavailable")) {
     // Offer the route-by-day read only when this grant actually has it.
     if (capabilities?.agent?.usage?.available !== true) return null;

@@ -335,7 +335,9 @@ test("remote terminals and redirected stderr never ask questions", () => {
 
 test("local login only fills a missing runtime after validation", () => {
   assert.deepEqual(fillLoginArgv(["login"]), ["login", "--runtime", "local"]);
-  for (const argv of [["login", "--runtime", "cloud"], ["login", "--workspace", "invalid"], ["setup"], ["login", "--help"]]) {
+  // --workspace takes a slug or name, so any non-empty value is valid.
+  assert.deepEqual(fillLoginArgv(["login", "--workspace", "acme"]), ["login", "--workspace", "acme", "--runtime", "local"]);
+  for (const argv of [["login", "--runtime", "cloud"], ["login", "--role", "replay"], ["setup"], ["login", "--help"]]) {
     assert.deepEqual(fillLoginArgv(argv), argv);
   }
 });

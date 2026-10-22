@@ -12,6 +12,7 @@ import {
 } from "./experiments-contract.js";
 import { parseJsonObject } from "./http.js";
 import { parseOrigin } from "./origin.js";
+import { workspaceLabel, workspacePinned } from "./read-contract.js";
 import { holdsKnown } from "./read.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 
@@ -217,6 +218,7 @@ export async function runExperimentStart(options) {
     origin: null,
     workspaceId: null,
     intendedWorkspace: null,
+    workspaceLabel: { slug: null, name: null },
     profile: null,
     authenticated: false,
     scopes: [],
@@ -234,7 +236,8 @@ export async function runExperimentStart(options) {
     const data = startData(ctx, notices, outcome, report);
     if (holdsKnown(data, known)) {
       return { outcome: "verification_failed", reason: "credential_in_metadata_response",
-        data: startData({ ...ctx, reason: "credential_in_metadata_response" }, new Set(), "verification_failed", null) };
+        data: startData({ ...ctx, reason: "credential_in_metadata_response", workspaceLabel: { slug: null, name: null } },
+          new Set(), "verification_failed", null) };
     }
     return { outcome, reason, data };
   };
@@ -279,6 +282,10 @@ export async function runExperimentStart(options) {
       return end(settled.outcome, reason);
     }
     ctx.profile = session.session.profile;
+    if (target.workspaceText !== null && !workspacePinned(session.documents.workspace?.workspace, target.workspaceText)) {
+      return end("verification_failed", "workspace_context_mismatch");
+    }
+    ctx.workspaceLabel = workspaceLabel(session.documents.workspace?.workspace);
     if (ctx.workspaceId === null) {
       ctx.workspaceId = session.session.workspaceId;
       notices.add("workspace_not_pinned");
@@ -335,7 +342,7 @@ function unconfirmed(response, failure) {
 function startData(ctx, notices, outcome, report) {
   return {
     origin: ctx.origin,
-    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId },
+    workspace: ctx.workspaceId === null ? null : { id: ctx.workspaceId, ...ctx.workspaceLabel },
     deployment_profile: ctx.profile,
     environment: ctx.environment.kind,
     credential: "agent_key",

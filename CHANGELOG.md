@@ -11,6 +11,24 @@
   Metadata key, and still send only their Metadata requests with it. `experiments start`
   accepts a Debug key with all three permissions. A key with Replay access is still
   refused.
+- `tools list` and `tools call TOOL --args JSON` reach every Agent Access tool the
+  credential can use, through the service's MCP endpoint, with the same sign in or key
+  and checks as the read commands: classified workloads, readiness, evaluations, analysis
+  runs and reports. A tool that writes, starts work or calls a model provider runs only
+  with `--yes`; without it the command exits 18 and calls nothing.
+- `login --role debug` signs in with the Debug role, and `--allow-evaluation-writes`,
+  `--allow-evaluation-previews` and `--allow-analysis-starts` add those workflow
+  permissions, the same flags `bin/agent-key` takes. A workspace owner approves them on
+  the consent page, so no key needs creating or saving. The reads, `tools` and `status`
+  use the grant, and `login --json` reports it in `data.access` as `status` does. Signing
+  in again with another role or other permissions replaces the grant for the same
+  workspace.
+- `--workspace` takes a workspace's slug or name, as well as its ID, for `login`, the read
+  commands, `tools` and `experiments`. `login` sends it to a consent page that can match it
+  and offers approval for that workspace alone; an unknown or ambiguous name ends sign in
+  with the slug to use. Text output names the workspace as "Name (slug)", never by ID;
+  JSON adds `slug` and `name` beside `id`.
+- JSON output escapes C1 control and bidirectional characters as `\uXXXX`.
 - `status` reports the credential's role and each permission in `data.access`
   (`role`, `permissions` with one boolean per permission, and `permissions_offered`,
   false where the deployment offers no managed evaluations) and, in text, how to grant

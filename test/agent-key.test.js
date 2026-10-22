@@ -95,7 +95,7 @@ test("a remote agent with a Metadata key reads usage after verifying origin, wor
     assert.equal(result.data.credential, "agent_key");
     assert.equal(result.data.environment, "ssh_session");
     assert.equal(result.data.origin, server.origin);
-    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A });
+    assert.deepEqual(result.data.workspace, { id: WORKSPACE_A, slug: "example-workspace", name: "Example Workspace" });
     assert.deepEqual(result.data.scopes, ["agent:metadata"]);
     assert.ok(result.data.notices.includes("workspace_not_pinned"));
     assert.notEqual(result.data.result, null);
@@ -130,7 +130,7 @@ test("routes, traces, context, capabilities and status work with a key, and reru
     assert.equal(run.code, 0, run.stdout);
     assert.equal(result.data.credential, "agent_key");
     assert.equal(result.data.authenticated, true);
-    assert.deepEqual(result.data.workspace, { intended: null, actual: WORKSPACE_A, match: null });
+    assert.deepEqual(result.data.workspace, { intended: null, actual: WORKSPACE_A, match: null, slug: "example-workspace", name: "Example Workspace" });
     // A key alone binds nothing, so the project is not configured.
     assert.equal(result.data.configured, false);
     assert.equal(result.data.deployment_profile_verified, true);

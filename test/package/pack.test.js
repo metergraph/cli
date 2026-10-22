@@ -77,6 +77,8 @@ const EXPECTED_FILES = [
   "src/skill-bundle.js",
   "src/skill.js",
   "src/style.js",
+  "src/tools-output.js",
+  "src/tools.js",
   "src/trace-contract.js",
   "src/trace-open.js",
   "src/transport.js",

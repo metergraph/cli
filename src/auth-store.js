@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { systemRoot } from "./auth-browser.js";
-import { AUTH_PATHS, METADATA_SCOPE, SUPPORTED_PROFILES } from "./constants.js";
+import { AUTH_PATHS, SUPPORTED_PROFILES, isLoginScope } from "./constants.js";
 import { parseOrigin } from "./origin.js";
 
 // Per-user credential storage for the delegated Metadata OAuth grant. Only
@@ -207,7 +207,7 @@ export function validRecord(record) {
     SUPPORTED_PROFILES.includes(record.deployment_profile) &&
     typeof record.workspace_id === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(record.workspace_id) &&
-    record.scope === METADATA_SCOPE &&
+    isLoginScope(record.scope) &&
     printable(record.client_id, 256) &&
     printable(record.access_token, 8192) &&
     printable(record.refresh_token, 4096) &&

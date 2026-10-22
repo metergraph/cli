@@ -19,6 +19,9 @@ const ALLOWED_PARAMS = new Set(["code", "state", "error", "error_description", "
 // The setup receipt a combined sign-in approval returns next to the code.
 // Accepted only by a wait that asked for it.
 export const SETUP_CODE_PARAM = "ingest_setup_code";
+// The fixed error_description values a consent page sends when the workspace
+// the CLI named matches none, or more than one, of the person's workspaces.
+const HINT_REFUSALS = ["workspace_hint_ambiguous", "workspace_hint_unknown"];
 
 const PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
@@ -39,7 +42,11 @@ const PAGE_HEADERS = {
 //     { kind: "code", code[, setupCode] } setupCode, the ingest_setup_code
 //                                         value, only when wait() was given
 //                                         acceptSetupCode and it was sent
-//     { kind: "denied" }                  the user or server declined
+//     { kind: "denied", hint }            the user or server declined; hint
+//                                         is workspace_hint_ambiguous or
+//                                         workspace_hint_unknown when the
+//                                         consent page refused the workspace
+//                                         the CLI named, else null
 //     { kind: "error", reason }           authorization_error,
 //                                         callback_issuer_mismatch or
 //                                         callback_invalid
@@ -163,8 +170,9 @@ function inspect(request, { host, state, issuer, requireIss, acceptSetupCode }) 
     if (seen.has("code") || seen.has(SETUP_CODE_PARAM)) {
       return { status: 400, result: { kind: "error", reason: "callback_invalid" } };
     }
+    const description = params.get("error_description");
     return params.get("error") === "access_denied"
-      ? { status: 200, result: { kind: "denied" } }
+      ? { status: 200, result: { kind: "denied", hint: HINT_REFUSALS.includes(description) ? description : null } }
       : { status: 200, result: { kind: "error", reason: "authorization_error" } };
   }
   const code = params.get("code");

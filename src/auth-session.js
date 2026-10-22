@@ -1,7 +1,7 @@
-import { endpointsFor, refreshGrant, verifyContext } from "./auth-oauth.js";
+import { endpointsFor, refreshGrant, sameScopes, verifyContext } from "./auth-oauth.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
 import { Stop, openStore, readCredential, resolveConfigDir, withSlotLock, writeCredential } from "./auth-store.js";
-import { AUTH_HTTP_TIMEOUT_MS } from "./constants.js";
+import { AUTH_HTTP_TIMEOUT_MS, METADATA_SCOPE } from "./constants.js";
 import { deadline } from "./transport.js";
 
 // The verified session that later read commands build on. It never opens a
@@ -68,12 +68,18 @@ export async function sessionFor(binding, store, cancel) {
   }
 
   const limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
+  // A Debug sign in (login --role debug) is verified as Debug with workflow
+  // permissions, and must still hold exactly the scopes it was granted.
+  const debug = record.scope !== METADATA_SCOPE;
   const verified = await verifyContext(
     binding.origin,
     record.access_token,
-    { profile: binding.deployment_profile, workspaceId: binding.workspace_id },
+    { profile: binding.deployment_profile, workspaceId: binding.workspace_id, access: debug ? "read" : "metadata" },
     limit.signal,
   );
+  if (verified.ok && debug && !sameScopes(record.scope, verified.scopes)) {
+    return stop("verification_failed", "scope_mismatch");
+  }
   if (!verified.ok) {
     // The service refused a token that was valid when issued: the grant was
     // revoked, or the user lost access to the workspace. Fail closed.
@@ -140,7 +146,7 @@ async function refreshLocked(store, slot, binding, cancel) {
   const limit = deadline(AUTH_HTTP_TIMEOUT_MS, cancel);
   const result = await refreshGrant(
     endpoints,
-    { clientId: current.client_id, refreshToken: current.refresh_token },
+    { clientId: current.client_id, refreshToken: current.refresh_token, scopes: current.scope.split(" ") },
     limit.signal,
   );
   if (!result.ok) {

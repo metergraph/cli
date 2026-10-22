@@ -104,7 +104,7 @@ test("status keeps configured, reachable, authenticated and the verified workspa
       authenticated: true,
       deployment_profile: "local",
       deployment_profile_verified: true,
-      workspace: { intended: WORKSPACE_A, actual: WORKSPACE_A, match: true },
+      workspace: { intended: WORKSPACE_A, actual: WORKSPACE_A, match: true, slug: "example-workspace", name: "Example Workspace" },
       scopes: ["agent:metadata"],
       capabilities: {
         workspace_context: true,
@@ -172,7 +172,7 @@ test("status without a sign in is a truthful login_required and makes no request
   assert.equal(result.data.configured, false);
   assert.equal(result.data.reachable, null);
   assert.equal(result.data.authenticated, false);
-  assert.deepEqual(result.data.workspace, { intended: null, actual: null, match: null });
+  assert.deepEqual(result.data.workspace, { intended: null, actual: null, match: null, slug: null, name: null });
   assert.equal(result.data.capabilities, null);
   assert.equal(result.data.next_action.kind, "login");
   assert.equal(fs.existsSync(box.config), false, "a read command created the config directory");
@@ -858,7 +858,7 @@ test("invalid read arguments and credential arguments exit 2 without echo or req
     [["status", "--limit", "5"], "unknown_argument"],
     [["routes", "--days", "5"], "unknown_argument"],
     [["status", "--url", "http://example.com"], "invalid_url"],
-    [["usage", "--workspace", "hunter2"], "invalid_workspace"],
+    [["usage", "--workspace", "hunter2\u0007"], "invalid_workspace"],
     [["usage", "--agent-token-file", ""], "invalid_agent_token_file"],
     [["verify", "--agent-token-file", "/tmp/x"], "unknown_argument"],
     [["usage", "--token", "hunter2"], "unknown_argument"],

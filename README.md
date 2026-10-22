@@ -125,13 +125,16 @@ The CLI is built to be run by Codex, Claude Code and Cursor as well as by people
 - **Access, said by role and permission.** Sign in and setup give the Metadata role,
   which is enough for usage, cost and trace questions. Writing and testing evaluations
   and starting analyses need the Debug role with Allow evaluation writes, Allow
-  evaluation previews and Allow analysis starts: a coding-agent key a workspace owner
-  creates on the Keys page by choosing "Debug with all three permissions", or with
-  `bin/agent-key create --role debug --allow-evaluation-writes --allow-evaluation-previews
-  --allow-analysis-starts` on the customer-local bundle. Save it as
-  `METERGRAPH_AGENT_TOKEN`; the same key serves the read commands and an MCP client
-  configuration. `metergraph status --json` reports the role and each permission in
-  `data.access`. Clients without a shell connect through the
+  evaluation previews and Allow analysis starts, which only a workspace owner grants. On
+  a local machine, `metergraph login --runtime local --role debug
+  --allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts` asks
+  for them in the browser. Otherwise a workspace owner creates a coding-agent key on the
+  Keys page by choosing "Debug with all three permissions", or with `bin/agent-key
+  create` and the same flags on the customer-local bundle; save it as
+  `METERGRAPH_AGENT_TOKEN`, and the same key serves the read commands and an MCP client
+  configuration. `--workspace` takes a workspace's slug (on its Settings page) or name.
+  `metergraph status --json` reports the role and each permission in `data.access`.
+  Clients without a shell connect through the
   [MCP server](https://www.metergraph.dev/docs/guides/mcp-server/) instead.
 
 Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
@@ -158,6 +161,7 @@ Suggested `AGENTS.md` or `CLAUDE.md` lines for a project that uses Metergraph:
 | `context` | Workspace details and retention | Yes |
 | `capabilities` | What the workspace makes available to this project | Yes |
 | `experiments list`, `estimate`, `start`, `get` | Replay a workload's recent production calls on 1 to 3 other models or settings: price it, start it, poll it and read cost, latency and output statistics per treatment next to production | Yes |
+| `tools list`, `tools call` | Any Agent Access tool the credential can use, as an MCP client calls it: classified workloads, readiness, evaluations, analysis runs and reports. A tool that writes, starts work or calls a model provider runs only with `--yes` | Yes |
 | `login`, `logout` | Sign a project in or out without the rest of `setup` | Yes |
 | `doctor` | Check that a service is reachable, healthy and supported, without credentials | Yes |
 | `skill install`, `skill update` | Install or update the Metergraph skill for one agent | No |
