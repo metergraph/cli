@@ -587,7 +587,7 @@ export function helpData(topic) {
         name: "setup",
         summary: "Guide browser sign in and workspace choice, approve an ingest-only key, and install the selected client skill. Does not verify application traffic.",
         options: [
-          { name: "--runtime", value: "RUNTIME", summary: "Required. local only; other runtimes get a handoff." },
+          { name: "--runtime", value: "RUNTIME", summary: "Required unless a person runs setup at a terminal (then local). local only; other runtimes get a handoff." },
           { name: "--url", value: "ORIGIN", summary: "Deployment origin. Defaults to an existing project binding, else the hosted origin." },
           { name: "--workspace", value: "UUID", summary: "Expected workspace; the browser must approve this exact workspace." },
           { name: "--project", value: "DIR", summary: "Project directory. Default: current directory." },
@@ -711,6 +711,8 @@ See docs/pricing.md for the supported contract, limitations and reference previe
       "--skip-skill is explicit. Non-hosted setup requires an explicit origin, workspace and",
       "operator prerequisite attestation; OSS remains an operator handoff. No application",
       "traffic is claimed until an exact instrumented invocation is separately verified.",
+      "", "At a terminal without --json, setup asks for any of these it needs that are",
+      "missing, prints the full command, then runs it. Scripts and agents get no questions.",
       "", "Options:");
     lines.push(...optionLines(helpData(null).commands.find((entry) => entry.name === "setup").options, 25));
     lines.push("", ...AGENT_APPROVAL_HELP);

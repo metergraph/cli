@@ -366,6 +366,20 @@ workspace:
 metergraph setup --runtime local --deployment customer-local --url http://localhost:8080 --workspace 11111111-1111-4111-8111-111111111111 --confirm-prerequisites --client codex
 ```
 
+Run by a person at a terminal (stdin and stdout both terminals, no `--json`, no
+`CI`), setup asks for what its flags leave out instead of failing: where Metergraph
+runs, the address and workspace of a non-hosted installation, whether its
+prerequisites are done, and which client gets the skill. It assumes `--runtime
+local`, offers a bundle answering on `http://localhost:8080` as the default (a
+remote session is not probed, so it sends no request before its handoff), and
+resumes a project's saved route without asking about it. Flags already given are
+never asked for. The answers become ordinary flags, and setup prints the full
+command (`Running: metergraph setup ...`) before running it, so it can be rerun
+without questions. A command that does not parse is not printed: its error never
+echoes the refused value. Ctrl-C or Ctrl-D at a question exits with 17 `cancelled` and
+changes nothing. An agent or script never gets a question: it keeps the flag errors
+and the handoffs below.
+
 If the bundle is not running yet, setup returns the `complete_prerequisite` handoff
 below. The `metergraph-local-bundle` skill from `skills install` walks a coding agent
 through downloading, verifying and starting it first; the CLI itself provisions nothing.
@@ -426,6 +440,39 @@ never written anywhere, and setup stops if it grants content, replay or any
 access beyond Metadata. For OSS, `MG_TOKENS` ingestion tokens and
 `MG_AGENT_TOKENS` read tokens stay with the operator: setup verifies only the
 read token and never issues or writes an OSS ingest token.
+
+Setup gives the agent Metadata access only. A successful customer-local setup
+also returns `data.agent_access`, saying how the bundle gives the agent more
+without a sign in:
+
+```json
+{
+  "role": "metadata",
+  "offer": {
+    "kind": "bundle_agent_key",
+    "run_in": "bundle_directory",
+    "command": "./bin/agent-key create --write-to ~/.config/metergraph/agent.env --role debug --allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts",
+    "requires_person_approval": true,
+    "keys_page_url": "http://localhost:8080/#api-keys",
+    "message": "..."
+  }
+}
+```
+
+`bin/agent-key` ships in the bundle. It issues a coding-agent key attributed to
+the local admin, shows what each grant allows and asks to confirm (outside a
+terminal it needs `--yes`), and writes the key only to the named private file,
+never printing it. The command text is fixed in this CLI, never taken from the
+service. An agent relays the offer and runs the command only after the person
+agrees to that access; a bundle without `bin/agent-key` uses `keys_page_url`
+instead. At a terminal, setup asks instead. The person types the bundle directory
+(nothing in the current project is offered as a default), which must hold
+`bin/start`, `docker-compose.yml` and the release manifest. Setup runs that
+bundle's `bin/agent-key` only if the person owns it and nobody else can change
+it, and only after naming its full path and asking. `bin/agent-key` then asks
+for its own confirmation, and setup prints how to load the key and add the MCP
+server for the chosen client. On Windows, where the bundle runs inside WSL, setup
+prints the command to run there instead of asking. A hosted setup has no `agent_access`.
 
 A rerun of customer-local or BYOC setup can omit `--deployment`, `--url`,
 `--workspace` and `--confirm-prerequisites`, as a hosted rerun does. Setup then

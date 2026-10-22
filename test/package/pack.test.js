@@ -69,6 +69,7 @@ const EXPECTED_FILES = [
   "src/setup-env-git.js",
   "src/setup-env-parse.js",
   "src/setup-env.js",
+  "src/setup-interactive.js",
   "src/setup-refusal.js",
   "src/setup-state.js",
   "src/setup.js",
