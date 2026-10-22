@@ -441,3 +441,13 @@ test("Debug with every permission passes only where the caller accepts Debug, an
   assert.equal(checkCapabilities(offered, CONTEXT).reason, "content_access_granted");
   assert.deepEqual(checkCapabilities(offered, { ...CONTEXT, access: "debug" }), { ok: true });
 });
+
+test("Debug capabilities refuse Replay scopes even on an unfamiliar capability", () => {
+  for (const name of ["trace_replay", "future_replay"]) {
+    const doc = capabilitiesDocument(PROVENANCE, { start: true });
+    doc.agent[name] = { ...doc.agent.trace_replay, available: true };
+    assert.equal(checkCapabilities(doc, { ...CONTEXT, access: "debug" }).reason, "scope_mismatch");
+    doc.agent[name].available = false;
+    assert.deepEqual(checkCapabilities(doc, { ...CONTEXT, access: "debug" }), { ok: true });
+  }
+});

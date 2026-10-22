@@ -998,7 +998,9 @@ Before any read, in order and under one `--timeout-ms` deadline:
    the Debug role with any workflow permissions (`agent:read` with any of
    `agent:eval-write`, `agent:eval-preview` and `agent:analysis-run`), the same profile and the pinned workspace. A key with
    `agent:replay`, or one mixing Metadata with other scopes, is refused. With either
-   access, the read commands send only their Metadata requests.
+   access, the read commands send only their Metadata requests. The full model-swap
+   workflow requires the Debug role with all three permissions: Allow evaluation
+   writes, Allow evaluation previews and Allow analysis starts.
 
 | Result | Exit | `next_action.kind` |
 | --- | --- | --- |
@@ -1341,7 +1343,8 @@ CLI never assumes such a server is hosted.
   provider through its AI gateway, within the budget the service owns.
 - It never uses a saved sign in, never requests a scope, and never uses its key for any
   other request. Read commands, `experiments list`, `estimate` and `get` among them,
-  refuse a key that holds more than Metadata access.
+  accept keys with the Metadata or Debug role and send only Metadata requests.
+  Replay access is refused.
 - It never retries a start, and never reads the experiment's inputs or outputs.
 
 ## What the read commands do not do
