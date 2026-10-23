@@ -117,10 +117,13 @@ Rules:
 
 ## 3. Links
 
-Use a link a tool returned (`metergraph_links`, `links`) exactly as given.
-Otherwise build it from the origin of the Metergraph deployment the agent
-reads from (hosted is `https://app.metergraph.dev`; the customer-local bundle
-is normally `http://127.0.0.1:8080`) and these app routes:
+For an authenticated HTTPS browser deployment, use a tool-returned link only
+after confirming its origin/path against the intended deployment as the
+`metergraph` skill requires. Otherwise build it from that confirmed browser
+origin (hosted is `https://app.metergraph.dev`) and the routes below. The
+customer-local authenticated Docker bundle has no browser dashboard route;
+do not construct or offer legacy localhost report links. Explain that limitation
+and return the bounded report evidence instead.
 
 | Page | Route |
 | --- | --- |

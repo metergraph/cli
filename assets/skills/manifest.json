@@ -1,13 +1,13 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "29c1ded28f987a876da19e373aa8f47bf44adfae",
+  "commit": "93edccdb047d68e55104217269bf66d662611694",
   "skills": [
     {
       "name": "metergraph-analyze",
-      "sha256": "68df792268caf4031dc6a2f20c3abd25d9afd2b8d430437b1916e22bab8ba20e",
-      "size": 17160,
-      "revision": "sha256-68df792268ca"
+      "sha256": "0288ad9e420ae37dcbee0fd274045dc0fa3ffa674d68495979975e57f13a9b01",
+      "size": 18668,
+      "revision": "sha256-0288ad9e420a"
     },
     {
       "name": "metergraph-candidates",
@@ -17,51 +17,51 @@
     },
     {
       "name": "metergraph-evals",
-      "sha256": "eb782c3b08df3454e2d70ebc2009ac84248ca671ee210d37ca7264e5998c3118",
-      "size": 8669,
-      "revision": "sha256-eb782c3b08df"
+      "sha256": "0a96439daa30d0dcac6b4821bf14f12279cbb793bd3af21b6363fd71b1c14cc6",
+      "size": 9962,
+      "revision": "sha256-0a96439daa30"
     },
     {
       "name": "metergraph-investigate",
-      "sha256": "3006919baa4a1166a6085b4d9a72a10dd6fc3f0d03193a1d2cbac166b204b1a0",
-      "size": 21871,
-      "revision": "sha256-3006919baa4a"
+      "sha256": "9ea5feec4456b675422aad5a707641f149abfb33aa3b1f6d69c9f85da30b9fc5",
+      "size": 23517,
+      "revision": "sha256-9ea5feec4456"
     },
     {
       "name": "metergraph-iterate",
-      "sha256": "efcf7400c748788e6493141a693526519de015109d54f4d0bd60e172c8fdbdff",
-      "size": 6704,
-      "revision": "sha256-efcf7400c748"
+      "sha256": "32aaa19b7fce6c365a5935f9eeb69daca357e7e2c99f330ca2d8ac81febb6225",
+      "size": 7997,
+      "revision": "sha256-32aaa19b7fce"
     },
     {
       "name": "metergraph-local-bundle",
-      "sha256": "750eed186870775b30d394d5d6aa157785353d8b3155c34cf14cf886e29ace12",
-      "size": 16047,
-      "revision": "sha256-750eed186870"
+      "sha256": "3ea257ceb47eef905bea89624163daf67c678a93019f70e46cc2bc0b26bdf975",
+      "size": 14428,
+      "revision": "sha256-3ea257ceb47e"
     },
     {
       "name": "metergraph-model-swap",
-      "sha256": "c8f1ad82930557c5d76946d1b093fde64da04db95eb1288ea60ec298ed0031dd",
-      "size": 10355,
-      "revision": "sha256-c8f1ad829305"
+      "sha256": "7a76b7121a5a0b4312a3e5dec7abe8184ee3f492b980a04f872a9547229c7a5e",
+      "size": 11863,
+      "revision": "sha256-7a76b7121a5a"
     },
     {
       "name": "metergraph-onboarding",
-      "sha256": "94f2226535ec86192eacc0e02315042a45df9a793c75e869f0d4d8702b0e642e",
-      "size": 12523,
-      "revision": "sha256-94f2226535ec"
+      "sha256": "a455313cd866b44f85f396107e6f21c6d2f7922dd8824be682b739800cdbe75f",
+      "size": 13839,
+      "revision": "sha256-a455313cd866"
     },
     {
       "name": "metergraph-report",
-      "sha256": "2a7eafcc04d21b30ad19fe6fb23600fa952498db707556e2027137a23f7bcd4a",
-      "size": 8019,
-      "revision": "sha256-2a7eafcc04d2"
+      "sha256": "6deb06f24d3c4e7a0e0c19d964b79a4b3278bdc8524776829821897f3e921a18",
+      "size": 8236,
+      "revision": "sha256-6deb06f24d3c"
     },
     {
       "name": "metergraph-workloads",
-      "sha256": "9e48f10cfb6708c7cf92db7ab14a68da057ae6a34d620652fd87176a7033ca0b",
-      "size": 8813,
-      "revision": "sha256-9e48f10cfb67"
+      "sha256": "40161aa823a859cc3a1b2a1dd644bb54cf33ac32f82546346da785413abccfa6",
+      "size": 9607,
+      "revision": "sha256-40161aa823a8"
     }
   ]
 }

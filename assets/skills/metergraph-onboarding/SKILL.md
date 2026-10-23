@@ -48,26 +48,32 @@ skill installation; a later installed version may offer `login`, `setup` and
 https://www.metergraph.dev/docs/start/first-trace/ and its manual setup steps.
 Do not infer that a server endpoint or source-only CLI command has shipped.
 
-For customer-local MeterGraph, use `metergraph-local-bundle` to stand up the
-released bundle, then continue here. Use its included README, signed manifest
-and verification files. The human obtains the current
-pull-only registry credential; registry access is not yet universally self-serve.
-Use password-stdin and the local secret store for registry login. Verify the
-archive before running its scripts. Configure the bundle's local settings,
-start with `./bin/start`, and inspect `./bin/status` and the reported readiness.
-Use the bundle's printed loopback URL. Record bundle version and image digests.
-The human sets their local admin/database passwords and signs in. Reuse the
-bundle's startup/recovery instructions; do not replace them with an ad-hoc
-Compose stack. First boot may ingest a demo trace, which is synthetic evidence.
+For customer-local MeterGraph, use `metergraph-local-bundle` to verify a release
+that supports authenticated Docker transport and select its installation and
+local context independently. Missing support is an upgrade/client blocker, not
+permission to use a legacy HTTP client. Preserve the signed archive, manifest,
+existing data and runtime secrets. The human uses their separate pull-only
+registry access; never request it in chat. Start and inspect only that verified
+bundle's `bin/start` and `bin/status`. Record release and image provenance.
+
+The authenticated-transport bundle publishes no host API port. Its local browser
+dashboard and browser sign-in/consent are unavailable. Do not use a printed legacy
+loopback setup URL, administrator password, HTTP MCP endpoint or SDK ingest key
+against a host listener. Startup/demo readiness does not prove client transport
+support. If no released client supports the authenticated Docker channel, stop
+onboarding at that boundary and name it. First-boot demo traces remain synthetic.
 
 ## Connect the coding client
 
 For hosted sign-in, the connection is the CLI's saved sign-in, or the
-URL-only MCP server added above. For a keyed or customer-local connection,
+URL-only MCP server added above. For a keyed HTTPS connection,
 reuse the Keys page's client-specific instructions, documented in
 https://www.metergraph.dev/docs/guides/agent-access/. On the customer-local
 bundle, `bin/agent-key` can issue the key instead; see
-`metergraph-local-bundle`. The key goes in `METERGRAPH_AGENT_TOKEN`, which
+`metergraph-local-bundle`, but create no key until a compatible authenticated
+client path exists. Key issuance does not authenticate a host HTTP listener.
+The following environment/MCP examples apply only to an authenticated HTTPS
+client path, never as customer-local plaintext fallback. The key goes in `METERGRAPH_AGENT_TOKEN`, which
 the CLI reads from the shell that starts the agent. For MCP, the endpoint is
 `<origin>/v1/agent/mcp`, and the stdio bridge is `metergraph-mcp` with
 `METERGRAPH_URL` and `METERGRAPH_AGENT_TOKEN` in its environment.
@@ -94,8 +100,14 @@ Keep these credentials separate:
 
 Never ask for secrets in chat, commit them, put them in a shared MCP file or
 save them in verification evidence. A read connection is sufficient for this
-onboarding verification. Replay, eval previews and analyses make separate
-authorization and cost decisions.
+onboarding verification. Replay and provider-backed work make separate authorization and cost decisions.
+Apply the `metergraph` skill's provider execution consent gate before any paid
+call. `provider_consent_unavailable` pauses agent analysis, classification and
+experiment starts, even with scopes and `--yes`. Deterministic previews/reads
+can continue. For a supported one-replay receipt, hand the frozen plan to the
+human's authenticated hosted form or the verified local `bin/consent` terminal
+command, then retry exact arguments with `consent_id` only after approval.
+Never approve for the person, fabricate a receipt or retry uncertain consumption.
 
 ## Instrument or import application traffic
 
@@ -107,7 +119,7 @@ and validation jobs from production traffic claims. Keep provider base URLs,
 gateway credentials and application behavior intact. Review instrumentation
 changes with the user, including calls that could not be captured.
 
-Use the selected deployment's ingestion destination and the ingest credential,
+Use only the selected deployment's authenticated ingestion destination and the ingest credential,
 not its MCP URL or Agent Access key. Use that deployment's SDK/connector setup
 instructions to choose the complete ingest URL. Set capture/retention as the
 workspace owner intends; metadata-only telemetry does not prove retained
@@ -163,7 +175,9 @@ discovery is not analysis readiness. Keep retained content out of setup reports.
 
 | State | Next action |
 | --- | --- |
-| Signup, sign-in or OAuth consent required | Hand the browser step to the human, then reconnect and verify workspace identity |
+| Hosted HTTPS signup, sign-in or OAuth consent required | Hand the verified browser step to the human, then reconnect and verify workspace identity |
+| Local authenticated transport/client missing | Stop for a supported signed release/client; no HTTP/browser credential fallback |
+| Provider consent unavailable or receipt refused | Stop paid starts; preserve reads and follow the trusted human consent flow only where supported |
 | Registry access expired/denied | Refresh the pull credential through the supported distribution channel, repeat registry login, retain local data |
 | Local startup or bootstrap failure | Inspect `bin/status` and the bundle's named logs/readiness checks; follow its recovery instructions |
 | Runner unavailable | Use the bundle's runner health instructions; do not claim a healthy agent connection proves analysis readiness |
