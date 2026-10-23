@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "84309f9097342413df0e07267a3f6fb39e269df4",
+  "commit": "29c1ded28f987a876da19e373aa8f47bf44adfae",
   "skills": [
     {
       "name": "metergraph-analyze",

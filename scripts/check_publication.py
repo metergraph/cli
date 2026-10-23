@@ -32,11 +32,23 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True)
 
 
+def blob_texts(content: bytes) -> list[str]:
+    texts = [content.decode("utf-8", errors="replace")]
+    # Git treats wide-character text as binary. Inspect its decoded text too,
+    # including BOM-less files, instead of letting NULs hide known references.
+    for encoding in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        try:
+            texts.append(content.decode(encoding))
+        except UnicodeDecodeError:
+            pass
+    return texts
+
+
 def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
     try:
         metadata = [
-            ("new commits", git("log", "--format=%B", f"{base}..HEAD")),
+            ("new commits", git("log", "--format=%an%n%ae%n%cn%n%ce%n%B", f"{base}..HEAD")),
         ]
         commits = git("rev-list", "--reverse", f"{base}..HEAD").splitlines()
         diffs = [git("diff", "--no-ext-diff", "--no-textconv", "--unified=0", f"{base}...HEAD", "--")]
@@ -47,7 +59,7 @@ def main() -> int:
             changed = git("diff-tree", "--root", "-m", "--no-commit-id", "--name-only", "--diff-filter=ACMRT", "-r", "-z", commit, "--")
             for filename in set(changed.split("\0")) - {""}:
                 content = subprocess.check_output(["git", "cat-file", "blob", f"{commit}:{filename}"])
-                metadata.append(("published file", content.decode("utf-8", errors="replace")))
+                metadata.extend(("published file", text) for text in blob_texts(content))
         metadata.append(("HEAD refs", git("for-each-ref", "--points-at=HEAD", "--format=%(refname)", "refs/heads", "refs/tags")))
         metadata.append(("tag messages", git("for-each-ref", "--points-at=HEAD", "--format=%(contents)", "refs/tags")))
     except subprocess.CalledProcessError as error:

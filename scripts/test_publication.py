@@ -39,6 +39,10 @@ class PublicationTests(unittest.TestCase):
             env['GITHUB_EVENT_PATH'] = str(file)
         return subprocess.run(['python3', str(ROOT / 'scripts/check_publication.py'), 'baseline'], cwd=self.repo, env=env, capture_output=True, text=True).returncode
 
+    def test_commit_identity_is_checked(self):
+        self.git('-c', 'user.name=' + 'MET' + '-123', 'commit', '-q', '--allow-empty', '-m', 'ordinary change')
+        self.assertEqual(self.check(), 1)
+
     def test_clean_control(self):
         (self.repo / 'example.txt').write_text('ordinary text\n')
         self.commit('ordinary change')
@@ -63,6 +67,14 @@ class PublicationTests(unittest.TestCase):
         (self.repo / ('MET' + '-123.txt')).write_text('ordinary text\n')
         self.commit('add file')
         self.assertEqual(self.check(), 1)
+
+    def test_wide_character_text_cannot_hide_content(self):
+        for encoding in ('utf-16', 'utf-16-le', 'utf-16-be', 'utf-32', 'utf-32-le', 'utf-32-be'):
+            with self.subTest(encoding=encoding):
+                self.git('reset', '--hard', 'baseline')
+                (self.repo / 'payload.txt').write_bytes(('MET' + '-123\n').encode(encoding))
+                self.commit('add encoded text')
+                self.assertEqual(self.check(), 1)
 
     def test_binary_attribute_cannot_hide_content(self):
         (self.repo / '.gitattributes').write_text('payload.txt -diff\n')
