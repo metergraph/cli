@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 // Repository identity for the SDKs: `.metergraph/config.json` with
@@ -157,7 +157,7 @@ function writeNewConfig(root, repository) {
     try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.linkSync(temp, dest);
   } finally {
-    try { fs.unlinkSync(temp); } catch { /* already gone */ }
+    try { withRollback(() => fs.unlinkSync(temp)); } catch { /* already gone */ }
   }
 }
 

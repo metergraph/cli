@@ -61,9 +61,23 @@ script must not change with the `latest` tag. Previews use the `next` tag.
 | | Supported |
 | --- | --- |
 | Node.js | 22 and 24 |
-| Operating systems | Linux, macOS and Windows, each tested in CI |
+| Automatic file writes | macOS arm64, using the bundled filesystem helper |
+| Other operating systems and architectures | Automatic writes refuse until a verified helper is bundled |
 | Runtime dependencies | None |
 | Service | Hosted Metergraph, or a self-hosted deployment (see [Deployments](#deployments)) |
+
+Automatic writes use a first-party helper shipped in the npm package. Installation
+does not download a helper or invoke a compiler. The CLI verifies its packaged
+SHA-256 digest before starting it and refuses filesystem access if it is missing,
+altered, or unavailable for the current platform. The helper retains directory
+handles for reads, locks, replacement, rollback, and cleanup, so renaming a project
+directory cannot redirect writes into a substituted directory.
+
+This candidate includes a macOS arm64 build only. Linux and Windows automatic
+writes are unavailable; Windows needs a native handle and ACL backend before it
+can be enabled. Platform and runtime validation must pass before a release adds
+another binary. Existing read-only commands that do not need the local store
+remain available.
 
 Sign in needs a service that offers Metadata-only CLI grants and grant revocation; a
 service without them is reported as unsupported, and the CLI never falls back to

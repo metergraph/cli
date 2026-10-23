@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 import { parseOrigin } from "./origin.js";
@@ -80,6 +80,7 @@ export function readSetupState(root) {
   let stat;
   try { stat = fs.lstatSync(file); }
   catch (error) {
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     if (error.code === "ENOENT") return null;
     throw new Stop("filesystem_error", "setup_state_read_failed");
   }
@@ -97,6 +98,7 @@ export function readSetupState(root) {
       selected_client: null, skill_status: "pending" }) : value, content };
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("conflict", "setup_state_invalid");
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
@@ -136,10 +138,11 @@ export function writeSetupState(root, next, previous) {
     fs.renameSync(temp, dest);
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     if (error.code === "EEXIST") throw new Stop("conflict", "setup_state_locked");
     throw new Stop("filesystem_error", "setup_state_write_failed");
   } finally {
-    try { fs.unlinkSync(temp); } catch { /* no temp */ }
-    if (locked) { try { fs.unlinkSync(lock); } catch { /* next run refuses */ } }
+    try { withRollback(() => fs.unlinkSync(temp)); } catch { /* no temp */ }
+    if (locked) { try { withRollback(() => fs.unlinkSync(lock)); } catch { /* next run refuses */ } }
   }
 }

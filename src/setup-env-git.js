@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
+import fs from "./anchored-fs.js";
 import path from "node:path";
 
 import { Stop } from "./auth-store.js";

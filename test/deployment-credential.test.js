@@ -216,7 +216,7 @@ describe("deployment credential file", { skip: isWindows }, () => {
     assertFails(swapped, "credential_changed", { file: second, token });
   });
 
-  test("rechecks the file after the read and refuses any change made while it was read", () => {
+  test("rechecks the file after the read and refuses any change made while it was read", async (t) => {
     // Each case runs after the content was read and before it is checked
     // again. Replacement content has the same length as the original.
     const cases = [
@@ -228,9 +228,9 @@ describe("deployment credential file", { skip: isWindows }, () => {
           fs.chmodSync(file, 0o644);
           fs.chmodSync(file, 0o600);
         },
-        "credential_changed",
+        "credential_changed", true,
       ],
-      ["rewritten in place", (file, token) => fs.writeFileSync(file, newToken().slice(0, token.length)), "credential_changed"],
+      ["rewritten in place", (file, token) => fs.writeFileSync(file, newToken().slice(0, token.length)), "credential_changed", true],
       [
         "one byte overwritten without truncation",
         (file) => {
@@ -241,7 +241,7 @@ describe("deployment credential file", { skip: isWindows }, () => {
             fs.closeSync(fd);
           }
         },
-        "credential_changed",
+        "credential_changed", true,
       ],
       ["second link added", (file) => fs.linkSync(file, `${file}-late`), "credential_hardlinked"],
       ["replaced by rename", (file, token) => {
@@ -250,12 +250,43 @@ describe("deployment credential file", { skip: isWindows }, () => {
         fs.renameSync(other, file);
       }, "credential_changed"],
     ];
-    for (const [name, change, reason] of cases) {
-      const token = newToken();
-      const file = writePrivate(privateDir(), token);
-      const result = readCredentialFile(file, { afterRead: () => change(file, token) });
-      assert.equal(result.reason, reason, name);
-      assertFails(result, reason, { file, token });
+    for (const [name, change, reason, needsTimestamp] of cases) {
+      await t.test(name, (subtest) => {
+        const token = newToken();
+        const file = writePrivate(privateDir(), token);
+        let timestampChanged = !needsTimestamp;
+        let beforeChange = null;
+        let afterChange = null;
+        const result = readCredentialFile(file, { afterRead: () => {
+          const before = fs.statSync(file, { bigint: true });
+          beforeChange = before;
+          // Some Linux filesystems coalesce consecutive metadata updates in
+          // one clock tick. Establish the timestamp-change premise here,
+          // inside the test seam; production reading never waits or retries.
+          const until = performance.now() + 1000;
+          do {
+            change(file, token);
+            if (!needsTimestamp) break;
+            const after = fs.statSync(file, { bigint: true });
+            timestampChanged = after.ctimeNs !== before.ctimeNs || after.mtimeNs !== before.mtimeNs;
+            if (timestampChanged || performance.now() >= until) break;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+          } while (!timestampChanged);
+          afterChange = fs.statSync(file, { bigint: true });
+        } });
+        assert.notEqual(beforeChange, null, "read reached the mutation seam");
+        assert.notEqual(afterChange, null, "mutation finished");
+        if (name === "mode widened and restored") {
+          for (const field of ["mode", "uid", "gid", "size", "mtimeNs"]) assert.equal(afterChange[field], beforeChange[field], field);
+        }
+        if (!timestampChanged) {
+          subtest.skip("filesystem did not advance metadata timestamps within one second");
+          return;
+        }
+        if (name === "mode widened and restored") assert.notEqual(afterChange.ctimeNs, beforeChange.ctimeNs, "ctime-change premise");
+        assert.equal(result.reason, reason, name);
+        assertFails(result, reason, { file, token });
+      });
     }
 
     // The seam itself does not disturb an unchanged file.

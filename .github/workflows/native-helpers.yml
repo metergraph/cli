@@ -1,0 +1,137 @@
+name: Verify native helpers
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - native/**
+      - src/**
+      - test/**
+      - package.json
+      - .github/workflows/native-helpers.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: darwin-arm64 }
+          - { os: macos-15-intel, target: darwin-x64 }
+          - { os: ubuntu-22.04, target: linux-x64 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Compile first-party helper for this host
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          node -e 'if (`${process.platform}-${process.arch}` !== process.env.TARGET) process.exit(1)'
+          node native/build.mjs --output "$RUNNER_TEMP/helper" --revision "$GITHUB_SHA"
+          node native/install-artifact.mjs --input "$RUNNER_TEMP/helper" --revision "$GITHUB_SHA"
+      - name: Verify source and packaged behavior
+        run: |
+          npm test
+          npm run test:package
+      - name: Upload only verified executable and identity metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-helper-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/helper/bin/*
+            ${{ runner.temp }}/helper/manifest.json
+            ${{ runner.temp }}/helper/provenance.json
+          if-no-files-found: error
+          retention-days: 14
+
+  runtime:
+    name: Prebuilt ${{ matrix.target }} on Node ${{ matrix.node }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: darwin-arm64, node: 22 }
+          - { os: macos-15, target: darwin-arm64, node: 24 }
+          - { os: macos-15-intel, target: darwin-x64, node: 22 }
+          - { os: macos-15-intel, target: darwin-x64, node: 24 }
+          - { os: ubuntu-22.04, target: linux-x64, node: 22 }
+          - { os: ubuntu-22.04, target: linux-x64, node: 24 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64, node: 22 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64, node: 24 }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: native-helper-${{ matrix.target }}
+          path: ${{ runner.temp }}/helper
+      - name: Verify and install the prebuilt artifact
+        run: node native/install-artifact.mjs --input "$RUNNER_TEMP/helper" --revision "$GITHUB_SHA"
+      - name: Exercise the prebuilt helper on the target runtime
+        run: |
+          npm test
+          npm run test:package
+
+  windows-refusal:
+    name: Windows refusal and pure logic on Node ${{ matrix.node }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify unsupported writes and platform-independent behavior
+        run: node --test test/unsupported-filesystem.test.js test/args.test.js test/origin.test.js test/action-help.test.js test/style.test.js test/trace-contract.test.js
+
+  assemble:
+    name: Assemble the verified platform bundle
+    needs: [build, runtime, windows-refusal]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: native-helper-*
+          path: ${{ runner.temp }}/inputs
+      - name: Enforce exact target, source revision and byte digests
+        run: node native/aggregate.mjs --input "$RUNNER_TEMP/inputs" --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/verified"
+      - name: Upload only the complete tested bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-helper-bundle
+          path: |
+            ${{ runner.temp }}/verified/bin/*
+            ${{ runner.temp }}/verified/manifest.json
+            ${{ runner.temp }}/verified/provenance.json
+          if-no-files-found: error
+          retention-days: 14
