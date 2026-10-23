@@ -1,7 +1,7 @@
 import { TRUSTED_SKILLS } from "./skill-trusted.js";
 
 import { randomBytes } from "node:crypto";
-import fs from "node:fs";
+import fs, { validatePath, withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 import {
@@ -33,6 +33,7 @@ const ENTRY_KEYS = ["client", "path", "revision", "runtimes", "sha256", "skill"]
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
 const MESSAGES = {
+  secure_writes_unavailable: "Secure automatic file writes are unavailable on this platform or the bundled filesystem helper failed verification. Nothing was written.",
   invalid_project: "--project must name an existing directory.",
   client_not_supported:
     "This client cannot load project skill files. Follow the connection guide instead. Nothing was written.",
@@ -116,7 +117,7 @@ function apply(root, context) {
         return plan.status;
       } finally {
         try {
-          fs.unlinkSync(lockPath);
+          withRollback(() => fs.unlinkSync(lockPath));
         } catch {
           // A lock that cannot be removed is reported by the next run.
         }
@@ -136,7 +137,8 @@ function resolveProject(project) {
   try {
     const real = fs.realpathSync(path.resolve(project ?? process.cwd()));
     if (fs.statSync(real).isDirectory()) return real;
-  } catch {
+  } catch (error) {
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     // Fall through to the fixed error.
   }
   throw new Stop("invalid_input", "invalid_project");
@@ -206,6 +208,7 @@ function commit(root, context, state, plan) {
   const receipt = nextReceipt(state.receipt, context, target.relative);
   let createdDirs = [];
   let skillWritten = false;
+  let receiptWritten = false;
   try {
     if (plan.writeSkill) {
       createdDirs = ensureDirs(root, target.dirs);
@@ -214,13 +217,23 @@ function commit(root, context, state, plan) {
     }
     if (state.receiptFile === null || !state.receiptFile.content.equals(receipt)) {
       replaceFile(receiptPath, receipt, state.receiptFile);
+      receiptWritten = true;
     }
+    validatePath(root);
+    validatePath(path.dirname(skillPath));
+    validatePath(path.dirname(receiptPath));
   } catch (error) {
     try {
-      if (skillWritten) {
-        if (state.file === null) fs.unlinkSync(skillPath);
-        else replaceFile(skillPath, state.file.content, { content: bundle.content, mode: state.file.mode });
-      }
+      withRollback(() => {
+        if (receiptWritten) {
+          if (state.receiptFile === null) fs.unlinkSync(receiptPath);
+          else replaceFile(receiptPath, state.receiptFile.content, { content: receipt, mode: state.receiptFile.mode });
+        }
+        if (skillWritten) {
+          if (state.file === null) fs.unlinkSync(skillPath);
+          else replaceFile(skillPath, state.file.content, { content: bundle.content, mode: state.file.mode });
+        }
+      });
     } catch {
       throw new Stop("filesystem_error", "rollback_failed");
     }
@@ -331,7 +344,7 @@ function ensureDirs(root, dirs) {
 function removeDirs(created) {
   for (const dir of [...created].reverse()) {
     try {
-      fs.rmdirSync(dir);
+      withRollback(() => fs.rmdirSync(dir));
     } catch {
       // Not empty or not removable. An empty directory is harmless.
     }
@@ -388,7 +401,7 @@ function replaceFile(dest, content, previous) {
     fs.renameSync(temp, dest);
   } catch (error) {
     try {
-      fs.unlinkSync(temp);
+      withRollback(() => fs.unlinkSync(temp));
     } catch {
       // Already renamed or never created.
     }

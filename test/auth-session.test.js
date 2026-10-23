@@ -5,6 +5,7 @@
 // is protocol and file proof only, not proof of the real service.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import anchoredFs from "../src/anchored-fs.js";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -162,9 +163,9 @@ test("a refreshed grant that cannot be saved asks to reconnect instead of reusin
     const project = await signedIn(server);
     project.change({ expires_at: Date.now() - 1000 });
     const credential = `${project.slot}.json`;
-    const renameSync = fs.renameSync;
+    const renameSync = anchoredFs.renameSync;
     let renames = 0;
-    fs.renameSync = (from, to) => {
+    anchoredFs.renameSync = (from, to) => {
       if (path.basename(String(to)) === credential) {
         renames += 1;
         // The first rename marks the refresh as pending; the second would
@@ -177,7 +178,7 @@ test("a refreshed grant that cannot be saved asks to reconnect instead of reusin
     try {
       result = await project.session();
     } finally {
-      fs.renameSync = renameSync;
+      anchoredFs.renameSync = renameSync;
     }
     assertStop(result, "login_required", "refresh_not_saved");
     assert.equal(refreshRequests(server).length, 1);

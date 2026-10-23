@@ -32,9 +32,15 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-report/SKILL.md",
   "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
+  "native/README.md",
+  "native/anchored-fs.c",
+  "native/bin/anchored-fs-darwin-arm64",
+  "native/build.mjs",
+  "native/manifest.json",
   "package.json",
   "src/action-help.js",
   "src/agent-key.js",
+  "src/anchored-fs.js",
   "src/approval-handoff.js",
   "src/args.js",
   "src/auth-binding.js",
@@ -243,7 +249,9 @@ test("the installed CLI installs the skill offline into a project with spaces", 
     target,
     "--json",
   ];
-  const result = check(await run(process.execPath, args, { cwd: workDir }), "packed skill install");
+  const noTools = path.join(workDir, "no compilers or download tools");
+  mkdirSync(noTools);
+  const result = check(await run(process.execPath, args, { cwd: workDir, env: { ...npmEnv, PATH: noTools } }), "packed skill install without compiler or download tools");
   const parsed = parseJsonLine(result.stdout);
   assert.equal(parsed.data.status, "installed");
   assert.equal(parsed.data.discovery, "pending");
@@ -255,6 +263,27 @@ test("the installed CLI installs the skill offline into a project with spaces", 
 
   const rerun = check(await run(process.execPath, args, { cwd: workDir }), "packed skill rerun");
   assert.equal(parseJsonLine(rerun.stdout).data.status, "reused");
+});
+
+test("missing or altered helper artifacts refuse without writing the project", async () => {
+  const installedRoot = path.join(projectDir, "node_modules", "metergraph-cli");
+  const manifestFile = path.join(installedRoot, "native", "manifest.json");
+  const original = readFileSync(manifestFile);
+  const bin = path.join(installedRoot, "bin", "metergraph.js");
+  for (const artifacts of [{}, { [`anchored-fs-${process.platform}-${process.arch}`]: "0".repeat(64) }]) {
+    const target = path.join(workDir, `helper refusal ${Object.keys(artifacts).length}`);
+    mkdirSync(target);
+    try {
+      writeFileSync(manifestFile, JSON.stringify({ schema: 1, artifacts }));
+      const result = await run(process.execPath, [bin, "skill", "install", "--client", "codex", "--project", target, "--json"], { cwd: workDir });
+      assert.notEqual(result.code, 0);
+      assert.equal(parseJsonLine(result.stdout).error.reason, "secure_writes_unavailable");
+      assert.equal(existsSync(path.join(target, ".agents")), false);
+      assert.equal(existsSync(path.join(target, ".metergraph")), false);
+    } finally {
+      writeFileSync(manifestFile, original);
+    }
+  }
 });
 
 test("the installed CLI installs the workflow skills offline from the packed pack", async () => {

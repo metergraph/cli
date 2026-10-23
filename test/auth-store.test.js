@@ -2,6 +2,7 @@
 // touches the user's real config directory.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import anchoredFs from "../src/anchored-fs.js";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -183,8 +184,8 @@ test("a failed write keeps the previous grant and leaves no temporary file", () 
   const store = openStore(freshDir(), { create: true });
   const slot = newSlot();
   writeCredential(store, slot, record());
-  const renameSync = fs.renameSync;
-  fs.renameSync = () => {
+  const renameSync = anchoredFs.renameSync;
+  anchoredFs.renameSync = () => {
     throw Object.assign(new Error("SYNTHETIC_FAULT_MARKER"), { code: "EIO" });
   };
   try {
@@ -193,7 +194,7 @@ test("a failed write keeps the previous grant and leaves no temporary file", () 
       stopWith("filesystem_error", "credential_write_failed"),
     );
   } finally {
-    fs.renameSync = renameSync;
+    anchoredFs.renameSync = renameSync;
   }
   assert.equal(readCredential(store, slot).access_token, ACCESS);
   assert.deepEqual(fs.readdirSync(store.credentials), [`${slot}.json`]);

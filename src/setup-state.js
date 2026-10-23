@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 import { parseOrigin } from "./origin.js";
@@ -139,7 +139,7 @@ export function writeSetupState(root, next, previous) {
     if (error.code === "EEXIST") throw new Stop("conflict", "setup_state_locked");
     throw new Stop("filesystem_error", "setup_state_write_failed");
   } finally {
-    try { fs.unlinkSync(temp); } catch { /* no temp */ }
-    if (locked) { try { fs.unlinkSync(lock); } catch { /* next run refuses */ } }
+    try { withRollback(() => fs.unlinkSync(temp)); } catch { /* no temp */ }
+    if (locked) { try { withRollback(() => fs.unlinkSync(lock)); } catch { /* next run refuses */ } }
   }
 }

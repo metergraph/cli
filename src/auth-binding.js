@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 import { Stop, isSlot } from "./auth-store.js";
@@ -26,7 +26,8 @@ export function resolveProject(project) {
   try {
     const real = fs.realpathSync(path.resolve(project ?? process.cwd()));
     if (fs.statSync(real).isDirectory()) return real;
-  } catch {
+  } catch (error) {
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     // Fall through to the fixed error.
   }
   throw new Stop("invalid_input", "invalid_project");
@@ -83,7 +84,7 @@ export function writeBinding(root, binding, previous) {
   } catch (error) {
     if (created) {
       try {
-        fs.rmdirSync(dir);
+        withRollback(() => fs.rmdirSync(dir));
       } catch {
         // Not empty. An empty directory is harmless.
       }
@@ -119,7 +120,7 @@ function withProjectLock(dir, work) {
     return work();
   } finally {
     try {
-      fs.unlinkSync(lock);
+      withRollback(() => fs.unlinkSync(lock));
     } catch {
       // Reported by the next run as a held lock.
     }
@@ -146,7 +147,7 @@ function replace(dir, content) {
     fs.renameSync(temp, dest);
   } catch (error) {
     try {
-      fs.unlinkSync(temp);
+      withRollback(() => fs.unlinkSync(temp));
     } catch {
       // Already renamed or never created.
     }

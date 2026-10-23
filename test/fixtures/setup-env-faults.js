@@ -9,6 +9,7 @@
 //   edit-during-commit   another writer appends to options.file as soon as the
 //                        first temporary file is created
 import fs from "node:fs";
+import anchoredFs from "../../src/anchored-fs.js";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 
@@ -28,9 +29,9 @@ export function clearFault() {
   setFault(null);
 }
 
-const renameSync = fs.renameSync;
-const unlinkSync = fs.unlinkSync;
-const openSync = fs.openSync;
+const renameSync = anchoredFs.renameSync;
+const unlinkSync = anchoredFs.unlinkSync;
+const openSync = anchoredFs.openSync;
 const TEMP = /[\\/]\.metergraph-[0-9a-f]{12}\.tmp$/;
 
 function failure(code) {
@@ -41,7 +42,7 @@ function failure(code) {
 
 const isIgnoreFile = (file) => path.basename(String(file)) === ".gitignore";
 
-fs.renameSync = (from, to) => {
+anchoredFs.renameSync = (from, to) => {
   if (TEMP.test(String(from))) {
     if (isIgnoreFile(to)) {
       ignoreRenames += 1;
@@ -55,12 +56,12 @@ fs.renameSync = (from, to) => {
   return renameSync(from, to);
 };
 
-fs.unlinkSync = (file) => {
+anchoredFs.unlinkSync = (file) => {
   if (fault === "rollback-blocked" && isIgnoreFile(file)) throw failure("EIO");
   return unlinkSync(file);
 };
 
-fs.openSync = (file, flags, mode) => {
+anchoredFs.openSync = (file, flags, mode) => {
   if (fault === "edit-during-commit" && !edited && flags === "wx" && TEMP.test(String(file))) {
     edited = true;
     fs.appendFileSync(options.file, "SYNTHETIC_CONCURRENT_EDIT=1\n");

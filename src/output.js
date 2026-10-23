@@ -1238,6 +1238,8 @@ const AUTH_MESSAGES = {
     "The grant would allow content, replay or provider access, which login never accepts. It was not kept.",
   access_rejected: "The service refused the new grant. Nothing was saved.",
   invalid_project: "--project must name an existing directory.",
+  secure_writes_unavailable:
+    "Secure automatic file writes are unavailable on this platform or the bundled filesystem helper failed verification. Nothing was written.",
   invalid_config_dir: "METERGRAPH_CONFIG_DIR must be an absolute path.",
   unsafe_path: "A path in .metergraph is a symbolic link or is not a regular file or directory. Nothing was changed.",
   binding_invalid: "The project binding .metergraph/project.json is not valid. Nothing was changed.",

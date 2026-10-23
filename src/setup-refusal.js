@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 // What the --json --no-browser background waiter is doing with an approval
@@ -80,7 +80,7 @@ function write(root, value) {
     fs.renameSync(temp, fileFor(root));
     return true;
   } catch {
-    try { fs.unlinkSync(temp); } catch { /* no temp */ }
+    try { withRollback(() => fs.unlinkSync(temp)); } catch { /* no temp */ }
     return false;
   }
 }

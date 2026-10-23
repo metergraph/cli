@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -189,7 +189,7 @@ export async function withSlotLock(store, slot, work, { waitMs, signal = null })
     return await work();
   } finally {
     try {
-      fs.unlinkSync(lock);
+      withRollback(() => fs.unlinkSync(lock));
     } catch {
       // Reported by the next run as a held lock.
     }
@@ -389,7 +389,7 @@ function writePrivateFile(dir, name, content) {
     fs.renameSync(temp, dest);
   } catch (error) {
     try {
-      fs.unlinkSync(temp);
+      withRollback(() => fs.unlinkSync(temp));
     } catch {
       // Already renamed or never created.
     }

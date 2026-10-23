@@ -53,8 +53,11 @@ NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # such as cloud placeholder files, are ordinary files and directories.
 NAME_SURROGATE_BIT = 0x20000000
 BINARY = getattr(os, "O_BINARY", 0)
+# Search handles preserve access to writable directories without read permission.
+DIRECTORY_ACCESS = getattr(os, "O_SEARCH", getattr(os, "O_PATH", os.O_RDONLY))
 
 MESSAGES = {
+    "secure_filesystem_unavailable": "Secure filesystem operations are unavailable on this platform. Nothing was written.",
     "invalid_project": "--project must name an existing directory.",
     "client_not_supported": (
         "This client cannot load project skill files. Follow the connection guide instead. "
@@ -140,6 +143,13 @@ def _execute(context: Context, project: Optional[str]) -> Dict[str, Any]:
         raise Stop("internal_error", "bundled_skill_invalid")
     context.target = _target_for(context.client, context.bundle.name)
     root = _resolve_project(project)
+    try:
+        return _execute_anchored(context, root)
+    finally:
+        root.close()
+
+
+def _execute_anchored(context, root):
 
     # Decide from a read-only look first, so a matching rerun writes nothing.
     state = _inspect(root, context)
@@ -149,7 +159,7 @@ def _execute(context: Context, project: Optional[str]) -> Dict[str, Any]:
 
     with _deferred_signals():
         created_meta = _ensure_dirs(root, [RECEIPT_DIR])
-        lock_path = os.path.join(root, RECEIPT_DIR, LOCK_FILE)
+        lock_path = root.file([RECEIPT_DIR], LOCK_FILE)
         done = False
         try:
             _acquire_lock(lock_path)
@@ -163,7 +173,7 @@ def _execute(context: Context, project: Optional[str]) -> Dict[str, Any]:
                 return _success(context, plan["status"])
             finally:
                 try:
-                    os.unlink(lock_path)
+                    _unlink(lock_path)
                 except OSError:
                     # A lock that cannot be removed is reported by the next run.
                     pass
@@ -177,24 +187,24 @@ def _target_for(client: str, name: str) -> Dict[str, Any]:
     return {"dirs": dirs, "relative": "/".join(dirs + ["SKILL.md"])}
 
 
-def _resolve_project(project: Optional[str]) -> str:
+def _resolve_project(project: Optional[str]) -> "AnchoredProject":
     if project is not None and (project == "" or "\0" in project):
         raise Stop("invalid_input", "invalid_project")
     try:
         real = os.path.realpath(os.path.abspath(project if project is not None else os.getcwd()))
         if os.path.isdir(real):
-            return real
+            return AnchoredProject(real)
     except (OSError, ValueError):
         pass
     raise Stop("invalid_input", "invalid_project")
 
 
-def _inspect(root: str, context: Context) -> Dict[str, Any]:
+def _inspect(root: "AnchoredProject", context: Context) -> Dict[str, Any]:
     """Reads the receipt and the target without writing. Any symbolic link or
     non-regular entry on either path stops the run."""
     try:
         _check_dirs(root, [RECEIPT_DIR])
-        receipt_file = _read_regular(os.path.join(root, RECEIPT_DIR, RECEIPT_FILE), MAX_RECEIPT_BYTES)
+        receipt_file = _read_regular(root.file([RECEIPT_DIR], RECEIPT_FILE), MAX_RECEIPT_BYTES)
         receipt = None
         if receipt_file is not None:
             if receipt_file["content"] is not None:
@@ -203,7 +213,7 @@ def _inspect(root: str, context: Context) -> Dict[str, Any]:
                 raise Stop("conflict", "receipt_invalid")
         skill_dir_exists = _check_dirs(root, context.target["dirs"])
         file = (
-            _read_regular(os.path.join(root, *context.target["dirs"], "SKILL.md"), MAX_SKILL_BYTES)
+            _read_regular(root.file(context.target["dirs"], "SKILL.md"), MAX_SKILL_BYTES)
             if skill_dir_exists
             else None
         )
@@ -245,19 +255,20 @@ def _decide(action: str, runtime: str, state: Dict[str, Any], bundle) -> Dict[st
     return {"status": "installed" if current else "updated", "noop": False, "write_skill": True}
 
 
-def _commit(root: str, context: Context, state: Dict[str, Any], plan: Dict[str, Any]) -> None:
+def _commit(root: "AnchoredProject", context: Context, state: Dict[str, Any], plan: Dict[str, Any]) -> None:
     """Writes the skill, then the receipt. If the receipt cannot be written the
     skill is restored to its previous state, so ownership is never recorded
     for a skill that was not written."""
     bundle, target = context.bundle, context.target
-    skill_path = os.path.join(root, *target["dirs"], "SKILL.md")
-    receipt_path = os.path.join(root, RECEIPT_DIR, RECEIPT_FILE)
+    skill_path = None
+    receipt_path = root.file([RECEIPT_DIR], RECEIPT_FILE)
     receipt = _next_receipt(state["receipt"], context, target["relative"])
-    created_dirs: List[str] = []
+    created_dirs = []
     skill_written = False
     try:
         if plan["write_skill"]:
             created_dirs = _ensure_dirs(root, target["dirs"])
+            skill_path = root.file(target["dirs"], "SKILL.md")
             _replace_file(skill_path, bundle.content, state["file"])
             skill_written = True
         if state["receipt_file"] is None or state["receipt_file"]["content"] != receipt:
@@ -266,7 +277,7 @@ def _commit(root: str, context: Context, state: Dict[str, Any], plan: Dict[str, 
         try:
             if skill_written:
                 if state["file"] is None:
-                    os.unlink(skill_path)
+                    _unlink(skill_path)
                 else:
                     _replace_file(
                         skill_path,
@@ -356,66 +367,111 @@ def _is_name_surrogate(info) -> bool:
     return bool(getattr(info, "st_reparse_tag", 0) & NAME_SURROGATE_BIT)
 
 
-def _lstat_or_none(file: str):
-    try:
-        return os.lstat(file)
-    except FileNotFoundError:
-        return None
+class AnchoredProject:
+    """Retain every traversed directory until the transaction is finished.
 
+    All child operations are relative to these descriptors, even if an attacker
+    renames a directory or replaces its former pathname with a symlink.
+    """
+    def __init__(self, path):
+        if os.name != "posix" or not NOFOLLOW or not getattr(os, "O_DIRECTORY", 0):
+            raise Stop("unsupported", "secure_filesystem_unavailable")
+        self.fds = {}
+        fd = os.open("/", DIRECTORY_ACCESS | os.O_DIRECTORY | NOFOLLOW)
+        try:
+            for component in path.split("/"):
+                if component:
+                    child = os.open(component, DIRECTORY_ACCESS | os.O_DIRECTORY | NOFOLLOW, dir_fd=fd)
+                    if not stat.S_ISDIR(os.fstat(child).st_mode):
+                        os.close(child)
+                        raise Stop("conflict", "unsafe_path")
+                    os.close(fd)
+                    fd = child
+            self.fds[()] = fd
+        except BaseException:
+            os.close(fd)
+            raise
 
-def _check_dirs(root: str, dirs: List[str]) -> bool:
-    """Returns True when every directory exists, False at the first missing
-    one. Anything else, including a symbolic link to a directory, is unsafe."""
-    current = root
-    for name in dirs:
-        current = os.path.join(current, name)
-        info = _lstat_or_none(current)
-        if info is None:
-            return False
-        if not _is_directory(info):
-            raise Stop("conflict", "unsafe_path")
-    return True
+    def close(self):
+        for fd in reversed(list(self.fds.values())):
+            os.close(fd)
+        self.fds.clear()
 
-
-def _ensure_dirs(root: str, dirs: List[str]) -> List[str]:
-    """Creates missing directories one level at a time and returns the ones it
-    created, deepest last, so a rollback can remove exactly those."""
-    created: List[str] = []
-    current = root
-    try:
+    def directory(self, dirs, create=False, created=None):
+        key = ()
         for name in dirs:
-            current = os.path.join(current, name)
+            parent = self.fds[key]
+            key += (name,)
+            if key in self.fds:
+                continue
+            made = False
+            if create:
+                try:
+                    os.mkdir(name, dir_fd=parent)
+                    made = True
+                except FileExistsError:
+                    pass
             try:
-                os.mkdir(current)
-                created.append(current)
-            except FileExistsError:
-                if not _is_directory(os.lstat(current)):
+                fd = os.open(name, DIRECTORY_ACCESS | os.O_DIRECTORY | NOFOLLOW, dir_fd=parent)
+            except FileNotFoundError:
+                if not create:
+                    return None
+                raise
+            except OSError as error:
+                if error.errno in (errno.ELOOP, errno.ENOTDIR):
                     raise Stop("conflict", "unsafe_path")
+                raise
+            # Linux O_PATH | O_NOFOLLOW opens a symlink itself. Verify the
+            # descriptor, never the pathname, before retaining it.
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                os.close(fd)
+                raise Stop("conflict", "unsafe_path")
+            self.fds[key] = fd
+            if made and created is not None:
+                created.append((parent, name, os.fstat(fd)))
+        return self.fds[key]
+
+    def file(self, dirs, name):
+        return (self.directory(dirs), name)
+
+
+def _check_dirs(root, dirs):
+    return root.directory(dirs) is not None
+
+
+def _ensure_dirs(root, dirs):
+    created = []
+    try:
+        root.directory(dirs, create=True, created=created)
     except BaseException:
         _remove_dirs(created)
         raise
     return created
 
 
-def _remove_dirs(created: List[str]) -> None:
-    for path in reversed(created):
+def _remove_dirs(created):
+    for parent, name, expected in reversed(created):
         try:
-            os.rmdir(path)
+            now = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (now.st_dev, now.st_ino) == (expected.st_dev, expected.st_ino):
+                os.rmdir(name, dir_fd=parent)
         except OSError:
-            # Not empty or not removable. An empty directory is harmless.
             pass
 
 
-def _read_regular(file: str, max_bytes: int) -> Optional[Dict[str, Any]]:
-    """Returns {content, mode} for a regular file, {content: None, mode} when
-    it is larger than max_bytes, or None when it does not exist."""
-    info = _lstat_or_none(file)
-    if info is None:
+def _unlink(file):
+    parent, name = file
+    os.unlink(name, dir_fd=parent)
+
+
+def _read_regular(file, max_bytes):
+    parent, name = file
+    if parent is None:
         return None
-    if not _is_regular(info):
-        raise Stop("conflict", "unsafe_path")
     try:
-        fd = os.open(file, os.O_RDONLY | NOFOLLOW | BINARY)
+        fd = os.open(name, os.O_RDONLY | NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
+    except FileNotFoundError:
+        return None
     except OSError as error:
         if error.errno == errno.ELOOP:
             raise Stop("conflict", "unsafe_path")
@@ -425,47 +481,39 @@ def _read_regular(file: str, max_bytes: int) -> Optional[Dict[str, Any]]:
         if not stat.S_ISREG(opened.st_mode):
             raise Stop("conflict", "unsafe_path")
         mode = stat.S_IMODE(opened.st_mode) & 0o777
-        if opened.st_size > max_bytes:
-            return {"content": None, "mode": mode}
-        return {"content": handle.read(), "mode": mode}
+        content = handle.read(max_bytes + 1)
+        return {"content": content if len(content) <= max_bytes else None, "mode": mode}
 
 
-def _replace_file(dest: str, content: bytes, previous: Optional[Dict[str, Any]]) -> None:
-    """Writes content to an exclusive temporary file next to dest, then renames
-    it into place. Right before the rename, dest must still be exactly what
-    inspect saw, so a file created or edited by someone else in the meantime
-    is never replaced. An existing file keeps its permission bits."""
-    temp = os.path.join(
-        os.path.dirname(dest), ".{}.{}.tmp".format(os.path.basename(dest), secrets.token_hex(6))
-    )
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | BINARY, 0o666 if previous is None else 0o600)
+def _replace_file(dest, content, previous):
+    parent, name = dest
+    temp = ".{}.{}.tmp".format(name, secrets.token_hex(6))
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+                 0o666 if previous is None else 0o600, dir_fd=parent)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(content)
             handle.flush()
+            if previous is not None:
+                os.fchmod(handle.fileno(), previous["mode"])
             os.fsync(handle.fileno())
-        if previous is not None:
-            os.chmod(temp, previous["mode"])
         now = _read_regular(dest, MAX_SKILL_BYTES)
-        if previous is None:
-            unchanged = now is None
-        else:
-            unchanged = now is not None and now["content"] is not None and now["content"] == previous["content"]
+        unchanged = now is None if previous is None else (now is not None and now["content"] == previous["content"])
         if not unchanged:
             raise Stop("conflict", "changed_during_install")
-        os.replace(temp, dest)
+        os.replace(temp, name, src_dir_fd=parent, dst_dir_fd=parent)
     except BaseException:
         try:
-            os.unlink(temp)
+            os.unlink(temp, dir_fd=parent)
         except OSError:
-            # Already renamed or never created.
             pass
         raise
 
 
-def _acquire_lock(lock_path: str) -> None:
+def _acquire_lock(lock_path):
+    parent, name = lock_path
     try:
-        os.close(os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | BINARY, 0o666))
+        os.close(os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, 0o666, dir_fd=parent))
     except FileExistsError:
         raise Stop("conflict", "locked")
 

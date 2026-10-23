@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import fs from "node:fs";
+import fs, { validatePath, withRollback } from "./anchored-fs.js";
 import path from "node:path";
 
 import { resolveProject } from "./auth-binding.js";
@@ -193,12 +193,12 @@ export async function rollbackEnv(handle, { signal = null, waitMs = DEFAULT_WAIT
   if (state === undefined) throw new Stop("internal_error", "invalid_plan");
   checkCancel(signal);
   if (state.journal.length > 0) {
-    const lock = await takeLock(state.lockDir, waitMs, signal);
+    const lock = await takeLock(state.lockDir, waitMs, signal, true);
     try {
       checkCancel(signal);
       deferSignals(() => {
         try {
-          undo(state.journal);
+          withRollback(() => undo(state.journal));
         } catch (error) {
           if (error instanceof Stop && error.outcome === "conflict") throw new Stop("conflict", "rollback_conflict");
           throw new Stop("filesystem_error", "rollback_incomplete");
@@ -352,6 +352,8 @@ function apply(state, updates) {
       }
     }
 
+    validatePath(target.dir);
+    if (ignore !== null) validatePath(state.root);
     const receipt = freeze({
       path: target.rel,
       location: target.location,
@@ -363,7 +365,7 @@ function apply(state, updates) {
     return { receipt, journal };
   } catch (error) {
     try {
-      undo(journal);
+      withRollback(() => undo(journal));
     } catch {
       throw new Stop("filesystem_error", "rollback_incomplete");
     }
@@ -575,7 +577,7 @@ function replaceFile(file, content, { before, mode, protect, reasons, changed })
   } catch (error) {
     if (created) {
       try {
-        fs.unlinkSync(temp);
+        withRollback(() => fs.unlinkSync(temp));
       } catch {
         // Reported by the caller's failure; nothing else to do.
       }
@@ -602,7 +604,7 @@ function syncDir(dir) {
 // An exclusive lock file in the project (or, outside a project, in the env
 // file's directory). A held lock is waited on for at most waitMs, then
 // reported; it is never taken over or removed, even if it looks stale.
-async function takeLock(dir, waitMs, signal) {
+async function takeLock(dir, waitMs, signal, rollback = false) {
   const file = path.join(dir, LOCK);
   const wait = Number.isFinite(waitMs) ? Math.min(Math.max(waitMs, 0), MAX_WAIT_MS) : DEFAULT_WAIT_MS;
   const until = Date.now() + wait;
@@ -610,7 +612,7 @@ async function takeLock(dir, waitMs, signal) {
     checkCancel(signal);
     let fd;
     try {
-      fd = fs.openSync(file, "wx", 0o600);
+      fd = rollback ? withRollback(() => fs.openSync(file, "wx", 0o600)) : fs.openSync(file, "wx", 0o600);
     } catch (error) {
       if (error.code !== "EEXIST") throw fixed(error, "env_write_failed");
       if (Date.now() >= until) throw new Stop("conflict", "env_locked");
@@ -629,8 +631,10 @@ async function takeLock(dir, waitMs, signal) {
 // Removes the lock only if it is still the file this process created.
 function dropLock(lock) {
   try {
-    const stat = fs.lstatSync(lock.file);
-    if (IS_WINDOWS || (stat.dev === lock.dev && stat.ino === lock.ino)) fs.unlinkSync(lock.file);
+    withRollback(() => {
+      const stat = fs.lstatSync(lock.file);
+      if (stat.dev === lock.dev && stat.ino === lock.ino) fs.unlinkSync(lock.file);
+    });
   } catch {
     // Reported by the next run as a held lock.
   }
