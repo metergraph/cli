@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "source_revision": "8605aa17f7a20d986e027775ab4f652c9b725b17",
+  "source_sha256": "44eb6d363823b63ab1090ff92970666d6c9e9c8d525ab4e1ddfa1a376c31c7f6",
+  "targets": [
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-arm64",
+    "linux-x64"
+  ]
+}
