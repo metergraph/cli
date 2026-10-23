@@ -277,3 +277,39 @@ test("a grant for a registered client keeps refreshing and revoking after the se
     assert.ok([...server.state.refresh.values()].every((grant) => grant.revoked));
   });
 });
+
+test("a copied binding cannot use, refresh, revoke or remove another checkout's grant", async () => {
+  await withServer({}, async (server) => {
+    const owner = await signedIn(server);
+    const copy = sandbox();
+    fs.mkdirSync(path.join(copy.project, ".metergraph"));
+    fs.copyFileSync(path.join(owner.box.project, ".metergraph/project.json"), path.join(copy.project, ".metergraph/project.json"));
+    copy.config = owner.box.config;
+    const before = server.requests.length;
+    const saved = owner.record();
+    const result = await verifiedSession({ project: copy.project, configDir: copy.config });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "credential_missing");
+    const signedOut = await logout(assert, copy);
+    assert.equal(signedOut.run.code, 0);
+    assert.deepEqual(owner.record(), saved);
+    assert.equal(server.requests.length, before);
+    assert.equal((await owner.session()).ok, true);
+  });
+});
+
+test("replacing a checkout at the same path does not adopt its private grant", async () => {
+  await withServer({}, async (server) => {
+    const owner = await signedIn(server);
+    const content = fs.readFileSync(path.join(owner.box.project, ".metergraph/project.json"));
+    fs.renameSync(owner.box.project, `${owner.box.project}-previous`);
+    fs.mkdirSync(owner.box.project);
+    fs.mkdirSync(path.join(owner.box.project, ".metergraph"));
+    fs.writeFileSync(path.join(owner.box.project, ".metergraph/project.json"), content);
+    const before = server.requests.length;
+    const result = await owner.session();
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "credential_missing");
+    assert.equal(server.requests.length, before);
+  });
+});

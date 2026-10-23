@@ -1,6 +1,6 @@
 import { agentKeySource, keySession, keyTarget, readAgentKey } from "./agent-key.js";
 import { readBinding, resolveProject } from "./auth-binding.js";
-import { Stop, openStore, readCredential, resolveConfigDir } from "./auth-store.js";
+import { Stop, openStore, readProjectCredential, resolveConfigDir } from "./auth-store.js";
 import { DEFAULT_ORIGIN, EXPERIMENT_PATHS, EXPERIMENT_START_SCOPE, METADATA_SCOPE, READ_MAX_BYTES } from "./constants.js";
 import { AGENT_URL_ENV, classifyEnvironment, handoffPages } from "./environment.js";
 import {
@@ -13,7 +13,7 @@ import {
 import { parseJsonObject } from "./http.js";
 import { parseOrigin } from "./origin.js";
 import { workspaceLabel, workspacePinned } from "./read-contract.js";
-import { holdsKnown } from "./read.js";
+import { holdsKnown, outputHoldsKnown } from "./read.js";
 import { deadline, failureOf, send, trapSignals } from "./transport.js";
 
 // Experiments: replay a workload's recent production calls on 1 to 3
@@ -237,9 +237,10 @@ export async function runExperimentStart(options) {
     if (holdsKnown(data, known)) {
       return { outcome: "verification_failed", reason: "credential_in_metadata_response",
         data: startData({ ...ctx, reason: "credential_in_metadata_response", workspaceLabel: { slug: null, name: null } },
-          new Set(), "verification_failed", null) };
+          new Set(), "verification_failed", null),
+        validateOutput: (text) => !outputHoldsKnown(text, known) };
     }
-    return { outcome, reason, data };
+    return { outcome, reason, data, validateOutput: (text) => !outputHoldsKnown(text, known) };
   };
   const settle = (result) => {
     const interrupted =
@@ -260,7 +261,7 @@ export async function runExperimentStart(options) {
     if (binding !== null) {
       try {
         const store = openStore(resolveConfigDir(options.configDir), { create: false });
-        const record = store === null ? null : readCredential(store, binding.credential_slot);
+        const record = store === null ? null : readProjectCredential(store, binding.credential_slot, root);
         originConfirmed = record !== null && record.origin === binding.origin;
       } catch (error) {
         if (!(error instanceof Stop)) throw error;

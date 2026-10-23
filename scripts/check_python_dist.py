@@ -51,7 +51,7 @@ def main() -> int:
         allowed.add(dist_info + "entry_points.txt")
         allowed |= {
             module + "/" + item
-            for item in ("__init__.py", "__main__.py", "bundle.py", "cli.py", "installer.py",
+            for item in ("__init__.py", "__main__.py", "bundle.py", "cli.py", "installer.py", "trusted.py",
                          "skill/SKILL.md", "skill/manifest.json")
         }
     else:

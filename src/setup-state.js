@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { parseOrigin } from "./origin.js";
+
 import { Stop } from "./auth-store.js";
 
 // Public, non-credential project state. It is persisted before browser
@@ -53,7 +55,7 @@ export function setupReceipt(value) {
 function core(value) {
   return value.schema_version === 1 && UUID.test(value.family_id) &&
     (value.key_id === null || UUID.test(value.key_id)) && PHASES.has(value.phase) &&
-    typeof value.origin === "string" && typeof value.workspace_id === "string" && UUID.test(value.workspace_id);
+    typeof value.origin === "string" && parseOrigin(value.origin) === value.origin && typeof value.workspace_id === "string" && UUID.test(value.workspace_id);
 }
 
 function valid(value) {

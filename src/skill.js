@@ -1,3 +1,5 @@
+import { TRUSTED_SKILLS } from "./skill-trusted.js";
+
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -179,6 +181,10 @@ function decide(action, runtime, state, bundle) {
   }
   if (file !== null && (file.content === null || sha256Hex(file.content) !== entry.sha256)) {
     throw new Stop("conflict", "modified");
+  }
+  if (file !== null && entry.sha256 !== bundle.sha256 &&
+      !TRUSTED_SKILLS[bundle.name]?.includes(entry.sha256)) {
+    throw new Stop("conflict", "not_owned");
   }
   const current = entry.revision === bundle.revision;
   if (!current && action === "install") throw new Stop("conflict", "update_required");

@@ -5,3 +5,5 @@ assets/skill/manifest.json -text
 python/metergraph-skills/src/metergraph_skills/skill/SKILL.md -text
 python/metergraph-skills/src/metergraph_skills/skill/manifest.json -text
 assets/skills/** -text
+test/fixtures/prior-*.md -text
+python/metergraph-skills/tests/fixtures/prior-*.md -text

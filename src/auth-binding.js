@@ -8,8 +8,9 @@ import { parseOrigin } from "./origin.js";
 
 // The project binding, .metergraph/project.json, names which origin,
 // workspace and profile a project is signed in to and which credential slot
-// in the user's private store holds the grant. It holds no credential, user
-// name or absolute path, so it is safe to commit. Other files in .metergraph,
+// in the user's private store holds the grant. The private grant also pins the
+// canonical checkout, so copying this file never adopts or revokes that grant.
+// It holds no credential, user name or absolute path. Other files in .metergraph,
 // such as skill receipts, are never touched.
 
 export const BINDING_PATH = ".metergraph/project.json";

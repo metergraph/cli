@@ -195,7 +195,7 @@ async function run(argv, { stdout, stderr, stdin }) {
   }
 
   if (READ_COMMANDS.includes(parsed.command)) {
-    const { outcome, reason, data } = await runRead(parsed);
+    const { outcome, reason, data, validateOutput } = await runRead(parsed);
     const message = readMessage(outcome, reason);
     const result = envelope({
       command: parsed.command,
@@ -204,14 +204,16 @@ async function run(argv, { stdout, stderr, stdin }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : readText(result, message, style));
+    const text = parsed.json ? toJsonLine(result) : readText(result, message, style);
+    if (validateOutput && !validateOutput(text)) return refuseCredentialOutput(parsed, stdout, style, validateOutput);
+    stdout.write(text);
     return result;
   }
 
   if (parsed.command === "experiments") {
     // start is the one write: its own key session (experiments.js). The other
     // actions are Metadata reads through runRead's shared session.
-    const { outcome, reason, data } = parsed.action === "start" ? await runExperimentStart(parsed) : await runRead(parsed);
+    const { outcome, reason, data, validateOutput } = parsed.action === "start" ? await runExperimentStart(parsed) : await runRead(parsed);
     const message = experimentsMessage(outcome, reason);
     const result = envelope({
       command: `experiments ${parsed.action}`,
@@ -220,13 +222,15 @@ async function run(argv, { stdout, stderr, stdin }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : experimentsText(result, message, style, parsed.action));
+    const text = parsed.json ? toJsonLine(result) : experimentsText(result, message, style, parsed.action);
+    if (validateOutput && !validateOutput(text)) return refuseCredentialOutput(parsed, stdout, style, validateOutput);
+    stdout.write(text);
     return result;
   }
 
   if (parsed.command === "tools") {
     // Any Agent Access tool, through runRead's verified session (tools.js).
-    const { outcome, reason, data } = await runRead(parsed);
+    const { outcome, reason, data, validateOutput } = await runRead(parsed);
     const message = toolsMessage(outcome, reason);
     const result = envelope({
       command: `tools ${parsed.action}`,
@@ -235,7 +239,9 @@ async function run(argv, { stdout, stderr, stdin }) {
       data,
       message: outcome === "ok" ? null : message,
     });
-    stdout.write(parsed.json ? toJsonLine(result) : toolsText(result, message, style, parsed.action));
+    const text = parsed.json ? toJsonLine(result) : toolsText(result, message, style, parsed.action);
+    if (validateOutput && !validateOutput(text)) return refuseCredentialOutput(parsed, stdout, style, validateOutput);
+    stdout.write(text);
     return result;
   }
 
@@ -418,4 +424,13 @@ function repositoryValue(repository) {
     case "write_failed": return `not recorded (could not write ${repository.path})`;
     default: return "not recorded (no owner/name git remote; pass --repository OWNER/NAME)";
   }
+}
+
+function refuseCredentialOutput(parsed, stdout, style, validateOutput) {
+  const reason = "credential_in_metadata_response";
+  const message = readMessage("verification_failed", reason);
+  const result = envelope({ command: parsed.command, outcome: "verification_failed", reason, message });
+  const text = parsed.json ? toJsonLine(result) : `${message}\n`;
+  if (validateOutput(text)) stdout.write(text);
+  return result;
 }

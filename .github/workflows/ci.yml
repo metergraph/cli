@@ -85,7 +85,9 @@ jobs:
           node-version: 24
 
       - name: Unit and subprocess tests
-        run: python -m unittest discover -s python/metergraph-skills/tests -v
+        run: |
+          python -m unittest discover -s python/metergraph-skills/tests -v
+          python scripts/test_publication.py
 
   python-dist:
     name: Python distributions

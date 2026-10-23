@@ -303,3 +303,12 @@ targets; `byoc` and `oss` are not yet verified against a live deployment. See
 ## License
 
 Apache-2.0. See [LICENSE](https://github.com/metergraph/cli/blob/main/LICENSE).
+
+### Checkout-bound sign in
+
+New saved sign-ins belong to the canonical project directory on this machine.
+Copying a project binding does not adopt its grant or authorize revocation of
+another checkout's grant. Moving a checkout or upgrading a legacy sign-in
+requires a fresh browser sign-in. Legacy grants are kept for their original
+owner to revoke from the deployment's Keys page; a copied binding cannot remove
+them. No credential or absolute project path is stored in the public binding.

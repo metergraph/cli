@@ -18,8 +18,8 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = PACKAGE_ROOT.parent.parent
 NPM_BIN = REPO_ROOT / "bin" / "metergraph.js"
-SHA256 = "482bdb6c32ad04766ba5159449a612419c90bfe78ea07038eb8d1ca7fb1edb76"
-REVISION = "sha256-482bdb6c32ad"
+SHA256 = "f77e815d8894c57105430cd0263a1b8f421e0d47622804f97d6f9fdbffc7d349"
+REVISION = "sha256-f77e815d8894"
 PATHS = {
     "codex": ".agents/skills/metergraph/SKILL.md",
     "claude": ".claude/skills/metergraph/SKILL.md",
@@ -170,7 +170,7 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(self.read(PATHS["claude"]), b"edited\n")
 
     def older_install(self):
-        old = b"---\nname: metergraph\ndescription: old\n---\n"
+        old = (Path(__file__).parent / "fixtures/prior-skill.md").read_bytes()
         old_sha = hashlib.sha256(old).hexdigest()
         self.write(PATHS["codex"], old)
         receipt = {
@@ -187,6 +187,19 @@ class InstallerTest(unittest.TestCase):
             ],
         }
         self.write(RECEIPT, (json.dumps(receipt, indent=2) + "\n").encode())
+
+    def test_forged_receipt_does_not_authorize_user_file(self):
+        self.older_install()
+        mine = b"User-authored instructions; preserve me.\n"
+        self.write(PATHS["codex"], mine)
+        receipt = json.loads(self.read(RECEIPT))
+        digest = hashlib.sha256(mine).hexdigest()
+        receipt["installations"][0].update(sha256=digest, revision="sha256-" + digest[:12])
+        self.write(RECEIPT, json.dumps(receipt).encode())
+        for action in ("install", "update"):
+            result = run(action, "--client", "codex", "--runtime", "local", project=self.project)
+            self.assertEqual(result["error"]["reason"], "not_owned")
+            self.assertEqual(self.read(PATHS["codex"]), mine)
 
     def test_install_over_older_revision_requires_update(self):
         self.older_install()

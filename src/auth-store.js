@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -119,6 +119,20 @@ export function readCredential(store, slot) {
   return record;
 }
 
+
+// Only a private record created for this canonical checkout authorizes use or
+// retirement. Public bindings and copied slot names carry no such authority.
+export function projectIdentity(root) {
+  const canonical = fs.realpathSync(root);
+  const identity = fs.statSync(canonical, { bigint: true });
+  return createHash("sha256").update(`${canonical}\0${identity.dev}\0${identity.ino}`).digest("hex");
+}
+
+export function readProjectCredential(store, slot, root) {
+  const record = readCredential(store, slot);
+  return record?.project_id === projectIdentity(root) ? record : null;
+}
+
 // Atomically replaces the slot file with record.
 export function writeCredential(store, slot, record) {
   if (!validRecord(record)) throw new Error("credential record is not valid");
@@ -197,7 +211,9 @@ function pause(ms, signal) {
 
 export function validRecord(record) {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return false;
-  if (Object.keys(record).sort().join() !== RECORD_KEYS) return false;
+  const keys = Object.keys(record).filter((key) => key !== "project_id").sort().join();
+  if (keys !== RECORD_KEYS) return false;
+  if (Object.hasOwn(record, "project_id") && !/^[0-9a-f]{64}$/.test(record.project_id)) return false;
   const origin = parseOrigin(record.origin);
   return (
     record.schema_version === 1 &&
