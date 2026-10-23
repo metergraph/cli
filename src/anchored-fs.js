@@ -75,9 +75,19 @@ function canonical(value) {
 }
 function descriptor(value) { if (!Number.isSafeInteger(value) || value > -1001) throw failure("EBADF"); return -value - 1001; }
 function statResult(bytes, options) {
-  const keys = ["dev", "ino", "mode", "nlink", "uid", "gid", "size", "mtimeMs"];
+  if (bytes.length !== 88) throw failure("EIO");
+  const keys = ["dev", "ino", "mode", "nlink", "uid", "gid", "size"];
   const result = {};
-  keys.forEach((key, index) => { let n = bytes.readBigUInt64BE(index*8); if (key === "mtimeMs") n *= 1000n; result[key] = options?.bigint ? n : Number(n); });
+  keys.forEach((key, index) => { const n = bytes.readBigUInt64BE(index*8); result[key] = options?.bigint ? n : Number(n); });
+  for (const [name, index] of [["mtime", 7], ["ctime", 9]]) {
+    const seconds = bytes.readBigInt64BE(index * 8);
+    const nanoseconds = bytes.readBigUInt64BE((index + 1) * 8);
+    if (nanoseconds >= 1000000000n) throw failure("EIO");
+    const ns = seconds * 1000000000n + nanoseconds;
+    result[`${name}Ms`] = options?.bigint ? ns / 1000000n : Number(seconds) * 1000 + Number(nanoseconds) / 1000000;
+    if (options?.bigint) result[`${name}Ns`] = ns;
+    result[name] = new Date(Number(ns / 1000000n));
+  }
   const mode = Number(result.mode) & 0o170000;
   return Object.assign(result, { isFile: () => mode === 0o100000, isDirectory: () => mode === 0o040000,
     isSymbolicLink: () => mode === 0o120000, isFIFO: () => mode === 0o010000,

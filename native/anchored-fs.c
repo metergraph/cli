@@ -17,6 +17,7 @@
  * This process has no network interface or arbitrary execution operation. */
 #define LIMIT (2 * 1024 * 1024)
 #define MAX_HANDLES 8192
+#define STAT_BYTES (11 * 8)
 /* Search permission is sufficient for *at traversal; acquiring a directory
  * capability must not newly require directory-listing permission. */
 #if defined(O_SEARCH)
@@ -119,8 +120,16 @@ static int expected(int parent,const char *name,int use_owned) {
   errno=ESTALE;return -1;
 }
 static void statbytes(unsigned char *out,const struct stat *s) {
-  uint64_t fields[]={s->st_dev,s->st_ino,s->st_mode,s->st_nlink,s->st_uid,s->st_gid,s->st_size,(uint64_t)s->st_mtime};
-  for(int i=0;i<8;i++)put64(out+i*8,fields[i]);
+#if defined(__APPLE__)
+  struct timespec modified=s->st_mtimespec, changed=s->st_ctimespec;
+#else
+  struct timespec modified=s->st_mtim, changed=s->st_ctim;
+#endif
+  /* Keep seconds and nanoseconds separate. Multiplying time_t by 1e9 here
+   * would overflow for timestamps which JavaScript BigInt can represent. */
+  uint64_t fields[]={s->st_dev,s->st_ino,s->st_mode,s->st_nlink,s->st_uid,s->st_gid,s->st_size,
+    (uint64_t)modified.tv_sec,(uint64_t)modified.tv_nsec,(uint64_t)changed.tv_sec,(uint64_t)changed.tv_nsec};
+  for(int i=0;i<11;i++)put64(out+i*8,fields[i]);
 }
 static int filefd(const char *s) { char *end;long n=strtol(s,&end,10); if(*end || n<0 || n>=nfiles || files[n]<0) {errno=EBADF;return -1;}return files[n]; }
 int main(void) {
@@ -144,7 +153,7 @@ int main(void) {
       args[i]=malloc(len+1);if(!args[i]) {malformed=1;break;}
       memcpy(args[i],request+pos,len);args[i][len]=0;pos+=len;
     }
-    int error=0; unsigned char out[64];void *output=out;uint32_t outlen=0;
+    int error=0; unsigned char out[STAT_BYTES];void *output=out;uint32_t outlen=0;
     int parent=-1,fd=-1,result=-1;char *name=NULL;struct stat st;
     errno=0;
     if(malformed) error=EINVAL;
@@ -159,7 +168,7 @@ int main(void) {
             if(pinned<0) {result=-1;break;}
             if(fstat(dirs[pinned].fd,&opened)<0 || opened.st_dev!=st.st_dev || opened.st_ino!=st.st_ino) {errno=ESTALE;result=-1;break;}
           }
-          statbytes(out,&st);outlen=64;if(parent>=0 && !S_ISLNK(st.st_mode))remember(parent,name,&st);
+          statbytes(out,&st);outlen=STAT_BYTES;if(parent>=0 && !S_ISLNK(st.st_mode))remember(parent,name,&st);
         }
         break;
       case 2: /* open: protocol flags are independent of host constants */
@@ -175,7 +184,7 @@ int main(void) {
         if((kind==2?own(parent,name,&st):remember(parent,name,&st))<0) {close(fd);break;}
         put32(out,nfiles);outlen=4;files[nfiles++]=fd;result=0;break;
       case 3: /* fstat */
-        if(argc!=1) {error=EINVAL;break;}fd=filefd(args[0]);if(fd<0)break;result=fstat(fd,&st);if(!result){statbytes(out,&st);outlen=64;}break;
+        if(argc!=1) {error=EINVAL;break;}fd=filefd(args[0]);if(fd<0)break;result=fstat(fd,&st);if(!result){statbytes(out,&st);outlen=STAT_BYTES;}break;
       case 4: /* bounded read from descriptor */
         if(argc!=1) {error=EINVAL;break;}fd=filefd(args[0]);if(fd<0)break;
         if(fstat(fd,&st)<0)break;
@@ -195,7 +204,8 @@ int main(void) {
       case 9: /* mkdir one basename */
         if(argc!=2) {error=EINVAL;break;}parent=parent_for(args[0],&name);if(!mutable_parent(parent))break;
         result=mkdirat(dirs[parent].fd,name,strtoul(args[1],NULL,10)&0777);
-        if(!result && !fstatat(dirs[parent].fd,name,&st,AT_SYMLINK_NOFOLLOW))own(parent,name,&st);break;
+        if(!result && !fstatat(dirs[parent].fd,name,&st,AT_SYMLINK_NOFOLLOW)) {own(parent,name,&st);}
+        break;
       case 10: /* rename, anchored at both parents */
         if(argc!=2) {error=EINVAL;break;}parent=parent_for(args[0],&name);if(!mutable_parent(parent) || expected(parent,name,1)<0)break;
         char *destname=NULL;int dest=parent_for(args[1],&destname);

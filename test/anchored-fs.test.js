@@ -19,6 +19,24 @@ test("prebuilt helper reads, replaces, syncs and cleans without a runtime compil
   anchored.unlinkSync(file);anchored.rmdirSync(dir);
   anchored.mkdirSync(dir);create(path.join(dir,"new"),"new");
 });
+test("stat replies preserve mtime and ctime precision for normal and BigInt callers", {skip:!supported}, () => {
+  const root=fixture(),file=path.join(root,"timestamps");create(file,"synthetic");
+  for(const timestamp of [1700000000.123456,-1234.875123]) {
+    fs.utimesSync(file,timestamp,timestamp);
+    const expected=fs.statSync(file,{bigint:true});
+    const fromPath=anchored.lstatSync(file,{bigint:true});
+    const fd=anchored.openSync(file,"r");
+    let fromFd;try {fromFd=anchored.fstatSync(fd,{bigint:true});} finally {anchored.closeSync(fd);}
+    for(const actual of [fromPath,fromFd]) {
+      for(const field of ["mtimeNs","ctimeNs","mtimeMs","ctimeMs"]) assert.equal(actual[field],expected[field],field);
+    }
+    const expectedNumber=fs.statSync(file),actualNumber=anchored.statSync(file);
+    assert.equal(actualNumber.mtimeMs,expectedNumber.mtimeMs);
+    assert.equal(actualNumber.ctimeMs,expectedNumber.ctimeMs);
+    assert.equal(Object.hasOwn(actualNumber,"mtimeNs"),false);
+    assert.equal(Object.hasOwn(actualNumber,"ctimeNs"),false);
+  }
+});
 test("substituted parent fails closed and rollback stays on retained directory", {skip:!supported}, () => {
   const root=fixture(),outside=fixture(),dir=path.join(root,"target"),old=path.join(root,"old");fs.mkdirSync(dir);
   anchored.realpathSync(root);const file=path.join(dir,"secret");create(file,"synthetic-token");
@@ -70,10 +88,10 @@ test("helper survives deferred terminal signals and exits when owner pipe closes
   async function query() {
     const answer=new Promise((resolve,reject)=>{
       const pieces=[];let size=0;
-      function data(bytes) {pieces.push(bytes);size+=bytes.length;if(size>=72){child.stdout.off("data",data);resolve(Buffer.concat(pieces));}}
+      function data(bytes) {pieces.push(bytes);size+=bytes.length;if(size>=96){child.stdout.off("data",data);resolve(Buffer.concat(pieces));}}
       child.stdout.on("data",data);child.once("error",reject);
     });
-    child.stdin.write(frame);const reply=await answer;assert.equal(reply.readUInt32BE(),0);assert.equal(reply.readUInt32BE(4),64);
+    child.stdin.write(frame);const reply=await answer;assert.equal(reply.readUInt32BE(),0);assert.equal(reply.readUInt32BE(4),88);
   }
   try {
     await query();
