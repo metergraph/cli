@@ -18,6 +18,7 @@ import os
 import secrets
 import signal
 import stat
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
@@ -54,7 +55,20 @@ NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 NAME_SURROGATE_BIT = 0x20000000
 BINARY = getattr(os, "O_BINARY", 0)
 # Search handles preserve access to writable directories without read permission.
-DIRECTORY_ACCESS = getattr(os, "O_SEARCH", getattr(os, "O_PATH", os.O_RDONLY))
+def _directory_access(flags=os, platform=sys.platform):
+    if hasattr(flags, "O_SEARCH"):
+        return flags.O_SEARCH
+    if hasattr(flags, "O_PATH"):
+        return flags.O_PATH
+    if platform == "darwin":
+        # Older CPython builds omit O_SEARCH although Darwin supports it.
+        # Darwin sys/fcntl.h defines O_EXEC=0x40000000 and
+        # O_SEARCH=(O_EXEC | O_DIRECTORY); callers always add O_DIRECTORY.
+        return 0x40000000
+    return flags.O_RDONLY
+
+
+DIRECTORY_ACCESS = _directory_access()
 
 MESSAGES = {
     "secure_filesystem_unavailable": "Secure filesystem operations are unavailable on this platform. Nothing was written.",

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
@@ -85,6 +86,18 @@ class AnchoredTest(unittest.TestCase):
         self.assertEqual(list(self.project.iterdir()), [])
 
     def test_search_only_directories_preserve_install(self):
+        self._assert_search_only_install()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin legacy CPython compatibility')
+    def test_search_only_install_without_python_search_flag_symbols(self):
+        # CPython 3.9 on macOS does not export O_SEARCH or O_PATH. Exercise
+        # that selection independently of the interpreter running this test.
+        legacy_flags = SimpleNamespace(O_RDONLY=os.O_RDONLY)
+        access = subject._directory_access(legacy_flags, 'darwin')
+        with patch.object(subject, 'DIRECTORY_ACCESS', access):
+            self._assert_search_only_install()
+
+    def _assert_search_only_install(self):
         # Each case makes the project, a project ancestor, or the existing
         # client directory writable/searchable without directory listing.
         for restricted in ('project', 'ancestor', 'client'):
