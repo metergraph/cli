@@ -40,9 +40,9 @@ const agentDoc = (name, profile) => {
 };
 const discoveryRoutes = () => ({
   "/.well-known/oauth-protected-resource/v1/agent/mcp": (request, response) =>
-    json(200, doc(`http://${request.headers.host}`, "protected_resource"))(request, response),
+    json(200, doc(`https://${request.headers.host}`, "protected_resource"))(request, response),
   "/.well-known/oauth-authorization-server/v1/oauth": (request, response) =>
-    json(200, doc(`http://${request.headers.host}`, "authorization_server"))(request, response),
+    json(200, doc(`https://${request.headers.host}`, "authorization_server"))(request, response),
 });
 function credentialFile(token) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "metergraph route "));

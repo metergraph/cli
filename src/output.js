@@ -1169,6 +1169,8 @@ export function doctorText(result, style = PLAIN) {
 // Fixed text for every login, logout and session reason. Reasons shared
 // with doctor fall back to its wording.
 const AUTH_MESSAGES = {
+  local_docker_transport_required:
+    "Local credentials and consent require a verified Docker transport. This CLI has no configured Docker transport; nothing was sent. Update the local bundle and use its Docker-mediated bin/agent-key command, or connect this CLI to an authenticated HTTPS deployment.",
   runtime_not_supported:
     "--runtime says where this terminal runs, not which Metergraph service you sign in to. " +
     "A cloud runtime is a remote sandbox, and sign in needs a browser on the same machine as the CLI, " +

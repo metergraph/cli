@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -189,7 +190,7 @@ export async function completeInBrowser(start) {
 
 function get(url) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { agent: false }, (response) => {
+    const request = (new URL(url).protocol === "https:" ? https : http).get(url, { agent: false }, (response) => {
       response.resume();
       response.on("end", () => resolve({ status: response.statusCode, location: response.headers.location }));
     });

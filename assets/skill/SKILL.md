@@ -54,7 +54,7 @@ package does not support. A CLI login or health probe alone does not prove
 application traffic. Verification needs an exact trace or request ID from an
 application invocation, its time window and the intended workspace.
 
-`login` and `setup` need the person to approve in a browser on this machine. If the
+`login` and `setup` on an authenticated HTTPS deployment need the person to approve in a browser on this machine. The customer-local Docker migration below overrides this browser flow. If the
 installed CLI lists exit code 18 `action_required` in `metergraph --help`,
 `metergraph help exit-codes`, `metergraph help login` or `metergraph help setup`,
 run them with `--json --no-browser`. When a step needs approval, the command exits 18 within
@@ -86,9 +86,10 @@ access from the `METERGRAPH_AGENT_TOKEN` environment variable. Use one sequence:
 |---|---|
 | Local shell, hosted, new workspace | `metergraph setup --runtime local --client <client> --json --no-browser`, rerun after each approval, then `metergraph status --json`. Add `--signup` for a person with no hosted account. |
 | Local shell, hosted, existing workspace | `metergraph login --runtime local --workspace <slug> --json --no-browser`, then `metergraph status --json`. |
-| Local shell, customer-local or customer-owned AWS | `metergraph setup --runtime local --client <client> --deployment customer-local` (or `byoc`) `--url <origin> --workspace <slug> --json --no-browser`. Follow its `next_action` for each prerequisite, and add `--confirm-prerequisites` only after the person confirms them. Then `metergraph status --json`. Without `--deployment`, setup and login go to the hosted service. |
-| Local container (Docker, local dev container) | As a local shell. If the browser cannot reach the container's sign in callback, use the key sequence below. |
-| SSH, Codespaces, Gitpod, Cloud Shell, remote dev container, CI: hosted, customer-local or customer-owned AWS | The person signs in (or signs up, on the hosted service only) on their own device, opens the Keys page of the deployment and workspace the agent should read, creates a coding-agent key with Metadata access, and saves it in this environment's secret settings, or as a CI secret, named `METERGRAPH_AGENT_TOKEN`. Then run `metergraph status --json` and `metergraph usage --json`. Add `--workspace <slug>` to make a key for another workspace fail. For a non-hosted deployment, pass `--url <origin>` (or set `METERGRAPH_URL`) with its address. |
+| Local shell, customer-local | Use `metergraph-local-bundle` with an explicitly selected verified installation and local Docker context. Every credential-bearing request requires its authenticated Docker channel. Existing HTTP login/setup clients stop; do not open local browser consent or invent client transport flags. |
+| Local shell, customer-owned AWS | Use the installed CLI's documented `byoc` setup at the customer's independently confirmed HTTPS origin. Follow its prerequisite handoff and verify workspace identity. Without `--deployment`, setup and login go to the hosted service. |
+| Local container (Docker, local dev container) | Follow the deployment-specific route. A container or available key does not make a host HTTP listener trusted. |
+| SSH, Codespaces, Gitpod, Cloud Shell, remote dev container, CI: reachable hosted HTTPS or customer-owned AWS HTTPS | The person signs in (or signs up, on the hosted service only) on their own device, opens the Keys page of the deployment and workspace the agent should read, creates a coding-agent key with Metadata access, and saves it in this environment's secret settings, or as a CI secret, named `METERGRAPH_AGENT_TOKEN`. Then run `metergraph status --json` and `metergraph usage --json`. Add `--workspace <slug>` to make a key for another workspace fail. For a non-hosted deployment, pass `--url <origin>` (or set `METERGRAPH_URL`) with its address. |
 | Any runtime: open-source self-hosted server | The CLI read commands do not support the open-source server; use its MCP route (below). There are no accounts and no Keys page: the operator gives the person one of the server's `MG_AGENT_TOKENS` values for the client's private MCP settings. |
 | Has a Metadata key but no saved sign in | The same key sequence. If the project has a `.metergraph/project.json`, it pins the origin and workspace the key must match. |
 
@@ -146,7 +147,7 @@ which the CLI does not read.
 
 | Client and runtime | Hosted | Customer-local bundle | Customer AWS | Open source self-hosted |
 | --- | --- | --- | --- | --- |
-| Claude Code or Codex on the customer machine | Keyed HTTP at `https://app.metergraph.dev/v1/agent/mcp` | Keyed HTTP at the installed local address, normally `http://127.0.0.1:8080/v1/agent/mcp` | Keyed HTTP at the customer's reachable installation address | Static `MG_AGENT_TOKENS` bearer at the OSS server address, normally `http://localhost:8787/v1/agent/mcp` |
+| Claude Code or Codex on the customer machine | Keyed HTTP at `https://app.metergraph.dev/v1/agent/mcp` | Authenticated Docker channel only when a released client documents it; legacy host HTTP MCP is unavailable | Keyed HTTP at the customer's reachable installation address | Static `MG_AGENT_TOKENS` bearer at the OSS server address, normally `http://localhost:8787/v1/agent/mcp` |
 | Cursor on the customer machine | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide | Project skill supported; MCP connection not validated in this guide |
 | Claude Desktop remote connector on an individual account | Custom connector with a scoped bearer key if Request headers are available for the account; verify tools before claiming success | Cannot reach localhost from Anthropic's cloud | Default private installation is unreachable from Anthropic's cloud; no validated public route in this guide | Cannot reach localhost from Anthropic's cloud |
 | Claude Desktop local MCP | Separate local extension required; not supported by this guide | Docker does not install a host extension | Separate local extension required; not supported by this guide | Docker does not install a host extension |
@@ -164,11 +165,59 @@ For hosted Claude Desktop on an individual account, guide the human through Cust
 
 For a fresh hosted workspace, first ask whether the human already has a Metergraph account and workspace. Direct them to https://app.metergraph.dev/ and the signup, invitation or sign-in flow actually offered. The hosted UI can offer "Get a free API key" for self-service signup, but do not assume that button or a workspace invitation is available to everyone. If access is unavailable, direct them to their workspace owner or Metergraph. Confirm the workspace before creating a coding-agent key.
 
-For the commercial customer-local bundle, direct them to https://www.metergraph.dev/docs/self-host/local/#the-customer-local-bundle and the signed public release. They need a separate pull-only registry credential from Metergraph to pull the images; the public bundle download does not grant registry access. Verify the release before installation. Local admin credentials from the bundle's private configuration provide dashboard sign-in for the person; never read them. For a coding-agent key with more than Metadata access, use the bundle's `bin/agent-key` when it has one, as `metergraph-local-bundle` describes: it issues the key with no sign in and writes it only to a private file. Otherwise the person creates the key on that installation's Keys page. Do not substitute hosted signup or a hosted key. Do not clone the private implementation or run development seed commands. Use `metergraph-local-bundle` to stand the bundle up when that skill is installed.
+For the commercial customer-local bundle, direct them to https://www.metergraph.dev/docs/self-host/local/#the-customer-local-bundle and the signed public release. They need a separate pull-only registry credential from Metergraph to pull the images; the public bundle download does not grant registry access. Verify the release before installation. The authenticated-transport bundle does not publish a host API port and local browser dashboard/consent is unavailable. Never read its private administrator credentials or use legacy HTTP sign-in instructions. For a coding-agent key with more than Metadata access, use the bundle's `bin/agent-key` when it has one, as `metergraph-local-bundle` describes: it issues the key with no sign in and writes it only to a private file. If it lacks authenticated Docker transport or a compatible client, stop for a supported release; do not use a legacy local browser Keys page. Do not substitute hosted signup or a hosted key. Do not clone the private implementation or run development seed commands. Use `metergraph-local-bundle` to stand the bundle up when that skill is installed.
 
 For customer-owned AWS, direct them to https://www.metergraph.dev/docs/self-host/aws/. An operator provisions the installation, identity and membership. There is no public signup. Ask for the installation's actual reachable address and use a coding-agent key from its Keys page. Its default internal load balancer is private, and its Agent Access surface excludes trace content and replay.
 
 For the open-source self-hosted server, direct them to https://www.metergraph.dev/docs/self-host/local/#the-open-source-server. No Metergraph account, commercial release, registry credential or Keys page is needed. The operator configures static `MG_AGENT_TOKENS` separately from ingestion `MG_TOKENS`. Agent Access is content-blind and does not provide replay, incidents, ingestion health or pipeline reports. Use the actual local server address; do not ask them to mint a hosted coding-agent key.
+
+## Provider execution consent
+
+This gate applies before every provider-backed action, including a CLI tool call
+confirmed with `--yes`. Scopes, keys, a healthy connection, conversation approval
+and `--yes` do not create a server-approved execution receipt. Keep the person's
+explicit bounded approval and the server's trusted human consent as separate
+requirements. No agent bearer endpoint approves plans.
+
+On deployments enforcing this contract, analysis, classification and experiment
+starts currently refuse with `precondition_failed`, reason
+`provider_consent_unavailable`. Their frozen inputs and aggregate spending limits
+are not supported yet. Stop those starts, including request-key retries. Use an
+authenticated dashboard only where one is actually available, or continue bounded
+reads and deterministic evaluation previews. Do not switch to another key,
+endpoint, tool, legacy version or dashboard automation to bypass the refusal.
+Older capability listings or examples below do not establish this receipt contract.
+
+For one replay, use the documented `metergraph_replay_trace` tool only after the
+person agrees to the exact trace, overrides, destination, timeout and maximum
+cost. The first request can return `precondition_failed`, reason
+`provider_consent_required`, with `consent_id` and a relative
+`/v1/agent/provider-consent/<consent_id>` URL. This creates a ten-minute frozen
+plan; it does not approve sending captured content to the provider. Do not invent
+a preparation or approval tool when the connected schema lacks it.
+
+For hosted HTTPS, resolve that relative URL against the independently confirmed
+deployment origin, validate the expected path/ID, and hand it to the owner. The
+owner reviews the full plan and submits the authenticated, session-bound form.
+Never automatically navigate a returned URL or submit that form as the agent.
+For customer-local, local browser approval is refused. The human uses the verified
+installation's `METERGRAPH_DOCKER_CONTEXT='selected-local-context' ./bin/consent PLAN_UUID --tenant TENANT_UUID --principal USER_UUID`, retaining the same independently selected local context used for startup.
+It displays the complete server plan and requires its exact digest in their
+controlling terminal through the intended signed Docker container. Never guess
+IDs, pipe the digest, add `--yes` or automate the human approval. Docker
+administration is privileged service authority, not an isolation boundary from
+another process already holding that authority.
+
+After human approval, retry the exact replay arguments with `consent_id` only if
+the connected tool schema supports it. The backend rechecks the whole plan,
+principal and live key, atomically consumes the receipt and reserves the full
+approved maximum. Changed input, route, price, limit, tenant, delegate or key,
+expiry, reuse and concurrent consumption fail closed. A lost response, timeout
+or process crash never makes a consumed receipt reusable. Stop rather than
+blindly retrying uncertain execution. A timeout does not cancel provider billing.
+Unsupported counting, pricing or immutable execution also stops inference; do
+not silently substitute another model, route or counting service. If the client
+or deployment lacks this contract, report paid agent execution unavailable.
 
 ## Keep credentials outside chat
 
@@ -201,4 +250,4 @@ Read through the `metergraph` CLI when the agent has a shell and the CLI can rea
 4. Explain the failure or anomaly using only returned evidence. Cite workspace, time window, provenance, trace/report IDs, completeness/coverage, warnings and working app links when returned. Do not fabricate links. Distinguish no data, incomplete evidence, unavailable capability, classification pending, stale/mismatched identity, failed analysis and missing report. An empty result alone does not prove absence of traffic. Never conclude that a commit, deploy or config change did or did not change cost from source code or a git diff alone; a diff is a hypothesis until bounded usage reads for the same route before and after the change reached production agree, with completeness and warnings cited.
 5. An optional approved replay must be eligible, bounded and non-persistent. Do not claim that it changed production telemetry or fixed the application. Refuse autonomous dashboard mutations or production configuration changes.
 
-For an empty workspace, use https://www.metergraph.dev/docs/agents/instrument-a-repo/. If `metergraph setup` already ran in this project, it delivered the ingest credential: the project's `.env` holds `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`. Use them; do not ask for or create another key, and never print their values. The SDK reads the process environment. Never shell-source, evaluate or execute a project env file. Use a data-only loader for just `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`, rejecting unknown names and shell expressions without expanding them. Keep values out of output; configure the intended process through its supported secret input if no such loader is available. Otherwise confirm the ingestion destination and obtain a separate ingest credential securely. Ask before running anything that calls a paid model provider, and do not initiate provider calls or paid work merely to validate setup. Confirm the exact trace with `metergraph verify`; if the CLI is not installed, or `metergraph --version` lacks `verify`, use a separately installed and verified CLI that supports `verify`. Ingestion accepted, processed, retained content, classification readiness and analysis readiness are distinct states. Label synthetic/demo fixtures; they do not prove a first real application trace.
+For an empty workspace, use https://www.metergraph.dev/docs/agents/instrument-a-repo/ only through the authenticated deployment route. On the customer-local bundle, stop if no released SDK/client supports its authenticated Docker transport; never send an ingest key to host HTTP. If `metergraph setup` already ran in this project, it delivered the ingest credential: the project's `.env` holds `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`. Use them; do not ask for or create another key, and never print their values. The SDK reads the process environment. Never shell-source, evaluate or execute a project env file. Use a data-only loader for just `METERGRAPH_APP_TOKEN` and `METERGRAPH_INGEST_URL`, rejecting unknown names and shell expressions without expanding them. Keep values out of output; configure the intended process through its supported secret input if no such loader is available. Otherwise confirm the ingestion destination and obtain a separate ingest credential securely. Ask before running anything that calls a paid model provider, and do not initiate provider calls or paid work merely to validate setup. Confirm the exact trace with `metergraph verify`; if the CLI is not installed, or `metergraph --version` lacks `verify`, use a separately installed and verified CLI that supports `verify`. Ingestion accepted, processed, retained content, classification readiness and analysis readiness are distinct states. Label synthetic/demo fixtures; they do not prove a first real application trace.

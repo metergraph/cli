@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { parseArgs } from "../src/args.js";
 import { PRICING_SCHEMA, validatePricing } from "../src/pricing-reference.js";
 import { pricingHtml } from "../src/pricing-output.js";
-import { parseJsonLine, runCli, startServer } from "./helpers.js";
+import { parseJsonLine, runCli, startServer as startSecureServer } from "./helpers.js";
+
+// The reference service intentionally exercises credential-free HTTP loopback.
+const startServer = routes => startSecureServer(routes, { tls: false });
 
 const runReferenceCli = (args, options) => runCli([...args, "--api", "reference"], options);
 const query = { model: "example/model", channel: "example-api", at: "2026-10-20" };
@@ -212,6 +215,7 @@ test("history chart and HTML run through the CLI and retain provenance", async (
     },
   });
   try {
+    assert.match(server.origin, /^http:\/\/127\.0\.0\.1:/, 'reference pricing retains HTTP loopback support');
     const args = [
       "pricing",
       "history",

@@ -7,7 +7,7 @@
 // Every value is synthetic. Tests change behavior through server.behavior.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
-import http from "node:http";
+import { createServer } from "./https-server.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -112,7 +112,7 @@ export async function startOAuthServer(initial = {}) {
   };
 
   const sockets = new Set();
-  const server = http.createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://fixture.invalid");
     const body = await readBody(request);
     state.requests.push({
@@ -133,7 +133,7 @@ export async function startOAuthServer(initial = {}) {
     socket.on("close", () => sockets.delete(socket));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const origin = `https://127.0.0.1:${server.address().port}`;
   const issuer = `${origin}/v1/oauth`;
   const resource = `${origin}/v1/agent/mcp`;
   // Configures a pre-registered CLI client and offers its ID, as a service

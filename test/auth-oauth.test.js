@@ -117,10 +117,10 @@ test("an offered client ID is used without registration, and none offered regist
 });
 
 test("a server without OAuth metadata is unsupported, and a redirect is never followed", async () => {
-  const http = await import("node:http");
+  const { createServer } = await import("./fixtures/https-server.js");
   const make = (handler) =>
     new Promise((resolve) => {
-      const server = http.createServer(handler);
+      const server = createServer(handler);
       server.listen(0, "127.0.0.1", () => resolve(server));
     });
   const notFound = await make((request, response) => {
@@ -132,7 +132,7 @@ test("a server without OAuth metadata is unsupported, and a redirect is never fo
     response.end();
   });
   try {
-    const origin = (server) => `http://127.0.0.1:${server.address().port}`;
+    const origin = (server) => `https://127.0.0.1:${server.address().port}`;
     assert.deepEqual(await discover(origin(notFound), AbortSignal.timeout(2000)), {
       ok: false,
       outcome: "unsupported",

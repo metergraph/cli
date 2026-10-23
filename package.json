@@ -27,8 +27,8 @@
   ],
   "scripts": {
     "build:native": "node native/build.mjs",
-    "test": "node --test test/*.test.js",
-    "test:package": "node --test test/package/*.test.js"
+    "test": "node test/run-tests.js",
+    "test:package": "node test/run-tests.js package"
   },
   "engines": {
     "node": ">=22"

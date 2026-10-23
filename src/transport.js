@@ -62,6 +62,27 @@ export function send(
 ) {
   const url = requestUrl(origin, pathname, query);
 
+  // A loopback port is not proof of the local bundle's identity. Until a
+  // verified Docker transport is selected, never put credentials, OAuth
+  // exchanges, or bootstrap state on the host's plaintext HTTP listener.
+  // Public pricing has an explicit opt-in. The credential-free reference
+  // GET API is loopback-only and retains its isolated agent (no proxy).
+  const publicPricing = useGlobalAgent && bearer === null && form === null && (
+    (pathname === "/v1/pricing/models" && method === "GET" && json === null) ||
+    (["/v1/pricing/lookup", "/v1/pricing/calculate"].includes(pathname) && method === "POST")
+  );
+  const referencePricing = method === "GET" && bearer === null && form === null && json === null &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+    ["/v1/pricing/lookup", "/v1/pricing/cost", "/v1/pricing/history", "/v1/pricing/market"].includes(pathname);
+  // These public probes report reachability only; their replies never
+  // authenticate the service or authorize a later credential exchange.
+  const connectionProbe = method === "GET" && bearer === null && form === null && json === null &&
+    !useGlobalAgent && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+    ["/healthz", "/v1/deployment"].includes(pathname);
+  if (url.protocol === "http:" && !publicPricing && !referencePricing && !connectionProbe) {
+    return Promise.resolve({ kind: "error", reason: "local_docker_transport_required", status: null, sent: false });
+  }
+
   const headers = {
     accept: "application/json",
     "accept-encoding": "identity",

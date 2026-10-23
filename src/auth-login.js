@@ -88,6 +88,11 @@ export async function runLogin(options, progress) {
     return end("unsupported", "runtime_not_supported", agentKeyAction({ kind: "declared_cloud" }, options.origin));
   }
   if (environment.remote) return end("unsupported", environment.reason, agentKeyAction(environment, options.origin));
+  // Refuse before reading saved grants or creating a callback/manual URL.
+  // Browser consent through a host loopback port cannot establish identity.
+  if (new URL(options.origin).protocol === "http:") {
+    return end("unsupported", "local_docker_transport_required");
+  }
   const trap = trapSignals();
   try {
     const root = resolveProject(options.project);

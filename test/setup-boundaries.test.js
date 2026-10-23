@@ -89,7 +89,7 @@ test("a rerun cannot move a customer-local project to another deployment, origin
     [["--url", other.origin], "setup_binding_changed"],
     [route(server).map((arg) => arg === server.behavior.workspaceId ? WORKSPACE_B : arg), "setup_binding_changed"],
     [["--deployment", "byoc", "--confirm-prerequisites", "--url", server.origin,
-      "--workspace", server.behavior.workspaceId], "byoc_requires_https"],
+      "--workspace", server.behavior.workspaceId], "deployment_profile_mismatch"],
   ];
   for (const [args, reason] of attempts) {
     const run = await cli(box, args);
