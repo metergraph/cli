@@ -57,6 +57,9 @@ export async function runSetup(options, progress = () => {}) {
     const where = options.runtime !== "local" ? { kind: "declared_cloud" } : environment;
     return fail("unsupported", "run_on_local_machine", "not_ready", null, remoteSetupAction(where, options.origin, options));
   }
+  if (new URL(options.origin).protocol === "http:") {
+    return fail("unsupported", "local_docker_transport_required", "not_ready", null);
+  }
   const trap = trapSignals();
   let receipt = null;
   let loginVerified = false;

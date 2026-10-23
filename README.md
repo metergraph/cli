@@ -286,6 +286,13 @@ report. See [SECURITY.md](https://github.com/metergraph/cli/blob/main/SECURITY.m
 
 `--url ORIGIN` selects the service; the default is `https://app.metergraph.dev`. It
 accepts a bare `https://` origin, or `http://` on `localhost`, `127.0.0.1` or `[::1]`.
+Plain HTTP loopback origins support unauthenticated connection probes and public
+pricing only. Credential requests, login and setup fail closed with
+`local_docker_transport_required`, including manual browser approval. A host
+loopback listener does not prove the identity of the local bundle. Update the
+bundle and use its Docker-mediated `bin/agent-key` command for local credentials;
+this CLI requires an authenticated HTTPS deployment for credential operations
+until it supports the bundle's verified Docker transport.
 `setup --deployment` routes to the hosted service (`managed`), the commercial
 `customer-local` bundle, customer-owned cloud (`byoc`) or the open source server
 (`oss`). The hosted service and released customer-local bundle are the release

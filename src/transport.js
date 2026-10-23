@@ -62,6 +62,18 @@ export function send(
 ) {
   const url = requestUrl(origin, pathname, query);
 
+  // A loopback port is not proof of the local bundle's identity. Until a
+  // verified Docker transport is selected, never put credentials, OAuth
+  // exchanges, or bootstrap state on the host's plaintext HTTP listener.
+  // Public pricing is credential-free and has its own explicit opt-in.
+  const publicPricing = useGlobalAgent && bearer === null && form === null && (
+    (pathname === "/v1/pricing/models" && method === "GET" && json === null) ||
+    (["/v1/pricing/lookup", "/v1/pricing/calculate"].includes(pathname) && method === "POST")
+  );
+  if (url.protocol === "http:" && !publicPricing) {
+    return Promise.resolve({ kind: "error", reason: "local_docker_transport_required", status: null, sent: false });
+  }
+
   const headers = {
     accept: "application/json",
     "accept-encoding": "identity",

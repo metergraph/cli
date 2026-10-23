@@ -18,6 +18,7 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 
 const mode = process.env.METERGRAPH_TEST_BROWSER || "follow";
@@ -60,7 +61,7 @@ function record(entry) {
 
 function get(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { headers, agent: false }, (response) => {
+    const request = (new URL(url).protocol === "https:" ? https : http).get(url, { headers, agent: false }, (response) => {
       response.resume();
       response.on("end", () => resolve({ status: response.statusCode, location: response.headers.location }));
     });

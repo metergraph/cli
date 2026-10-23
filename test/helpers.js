@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import http from "node:http";
+import { createServer } from "./fixtures/https-server.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const BIN = fileURLToPath(new URL("../bin/metergraph.js", import.meta.url));
@@ -80,7 +80,7 @@ export function assertNoLeak(assert, ...texts) {
 export async function startServer(routes) {
   const requests = [];
   const sockets = new Set();
-  const server = http.createServer((request, response) => {
+  const server = createServer((request, response) => {
     requests.push({ path: request.url, headers: request.headers });
     const handler = routes[request.url];
     if (handler) {
@@ -97,7 +97,7 @@ export async function startServer(routes) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   return {
-    origin: `http://127.0.0.1:${port}`,
+    origin: `https://127.0.0.1:${port}`,
     port,
     requests,
     async close() {

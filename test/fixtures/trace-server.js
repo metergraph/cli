@@ -1,4 +1,4 @@
-import http from "node:http";
+import { createServer } from "./https-server.js";
 
 // Isolated protocol fixture. Its rows do not prove application traffic.
 export const TRACE_WORKSPACE = "11111111-1111-4111-8111-111111111111";
@@ -33,7 +33,7 @@ export function traceDocument(origin = "https://example.com", { found = true, re
 export async function startTraceServer(handler = null) {
   const requests = [];
   let origin;
-  const server = http.createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -47,7 +47,7 @@ export async function startTraceServer(handler = null) {
     res.end(JSON.stringify(response?.message ?? result));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  origin = `http://127.0.0.1:${server.address().port}`;
+  origin = `https://127.0.0.1:${server.address().port}`;
   return {
     origin, requests,
     session: async () => ({ ok: true, session: { origin, workspaceId: TRACE_WORKSPACE, profile: "local", scopes: ["agent:metadata"], accessToken: "example-access-secret" }, documents: { capabilities: capabilities() }, knownCredentials: ["example-access-secret", "example-refresh-secret"] }),

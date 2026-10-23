@@ -77,7 +77,7 @@ function oauthDoc(name, origin, edit = () => {}) {
 }
 
 const oauth = (name, edit) => (request, response) =>
-  json(200, oauthDoc(name, `http://${request.headers.host}`, edit))(request, response);
+  json(200, oauthDoc(name, `https://${request.headers.host}`, edit))(request, response);
 
 const metadataEntry = (schema) => ({
   available: true,
@@ -609,7 +609,7 @@ describe("verifyDeploymentRoute", { skip: isWindows }, () => {
       { prerequisites: {} },
       { runtime: "cloud" },
       { runtime: "remote-ssh" },
-      { model: "byoc", prerequisites: READY.byoc },
+      { model: "byoc", prerequisites: READY.byoc, origin: "http://127.0.0.1:8080" },
       { model: "oss", prerequisites: { ...READY.oss, deployment_discovery_supported: "required" } },
       { model: "oss", prerequisites: { ...READY.oss, metadata_scope_supported: "unknown" } },
       { timeoutMs: 0 },
