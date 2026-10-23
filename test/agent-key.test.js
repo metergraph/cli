@@ -516,7 +516,7 @@ test("experiment help and reference describe Debug reads and all workflow permis
   assert.equal(run.code, 0, run.stdout);
   assert.match(run.stdout, /For list, estimate and get: a key with the Metadata or Debug role/);
   const reference = fs.readFileSync(new URL("../docs/reference.md", import.meta.url), "utf8");
-  assert.match(reference, /workflow requires the Debug role with all three permissions: Allow evaluation\n   writes, Allow evaluation previews and Allow analysis starts/);
+  assert.match(reference, /workflow requires the Debug role with all three permissions: Allow evaluation\r?\n   writes, Allow evaluation previews and Allow analysis starts/);
   assert.match(reference, /accept keys with the Metadata or Debug role and send only Metadata requests/);
   assert.ok(!reference.includes("refuse a key that holds more than Metadata access"));
 });
