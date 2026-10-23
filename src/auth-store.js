@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import fs from "node:fs";
+import fs, { withRollback } from "./anchored-fs.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -90,6 +90,7 @@ export function openStore(dir, { create }) {
     return { dir, credentials };
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "credential_store_unavailable");
   }
 }
@@ -111,6 +112,7 @@ export function readCredential(store, slot) {
     content = readPrivateFile(file);
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "credential_store_unavailable");
   }
   if (content === null) return null;
@@ -141,6 +143,7 @@ export function writeCredential(store, slot, record) {
     writePrivateFile(store.credentials, `${slot}.json`, content);
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "credential_write_failed");
   }
 }
@@ -157,6 +160,7 @@ export function deleteCredential(store, slot) {
     return true;
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "credential_write_failed");
   }
 }
@@ -179,6 +183,7 @@ export async function withSlotLock(store, slot, work, { waitMs, signal = null })
       fs.closeSync(fd);
       break;
     } catch (error) {
+      if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
       if (error.code !== "EEXIST") throw new Stop("filesystem_error", "credential_store_unavailable");
       if (Date.now() >= until) throw new Stop("conflict", "credential_locked");
       await pause(50, signal);
@@ -189,7 +194,7 @@ export async function withSlotLock(store, slot, work, { waitMs, signal = null })
     return await work();
   } finally {
     try {
-      fs.unlinkSync(lock);
+      withRollback(() => fs.unlinkSync(lock));
     } catch {
       // Reported by the next run as a held lock.
     }
@@ -389,7 +394,7 @@ function writePrivateFile(dir, name, content) {
     fs.renameSync(temp, dest);
   } catch (error) {
     try {
-      fs.unlinkSync(temp);
+      withRollback(() => fs.unlinkSync(temp));
     } catch {
       // Already renamed or never created.
     }

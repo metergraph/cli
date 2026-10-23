@@ -8,11 +8,12 @@
 //   binding-partial     as binding-rename, and removing the saved grant fails too
 //   binding-unlink      removing .metergraph/project.json fails
 import fs from "node:fs";
+import anchoredFs from "../../src/anchored-fs.js";
 import { syncBuiltinESMExports } from "node:module";
 
 const fault = process.env.METERGRAPH_TEST_FAULT;
-const renameSync = fs.renameSync;
-const unlinkSync = fs.unlinkSync;
+const renameSync = anchoredFs.renameSync;
+const unlinkSync = anchoredFs.unlinkSync;
 const CREDENTIAL = /credentials[\\/][0-9a-f]{32}\.json$/;
 
 function failure() {
@@ -21,7 +22,7 @@ function failure() {
   return error;
 }
 
-fs.renameSync = (from, to) => {
+anchoredFs.renameSync = (from, to) => {
   const dest = String(to);
   if (fault === "receipt-rename" && dest.endsWith("skill-installations.json")) throw failure();
   if (fault === "credential-rename" && CREDENTIAL.test(dest)) throw failure();
@@ -33,7 +34,7 @@ fs.renameSync = (from, to) => {
   }
 };
 
-fs.unlinkSync = (file) => {
+anchoredFs.unlinkSync = (file) => {
   if (fault === "binding-partial" && CREDENTIAL.test(String(file))) throw failure();
   if (fault === "binding-unlink" && String(file).endsWith("project.json")) throw failure();
   unlinkSync(file);

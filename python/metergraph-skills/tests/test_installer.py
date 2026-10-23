@@ -84,6 +84,7 @@ def snapshot(root):
     return result
 
 
+@unittest.skipIf(IS_WINDOWS, "secure directory backend unavailable on Windows")
 class InstallerTest(unittest.TestCase):
     def setUp(self):
         # The space checks that nothing splits or quotes paths.
@@ -312,6 +313,7 @@ class NpmParityTest(unittest.TestCase):
                 self.assertEqual(python, expected)
 
     @unittest.skipUnless(shutil.which("node") and NPM_BIN.is_file(), "node is not available")
+    @unittest.skipIf(IS_WINDOWS, "secure directory backend unavailable on Windows")
     def test_installers_share_files_and_receipt(self):
         node_project = Path(tempfile.mkdtemp(prefix="metergraph skills node "))
         python_project = Path(tempfile.mkdtemp(prefix="metergraph skills python "))
@@ -335,6 +337,17 @@ class NpmParityTest(unittest.TestCase):
             capture_output=True, check=True,
         )
         self.assertEqual(json.loads(node.stdout)["data"]["status"], "reused")
+
+
+@unittest.skipUnless(IS_WINDOWS, "Windows fail-closed contract")
+class WindowsBackendTest(unittest.TestCase):
+    def test_installs_refuse_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for action in ("install", "update"):
+                for client in PATHS:
+                    result = run(action, "--client", client, project=directory)
+                    self.assertEqual(result["error"]["reason"], "secure_filesystem_unavailable")
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
 
 def snapshot_bytes(root):

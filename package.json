@@ -12,6 +12,12 @@
   "files": [
     "bin/metergraph.js",
     "src/*.js",
+    "native/anchored-fs.c",
+    "native/build.mjs",
+    "native/targets.mjs",
+    "native/manifest.json",
+    "native/README.md",
+    "native/bin/*",
     "assets/skill/SKILL.md",
     "assets/skill/manifest.json",
     "assets/skills/manifest.json",
@@ -20,6 +26,7 @@
     "README.md"
   ],
   "scripts": {
+    "build:native": "node native/build.mjs",
     "test": "node --test test/*.test.js",
     "test:package": "node --test test/package/*.test.js"
   },

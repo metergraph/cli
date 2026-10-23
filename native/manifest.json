@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "artifacts": {
+    "anchored-fs-darwin-arm64": "787a6d122add60a261fc6c70717f270825af3be7512d7dea4104f608293370b6",
+    "anchored-fs-darwin-x64": "f569e48393b0650a93c8aaf2ef8984fd0dbf90e33f51d847db3c629a7c8fbd38",
+    "anchored-fs-linux-arm64": "6ac3eca79a8211a32dfd76eebeffe0b4b4e6d1540bacad739856b9c91094b308",
+    "anchored-fs-linux-x64": "401e2fd89ca15cd9d68c4e5077ca08a9caf0fe93434a0b243a361845b1284533"
+  }
+}
