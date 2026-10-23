@@ -279,7 +279,7 @@ const EXPERIMENTS_USAGE = [
   "metergraph experiments list [--workload ID] [--limit N] [read options] [--json]",
   "metergraph experiments estimate --workload ID --treatment SPEC [--treatment SPEC]... [--last-n N] " +
     "[--sample-model MODEL] [--track PATH]... [read options] [--json]",
-  "metergraph experiments start (same as estimate) [--agent-token-file PATH] [--json]",
+  "metergraph experiments start (same as estimate) [--request-key UUID] [--consent-id UUID] [--agent-token-file PATH] [--json]",
   "metergraph experiments get --id UUID [read options] [--json]",
 ];
 const EXPERIMENTS_OPTIONS = [
@@ -294,6 +294,8 @@ const EXPERIMENTS_OPTIONS = [
   { name: "--last-n", value: "N", summary: "Replay the last N replayable calls, 10 to 40. Default 20." },
   { name: "--sample-model", value: "MODEL", summary: "Only production calls made with this exact model, for a single-model control." },
   { name: "--track", value: "PATH", summary: "Up to 10 times. A JSON path such as $.priority whose values the dashboard compares." },
+  { name: "--request-key", value: "UUID", summary: "Prepare or resume the same provider-consent operation. Keep this key and the request unchanged across approvals." },
+  { name: "--consent-id", value: "UUID", summary: "Resume with the receipt the workspace owner approved. Requires the original --request-key." },
   { name: "--id", value: "UUID", summary: "The experiment to read (get)." },
   { name: "--limit", value: "N", summary: "Experiments to list, 1 to 50. Default 20." },
   ...READ_BASE_OPTIONS.filter((option) => option.name !== "--agent-token-file"),
