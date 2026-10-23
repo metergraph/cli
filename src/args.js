@@ -86,7 +86,7 @@ const OPTIONS = {
   ]),
   verify: new Set([...READ_BASE, "--trace-id", "--request-id", "--since", "--until", "--source", "--days", "--poll-ms", "--max-attempts"]),
   experiments: new Set([
-    ...READ_BASE, ...READ_KEY, "--workload", "--limit", "--treatment", "--last-n", "--sample-model", "--track", "--id",
+    ...READ_BASE, ...READ_KEY, "--workload", "--limit", "--treatment", "--last-n", "--sample-model", "--track", "--id", "--request-key", "--consent-id",
   ]),
   tools: new Set([...READ_BASE, ...READ_KEY, "--name", "--args", "--args-file"]),
 };
@@ -94,7 +94,7 @@ const OPTIONS = {
 const EXPERIMENT_OPTIONS = {
   list: new Set(["--workload", "--limit"]),
   estimate: new Set(["--workload", "--treatment", "--last-n", "--sample-model", "--track"]),
-  start: new Set(["--workload", "--treatment", "--last-n", "--sample-model", "--track"]),
+  start: new Set(["--workload", "--treatment", "--last-n", "--sample-model", "--track", "--request-key", "--consent-id"]),
   get: new Set(["--id"]),
 };
 // Requests the read commands recognize and refuse, so a script gets an
@@ -542,6 +542,15 @@ function parseExperiments(action, values, json, fail) {
     return fail("invalid_tracked_fields", `Give at most ${EXPERIMENT_MAX_TRACKED_FIELDS} --track JSON paths, each starting with $.`);
   }
   parsed.experiment.request = { workload_id: workload, sample, treatments, tracked_fields: [...new Set(tracked)] };
+  for (const [option, field] of [["--request-key", "request_key"], ["--consent-id", "consent_id"]]) {
+    if (values[option] !== undefined) {
+      if (!UUID.test(values[option])) return fail("invalid_consent_identifier", `${option} must be a UUID.`);
+      parsed.experiment.request[field] = values[option].toLowerCase();
+    }
+  }
+  if (parsed.experiment.request.consent_id && !parsed.experiment.request.request_key) {
+    return fail("missing_request_key", "--consent-id requires the original --request-key.");
+  }
   return parsed;
 }
 

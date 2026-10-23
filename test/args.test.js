@@ -3,6 +3,19 @@ import { test } from "node:test";
 
 import { parseArgs } from "../src/args.js";
 
+test("provider consent identifiers apply only to starts and preserve the request key", () => {
+  const args = ["experiments", "start", "--workload", "sample", "--treatment", "openai/example-model"];
+  const key = "10000000-0000-4000-8000-000000000001";
+  const consent = "10000000-0000-4000-8000-000000000002";
+  const result = parseArgs([...args, "--request-key", key, "--consent-id", consent]);
+  assert.equal(result.ok, true);
+  assert.equal(result.experiment.request.request_key, key);
+  assert.equal(result.experiment.request.consent_id, consent);
+  assert.equal(parseArgs([...args, "--consent-id", consent]).ok, false);
+  assert.equal(parseArgs([...args, "--request-key", "not-a-key"]).ok, false);
+  assert.equal(parseArgs(["experiments", "list", "--request-key", key]).ok, false);
+});
+
 test("defaults doctor to the hosted origin and the default timeout", () => {
   const parsed = parseArgs(["doctor"]);
   assert.equal(parsed.ok, true);
