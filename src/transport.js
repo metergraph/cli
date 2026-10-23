@@ -74,7 +74,12 @@ export function send(
   const referencePricing = method === "GET" && bearer === null && form === null && json === null &&
     ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
     ["/v1/pricing/lookup", "/v1/pricing/cost", "/v1/pricing/history", "/v1/pricing/market"].includes(pathname);
-  if (url.protocol === "http:" && !publicPricing && !referencePricing) {
+  // These public probes report reachability only; their replies never
+  // authenticate the service or authorize a later credential exchange.
+  const connectionProbe = method === "GET" && bearer === null && form === null && json === null &&
+    !useGlobalAgent && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+    ["/healthz", "/v1/deployment"].includes(pathname);
+  if (url.protocol === "http:" && !publicPricing && !referencePricing && !connectionProbe) {
     return Promise.resolve({ kind: "error", reason: "local_docker_transport_required", status: null, sent: false });
   }
 

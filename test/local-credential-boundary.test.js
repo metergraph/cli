@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import { send } from '../src/transport.js';
 import { runLogin } from '../src/auth-login.js';
 import { runSetup } from '../src/setup.js';
+import { runDoctor } from '../src/doctor.js';
+import { healthyRoutes, startServer } from './helpers.js';
 
 test('unverified local transport sends no bearer, OAuth form, or bootstrap traffic', async () => {
   let requests = 0;
@@ -68,5 +70,36 @@ test('login and setup refuse local consent before files, listeners, and URL anno
         assert.equal(result.reason, 'local_docker_transport_required');
       }
     }
+  }
+});
+
+
+test('loopback HTTP probes remain credential-free and cannot authorize credential traffic', async () => {
+  const server = await startServer(healthyRoutes('local'), { tls: false });
+  try {
+    for (const pathname of ['/healthz', '/v1/deployment']) {
+      const response = await send(server.origin, pathname, { maxBytes: 1024 });
+      assert.equal(response.status, 200);
+    }
+    const probeRequests = server.requests.length;
+    for (const pathname of ['/healthz', '/v1/deployment', '/v1/oauth/token', '/v1/cli/setup/metadata', '/v1/agent/workspace']) {
+      for (const options of [{ bearer: 'synthetic-token' }, { form: { refresh_token: 'synthetic-token' } },
+        { json: { code: 'synthetic-code' } }, { method: 'POST' }]) {
+        const response = await send(server.origin, pathname, { maxBytes: 1024, ...options });
+        assert.equal(response.reason, 'local_docker_transport_required');
+        assert.equal(response.sent, false);
+      }
+    }
+    assert.equal(server.requests.length, probeRequests);
+    const nonLoopback = await send('http://example.test', '/healthz', { maxBytes: 1024 });
+    assert.equal(nonLoopback.sent, false);
+    assert.equal(nonLoopback.reason, 'local_docker_transport_required');
+    const doctor = await runDoctor({ origin: server.origin, timeoutMs: 5000 });
+    assert.equal(doctor.outcome, 'authentication_required');
+    assert.equal(doctor.report.authenticated, false);
+    assert.deepEqual(server.requests.slice(probeRequests).map(r => r.path), ['/healthz', '/v1/deployment', '/v1/agent/capabilities']);
+    assert.ok(server.requests.every(r => r.headers.authorization === undefined && r.headers.cookie === undefined));
+  } finally {
+    await server.close();
   }
 });
