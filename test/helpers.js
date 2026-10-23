@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import http from "node:http";
 import { createServer } from "./fixtures/https-server.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -74,13 +75,14 @@ export function assertNoLeak(assert, ...texts) {
   }
 }
 
-// Starts a loopback HTTP server. routes maps a path to a handler
+// Starts a loopback HTTPS server (HTTP only when explicitly selected).
+// routes maps a path to a handler
 // (request, response) => void. Unknown paths answer 404. Every request path
 // is recorded in server.requests.
-export async function startServer(routes) {
+export async function startServer(routes, { tls = true } = {}) {
   const requests = [];
   const sockets = new Set();
-  const server = createServer((request, response) => {
+  const server = (tls ? createServer : http.createServer)((request, response) => {
     requests.push({ path: request.url, headers: request.headers });
     const handler = routes[request.url];
     if (handler) {
@@ -97,7 +99,7 @@ export async function startServer(routes) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   return {
-    origin: `https://127.0.0.1:${port}`,
+    origin: `${tls ? "https" : "http"}://127.0.0.1:${port}`,
     port,
     requests,
     async close() {

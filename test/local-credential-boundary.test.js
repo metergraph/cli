@@ -26,15 +26,28 @@ test('unverified local transport sends no bearer, OAuth form, or bootstrap traff
         kind: 'error', reason: 'local_docker_transport_required', status: null, sent: false,
       });
     }
+    for (const pathname of ['/v1/pricing/lookup', '/v1/pricing/cost', '/v1/pricing/history', '/v1/pricing/market']) {
+      for (const options of [{ bearer: 'synthetic-token' }, { form: { token: 'synthetic-token' } },
+        { json: { token: 'synthetic-token' } }, { method: 'POST' }]) {
+        const response = await send(origin, pathname, { maxBytes: 1024, ...options });
+        assert.equal(response.reason, 'local_docker_transport_required');
+        assert.equal(response.sent, false);
+      }
+    }
     assert.equal(requests, 0);
+    for (const pathname of ['/v1/pricing/lookup', '/v1/pricing/cost', '/v1/pricing/history', '/v1/pricing/market']) {
+      const response = await send(origin, pathname, { maxBytes: 1024 });
+      assert.equal(response.status, 200, pathname);
+    }
+    assert.equal(requests, 4);
     const publicResponse = await send(origin, '/v1/pricing/models', { maxBytes: 1024, useGlobalAgent: true });
     assert.equal(publicResponse.status, 200);
-    assert.equal(requests, 1);
+    assert.equal(requests, 5);
     const calculation = await send(origin, '/v1/pricing/calculate', {
       maxBytes: 1024, useGlobalAgent: true, method: 'POST', json: { model: 'synthetic' },
     });
     assert.equal(calculation.status, 200);
-    assert.equal(requests, 2);
+    assert.equal(requests, 6);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
