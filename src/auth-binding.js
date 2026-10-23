@@ -46,6 +46,7 @@ export function readBinding(root) {
     return { binding, content };
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "read_failed");
   }
 }
@@ -90,6 +91,7 @@ export function writeBinding(root, binding, previous) {
       }
     }
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "binding_write_failed");
   }
 }
@@ -104,6 +106,7 @@ export function removeBinding(root, previous) {
     });
   } catch (error) {
     if (error instanceof Stop) throw error;
+    if (error.code === "ENOTSUP") throw new Stop("unsupported", "secure_writes_unavailable");
     throw new Stop("filesystem_error", "binding_write_failed");
   }
 }

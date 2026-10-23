@@ -15,8 +15,7 @@ let service = null;
 let rollbackDepth = 0;
 const aliases = new Map(process.platform === "darwin" ? [["/var", "/private/var"], ["/tmp", "/private/tmp"]] : []);
 function failure(code) { const error = new Error(`Secure filesystem operation failed (${code}).`); error.code = code; return error; }
-function start() {
-  if (service !== null) return service;
+function verifiedHelper() {
   const name = `anchored-fs-${process.platform}-${process.arch}`;
   let file;
   try {
@@ -26,6 +25,16 @@ function start() {
     if (manifest.schema !== 1 || typeof manifest.artifacts[name] !== "string" ||
         createHash("sha256").update(bytes).digest("hex") !== manifest.artifacts[name]) throw failure("ENOTSUP");
   } catch { throw failure("ENOTSUP"); }
+  return file;
+}
+// Test and diagnostic capability discovery verifies the same packaged bytes as
+// start(). It never enables a platform merely because its name is recognised.
+export function hasVerifiedHelper() {
+  try { verifiedHelper(); return true; } catch { return false; }
+}
+function start() {
+  if (service !== null) return service;
+  const file = verifiedHelper();
   const child = spawn(file, [], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, env: {} });
   child.on("error", () => { /* synchronous pipe operations report backend loss */ });
   const input = child.stdin?._handle;

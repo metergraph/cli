@@ -3,8 +3,8 @@ import { test, afterEach } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import anchored, { validatePath, withRollback, closeAnchoredFs } from "../src/anchored-fs.js";
-const supported = process.platform === "darwin" && process.arch === "arm64";
+import anchored, { validatePath, withRollback, closeAnchoredFs, hasVerifiedHelper } from "../src/anchored-fs.js";
+const supported = hasVerifiedHelper();
 const roots = [];
 afterEach(() => { closeAnchoredFs(); for (const root of roots.splice(0)) fs.rmSync(root,{recursive:true,force:true}); });
 function fixture() { const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"anchored-fs-test-"))); roots.push(root); return root; }
@@ -65,7 +65,7 @@ test("resolving a pinned root again cannot rebind it through a substituted symli
 test("helper survives deferred terminal signals and exits when owner pipe closes", {skip:!supported, timeout:5000}, async () => {
   const {spawn}=await import("node:child_process");
   const {once}=await import("node:events");
-  const child=spawn(new URL("../native/bin/anchored-fs-darwin-arm64",import.meta.url).pathname,[],{stdio:["pipe","pipe","ignore"]});
+  const child=spawn(new URL(`../native/bin/anchored-fs-${process.platform}-${process.arch}`,import.meta.url).pathname,[],{stdio:["pipe","pipe","ignore"]});
   const frame=Buffer.alloc(11);frame.writeUInt32BE(7);frame[4]=1;frame[5]=1;frame.writeUInt32BE(1,6);frame[10]=47;
   async function query() {
     const answer=new Promise((resolve,reject)=>{

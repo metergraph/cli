@@ -26,6 +26,31 @@ handle-relative implementation and restrictive DACL creation before token bytes
 are written; POSIX operations are not emulated through Windows pathname APIs.
 Node 22, Linux, and Windows execution remain release verification gates.
 
+## Producing the platform bundle
+
+The `Verify native helpers` workflow builds macOS arm64/x64 and Linux arm64/x64
+on their own hosted runners. Each executable runs the source and packed-package
+tests before upload. Separate jobs download the same executable and run both
+suites on Node 22 and 24. The packed-package test runs installation with an empty
+tool search path, proving consumers need no compiler or download tool. Windows
+jobs run platform-independent tests and explicit no-write refusals; they do not
+claim functional Windows installation support.
+
+Each single-target artifact contains only `bin/<allowlisted-name>`,
+`manifest.json`, and `provenance.json`. Provenance names the exact source commit,
+the C source hash, target, and executable hash. Assembly waits for every platform
+and runtime test to pass, verifies an exact four-target allowlist and all hashes,
+and refuses unknown files, links, duplicate JSON keys, missing/duplicate targets,
+or another source revision before writing output. Only the completed
+`native-helper-bundle` artifact is eligible for a release import.
+
+Maintainers import artifacts from the reviewed workflow run and exact commit;
+building alone does not establish platform support. After importing the verified
+executables and manifest, rerun the ordinary CI and packed-package matrix against
+the final release commit. Neither npm installation nor the runtime invokes these
+development scripts. Linux artifacts are built on Ubuntu 22.04; compatibility
+with older libc versions is not claimed.
+
 The helper checks retained ancestry before pathname mutations. A stale ancestry
 fails with `ESTALE`; explicit rollback mode still addresses retained parents.
 Removal of an exclusively created temporary file, lock, or directory checks

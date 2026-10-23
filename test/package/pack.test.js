@@ -10,6 +10,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { healthyRoutes, parseJsonLine, startServer } from "../helpers.js";
+import { TARGETS, binaryFor } from "../../native/targets.mjs";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const sourcePackage = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
@@ -34,9 +35,9 @@ const EXPECTED_FILES = [
   "bin/metergraph.js",
   "native/README.md",
   "native/anchored-fs.c",
-  "native/bin/anchored-fs-darwin-arm64",
   "native/build.mjs",
   "native/manifest.json",
+  "native/targets.mjs",
   "package.json",
   "src/action-help.js",
   "src/agent-key.js",
@@ -170,7 +171,16 @@ after(() => {
 });
 
 test("the tarball contains exactly the allowlisted files", () => {
-  assert.deepEqual(packedFiles, EXPECTED_FILES);
+  const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "native", "manifest.json"), "utf8"));
+  assert.equal(manifest.schema, 1);
+  const artifacts = Object.entries(manifest.artifacts);
+  assert.ok(artifacts.length > 0);
+  for (const [name, digest] of artifacts) {
+    assert.ok(TARGETS.some(target => binaryFor(target) === name), "unrecognised native artifact");
+    const bytes = readFileSync(path.join(PACKAGE_ROOT, "native", "bin", name));
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
+  }
+  assert.deepEqual(packedFiles, [...EXPECTED_FILES, ...artifacts.map(([name]) => `native/bin/${name}`)].sort());
   assert.ok(path.basename(tarball).startsWith("metergraph-cli-"));
 });
 

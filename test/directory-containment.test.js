@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
-import anchoredFs from "../src/anchored-fs.js";
+import anchoredFs, { hasVerifiedHelper } from "../src/anchored-fs.js";
 import { runSkill } from "../src/skill.js";
 import { commitEnv, preflightEnv, rollbackEnv } from "../src/setup-env.js";
 import { bindingFor, readBinding, resolveProject, writeBinding } from "../src/auth-binding.js";
@@ -12,7 +12,7 @@ import { newSetupState, readSetupState, writeSetupState } from "../src/setup-sta
 import { newSlot, openStore, writeCredential } from "../src/auth-store.js";
 import { waiterRecord } from "../src/setup-refusal.js";
 
-const supported = process.platform === "darwin" && process.arch === "arm64";
+const supported = hasVerifiedHelper();
 const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "directory containment ")));
 after(() => fs.rmSync(work, { recursive: true, force: true }));
 let counter = 0;

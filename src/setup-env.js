@@ -62,6 +62,8 @@ const PLANS = new WeakMap();
 const HANDLES = new WeakMap();
 
 export const ENV_MESSAGES = Object.freeze({
+  secure_writes_unavailable:
+    "Secure automatic file writes are unavailable on this platform or the bundled filesystem helper failed verification. Nothing was written.",
   invalid_project: "--project must name an existing directory.",
   env_path_invalid:
     "The env file path is not allowed. Use a project-relative path with forward slashes to a file named .env, .env.<name> or <name>.env.",
@@ -674,6 +676,7 @@ function deferSignals(work) {
 // error, which can hold a path, is never passed on.
 function fixed(error, reason) {
   if (error instanceof Stop) return error;
+  if (error?.code === "ENOTSUP") return new Stop("unsupported", "secure_writes_unavailable");
   if (DENIED.has(error?.code)) {
     return new Stop("filesystem_error", reason === "env_read_failed" ? "env_read_denied" : "env_write_denied");
   }
