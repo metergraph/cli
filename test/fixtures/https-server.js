@@ -1,7 +1,8 @@
-// Synthetic TLS identity for test servers only. Trust is set exclusively in
-// the child test runner, never in the CLI or the operating system CA store.
+// Test-only identity supplied by the lifecycle runner, never production trust.
 import fs from 'node:fs';
 import https from 'node:https';
-const key = fs.readFileSync(new URL('./https-key.pem', import.meta.url));
-const cert = fs.readFileSync(new URL('./https-cert.pem', import.meta.url));
-export const createServer = handler => https.createServer({ key, cert }, handler);
+export function createServer(handler) {
+  const { METERGRAPH_TEST_TLS_KEY: keyPath, METERGRAPH_TEST_TLS_CERT: certPath } = process.env;
+  if (!keyPath || !certPath) throw new Error('Run TLS fixtures with node test/run-tests.js [test/file.test.js].');
+  return https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, handler);
+}

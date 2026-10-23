@@ -9,6 +9,13 @@ node bin/metergraph.js skill install --client claude --runtime local --project /
 node bin/metergraph.js login --runtime local --url http://127.0.0.1:8080 --project /path/to/project
 ```
 
+Tests require development OpenSSL on `PATH` (no additional runtime dependency).
+The runner generates a one-day localhost/127.0.0.1/::1 TLS identity in private OS
+temporary storage, trusts it only in child test processes, and removes its files
+when tests finish or fail. No system trust is changed. Run individual tests with
+`node test/run-tests.js test/auth-oauth.test.js`; direct fixture servers must run
+inside this runner lifecycle. Never commit generated keys or certificates.
+
 The sign in and read command tests run against a synthetic loopback service and a
 test-only browser stand-in loaded with `--import`. They prove the protocol, file
 handling and output rules, not the real service, a real browser, real workspace
@@ -47,7 +54,7 @@ public issue. Releases are covered in [RELEASING.md](RELEASING.md).
 
 ## Public pricing integration
 
-`node --test test/pricing-public.test.js test/pricing.test.js` checks the public
+`node test/run-tests.js test/pricing-public.test.js test/pricing.test.js` checks the public
 GET/POST contract and the preserved local reference protocol using synthetic
 loopback responses. Run `npm run test:package` for the installed CLI.
 
