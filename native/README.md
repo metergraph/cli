@@ -16,15 +16,20 @@ runs a compiler. `node native/build.mjs` is a developer/release-only build.
 
 | Target | Artifact | Verification |
 | --- | --- | --- |
-| macOS arm64 | shipped in `bin/` | local Node 24 tests |
-| macOS x64 | absent | refuses secure filesystem operations |
-| Linux arm64/x64 | absent | refuses secure filesystem operations |
+| macOS arm64/x64 | shipped in `bin/` | source and prebuilt package tests on Node 22/24 |
+| Linux arm64/x64 | shipped in `bin/` | source and prebuilt package tests on Node 22/24, Ubuntu 22.04 |
 | Windows arm64/x64 | absent | refuses secure filesystem operations |
 
 This is not a completed multi-platform release. Windows requires a separate
 handle-relative implementation and restrictive DACL creation before token bytes
 are written; POSIX operations are not emulated through Windows pathname APIs.
-Node 22, Linux, and Windows execution remain release verification gates.
+Windows refusal tests cover Node 22/24; functional Windows installation remains
+unavailable. The final package head must still pass its complete CI matrix.
+
+The shipped POSIX artifacts come from successful workflow run
+[`39881339298`](https://github.com/metergraph/cli/actions/runs/39881339298).
+Their exact reviewed merge revision and C source digest are recorded in
+`provenance.json`; `manifest.json` binds each executable's bytes.
 
 ## Producing the platform bundle
 
