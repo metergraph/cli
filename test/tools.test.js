@@ -22,6 +22,17 @@ const KEY = "mgak_synthetic_metadata_key_3333333333333333";
 const DEBUG_KEY = "mgak_synthetic_debug_key_2222222222222222";
 const SSH = { SSH_CONNECTION: "192.0.2.1 50000 192.0.2.2 22" };
 
+test("tools final envelopes suppress even a credential matching a fixed output field", async () => {
+  const key = "credential_in_metadata_response";
+  await withServer({ agentTokens: [key], toolCall: () => ({ echoed: key }) }, async (server) => {
+    const box = sandbox();
+    const run = await runCli(["--json", "tools", "call", "metergraph_list_classified_workloads", "--project", box.project, "--config-dir", box.config],
+      { env: { ...LOCAL_ENV, ...SSH, METERGRAPH_URL: server.origin, METERGRAPH_AGENT_TOKEN: key } });
+    assert.equal(run.code, 11);
+    assert.ok(!run.stdout.includes(key) && !run.stderr.includes(key));
+  });
+});
+
 async function withServer(behavior, work) {
   const server = await startOAuthServer({ agentTokens: [KEY], debugTokens: [DEBUG_KEY], ...behavior });
   try {

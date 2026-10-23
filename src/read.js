@@ -204,7 +204,7 @@ export async function runRead(options) {
 
     const session = useKey
       ? await keySession({ target, source, env, signal: limit.signal, verifiedProfile, access: "read" })
-      : await sessionFor(binding, store, limit.signal);
+      : await sessionFor(binding, store, limit.signal, root);
     if (!session.ok) {
       const settled = settle(session);
       return end(settled.outcome, settled.reason);
