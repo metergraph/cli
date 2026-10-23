@@ -1,10 +1,12 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.2`.
+`latest` stays on the last stable version, currently `0.2.3`.
 
-## Unreleased
+## 0.2.4 (prepared; not yet published)
 
+- Bundles the skills from metergraph/skills 93edccd, which use `tools call` for the
+  loop and start a classification when none is current.
 - One key for an agent. The read commands and `experiments` accept a coding-agent key
   with the Debug role and the workflow permissions a workspace owner grants (Allow
   evaluation writes, Allow evaluation previews, Allow analysis starts) as well as a
@@ -34,7 +36,7 @@
   false where the deployment offers no managed evaluations) and, in text, how to grant
   Debug with all three permissions on this deployment.
 
-## 0.2.3 (prepared; not yet published)
+## 0.2.3 (published 2026-10-22)
 
 - At a terminal, `setup` asks for what its flags leave out instead of failing one flag
   at a time: where Metergraph runs (offering a customer-local bundle it finds on
