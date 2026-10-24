@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArgs } from "../src/args.js";
 import { pricingPayload, validateModels, validatePublicResult } from "../src/pricing.js";
+import { pricingText } from "../src/pricing-output.js";
 import { parseJsonLine, runCli, startServer } from "./helpers.js";
 
 const AT = "2026-10-20",
@@ -67,6 +68,10 @@ function cost(status = "priced") {
   const d = result();
   Object.assign(d.results[0], {
     status,
+    contract_version: 2,
+    assumptions: [],
+    fees: [],
+    uncaptured_fees: false,
     cost: "0.00416000",
     components: {
       input: "0.00200000",
@@ -74,6 +79,7 @@ function cost(status = "priced") {
       cache_read: "0.00016000",
       cache_write: "0.00000000",
       request: "0.00000000",
+      search: "0.00000000",
     },
   });
   return d;
@@ -169,6 +175,7 @@ test("calculate and cost alias post provider-specific usage, cache and batch con
         assert.equal(d.result.cost, "0.00416000");
         assert.equal(typeof d.result.cost, "string");
         assert.deepEqual(payload, {
+          contract_version: 2,
           format: "anthropic.messages",
           trace: {
             model: "example/model",
@@ -283,7 +290,7 @@ test("200 unpriced results remain unpriced, including missing channel and null c
       model_id: null,
       currency: null,
       missing_dimensions: ["channel"],
-      ...(action === "calculate" ? { cost: null, components: null } : {}),
+      ...(action === "calculate" ? { contract_version: 2, assumptions: [], fees: [], uncaptured_fees: false, cost: null, components: null } : {}),
     });
     await api({ [`/v1/pricing/${action}`]: respond(d) }, async (s) => {
       const got = await runCli(args(action, s.origin));
@@ -459,5 +466,214 @@ test("market concurrency is bounded and throttling never returns a partial board
     assert.equal(got.code, 16);
     assert.equal(parseJsonLine(got.stdout).data, null);
     assert.ok(count <= 3); assert.ok(maxActive <= 3);
+  });
+});
+
+function withSearch() {
+  const d = cost();
+  Object.assign(d.results[0], {
+    cost: "0.05416000",
+    components: { ...d.results[0].components, search: "0.05000000" },
+    fees: [{ operation: "web_search", tool: "web_search", channel: "example-api", unit: "completed_search", quantity: 5,
+      rate_per_1k: "10", currency: "USD", cost: "0.05000000", price_id: "search-price", source_url: "https://example.com/search-pricing",
+      effective_from: "2026-01-01", effective_to: null, region: "global", catalog_version: "2026-10-20", catalog_hash: "synthetic-hash" }],
+  });
+  return d;
+}
+
+test("v2 search fees reconcile exactly and preserve effective provenance", () => {
+  const q = { at: AT, channel: "example-api", input_tokens: 1000, output_tokens: 200, contract_version: 2, web_search_requests: 5 };
+  assert.equal(validatePublicResult(withSearch(), "calculate", q), true);
+  for (const mutate of [
+    d => d.results[0].fees[0].quantity = 1.5,
+    d => d.results[0].fees[0].quantity = -1,
+    d => d.results[0].fees[0].rate_per_1k = "11",
+    d => d.results[0].fees[0].cost = "0.04",
+    d => d.results[0].fees[0].source_url = "javascript:alert(1)",
+    d => d.results[0].fees[0].channel = "wrong-api",
+    d => d.results[0].fees[0].effective_to = "2026-01-02",
+    d => d.results[0].fees[0].effective_from = "2027-01-01",
+    d => d.results[0].uncaptured_fees = true,
+    d => d.results[0].fees = [],
+    d => delete d.results[0].contract_version,
+  ]) {
+    const d = withSearch(); mutate(d);
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+});
+
+test("search counts and legacy mode remain explicit with no silent downgrade", async () => {
+  const parsed = parseArgs(["pricing", "calculate", "--model", "example/model", "--provider", "anthropic", "--web-search-requests", "0"]);
+  assert.equal(parsed.ok, true);
+  assert.equal(pricingPayload(parsed).contract_version, 2);
+  assert.equal(pricingPayload(parsed).trace.usage.server_tool_use.web_search_requests, 0);
+  for (const value of ["-1", "1.5", "1e3", "true", "1000000000000"])
+    assert.equal(parseArgs(["pricing", "cost", "--model", "example/model", "--provider", "anthropic", "--web-search-requests", value]).ok, false);
+  assert.equal(parseArgs(["pricing", "cost", "--model", "example/model", "--provider", "openai", "--web-search-requests", "1"]).ok, false);
+  const old = cost();
+  delete old.results[0].contract_version;
+  delete old.results[0].assumptions;
+  delete old.results[0].components.search;
+  delete old.results[0].fees;
+  delete old.results[0].uncaptured_fees;
+  await api({ "/v1/pricing/calculate": respond(old) }, async s => {
+    const base = [...args("calculate", s.origin), "--input-tokens", "1000", "--output-tokens", "200", "--json"];
+    const rejected = await runCli(base);
+    assert.equal(rejected.code, 11);
+    const legacy = await runCli([...base, "--contract-version", "1"]);
+    assert.equal(legacy.code, 0);
+    assert.equal(parseJsonLine(legacy.stdout).data.result.cost, "0.00416000");
+  });
+});
+
+
+test("malformed unpriced fees and legacy hidden search fees are refused", () => {
+  const d = cost();
+  Object.assign(d.results[0], { status: "unpriced", cost: null, components: null, price: null, model_id: null, currency: null,
+    fees: [null], missing_dimensions: ["model"] });
+  assert.equal(validatePublicResult(d, "calculate", { at: AT, contract_version: 2 }), false);
+  const old = cost();
+  delete old.results[0].contract_version;
+  delete old.results[0].assumptions;
+  delete old.results[0].components.search;
+  delete old.results[0].fees;
+  delete old.results[0].uncaptured_fees;
+  const q = { at: AT, contract_version: 1, input_tokens: 1000, output_tokens: 200, web_search_requests: 5 };
+  assert.equal(validatePublicResult(old, "calculate", q), false);
+  old.results[0].status = "partial";
+  old.results[0].missing_dimensions = ["search.contract_version"];
+  assert.equal(validatePublicResult(old, "calculate", q), true);
+  old.results[0].fees = [null];
+  assert.equal(validatePublicResult(old, "calculate", q), false);
+});
+
+test("v2 fees must account for the supplied search count exactly once", () => {
+  const q = { at: AT, channel: "example-api", input_tokens: 1000, output_tokens: 200, contract_version: 2, web_search_requests: 5 };
+  const empty = cost();
+  assert.equal(validatePublicResult(empty, "calculate", q), false);
+  for (const quantity of [0, 4, 6]) {
+    const d = withSearch();
+    d.results[0].fees[0].quantity = quantity;
+    d.results[0].fees[0].cost = `0.0${quantity}000000`;
+    d.results[0].components.search = d.results[0].fees[0].cost;
+    d.results[0].cost = `0.0${quantity}416000`;
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+  const duplicate = withSearch();
+  duplicate.results[0].fees.push(structuredClone(duplicate.results[0].fees[0]));
+  duplicate.results[0].components.search = "0.10000000";
+  duplicate.results[0].cost = "0.10416000";
+  assert.equal(validatePublicResult(duplicate, "calculate", q), false);
+  assert.equal(validatePublicResult(withSearch(), "calculate", { ...q, web_search_requests: undefined }), false);
+  assert.equal(validatePublicResult(withSearch(), "calculate", { ...q, web_search_requests: 0 }), false);
+  for (const mutate of [
+    d => d.results[0].fees[0].operation = "web_fetch",
+    d => d.results[0].fees[0].tool = "other",
+    d => d.results[0].fees[0].unit = "unverified_unit",
+  ]) {
+    const d = withSearch(); mutate(d);
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+});
+
+test("missing search fees need a specific partial reason, while known zero remains valid", () => {
+  const q = { at: AT, input_tokens: 1000, output_tokens: 200, contract_version: 2, web_search_requests: 5 };
+  const d = cost("partial");
+  d.results[0].uncaptured_fees = true;
+  for (const missing of [[], ["input_tokens"], ["fees.coverage"]]) {
+    d.results[0].missing_dimensions = missing;
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+  d.results[0].missing_dimensions = ["search.rate"];
+  assert.equal(validatePublicResult(d, "calculate", q), true);
+  d.results[0].uncaptured_fees = false;
+  assert.equal(validatePublicResult(d, "calculate", q), false);
+  assert.equal(validatePublicResult(cost(), "calculate", { ...q, web_search_requests: 0 }), true);
+  const zeroFee = withSearch();
+  Object.assign(zeroFee.results[0], { cost: "0.00416000", components: { ...zeroFee.results[0].components, search: "0" } });
+  Object.assign(zeroFee.results[0].fees[0], { quantity: 0, cost: "0" });
+  assert.equal(validatePublicResult(zeroFee, "calculate", { ...q, web_search_requests: 0 }), true);
+  assert.equal(validatePublicResult(zeroFee, "calculate", { ...q, web_search_requests: undefined }), true);
+  const unpriced = cost();
+  Object.assign(unpriced.results[0], { status: "unpriced", model_id: null, price: null, currency: null, cost: null, components: null,
+    uncaptured_fees: true, missing_dimensions: ["model", "search.channel"] });
+  assert.equal(validatePublicResult(unpriced, "calculate", q), true);
+  unpriced.results[0].missing_dimensions = ["model"];
+  assert.equal(validatePublicResult(unpriced, "calculate", q), false);
+});
+
+test("lookup never accepts unvalidated fee fields in JSON or human output", async () => {
+  const d = result();
+  d.results[0].fees = [null];
+  assert.equal(validatePublicResult(d, "lookup", { at: AT }), false);
+  await api({ "/v1/pricing/lookup": respond(d) }, async s => {
+    for (const extra of [[], ["--json"]]) {
+      const got = await runCli([...args("lookup", s.origin), ...extra]);
+      assert.equal(got.code, 11);
+      assert.equal(got.stderr, "");
+      if (extra.length) assert.equal(parseJsonLine(got.stdout).error.reason, "pricing_contract_mismatch");
+      else assert.match(got.stdout, /pricing_contract_mismatch/);
+    }
+  });
+});
+
+test("the flag-based CLI refuses search-content assumptions it did not send", async () => {
+  const q = { at: AT, input_tokens: 1000, output_tokens: 200, contract_version: 2 };
+  for (const assumptions of [undefined, null, "search_content_tokens_included", [null], ["unknown"],
+    ["search_content_tokens_included"], ["search_content_tokens_excluded_fixed_block"],
+    ["search_content_tokens_included", "search_content_tokens_included"],
+    ["search_content_tokens_included", "search_content_tokens_excluded_fixed_block"]]) {
+    const d = cost(); d.results[0].assumptions = assumptions;
+    assert.equal(validatePublicResult(d, "calculate", q), false);
+  }
+  for (const search of [false, true]) {
+    const d = search ? withSearch() : cost();
+    d.results[0].assumptions = ["search_content_tokens_excluded_fixed_block"];
+    await api({ "/v1/pricing/calculate": respond(d) }, async s => {
+      const extra = search ? ["--trace-format", "anthropic.messages", "--web-search-requests", "5"] : [];
+      const got = await runCli([...args("calculate", s.origin), "--input-tokens", "1000", "--output-tokens", "200", ...extra, "--json"]);
+      assert.equal(got.code, 11);
+      assert.equal(parseJsonLine(got.stdout).error.reason, "pricing_contract_mismatch");
+    });
+  }
+  const lookup = result(); lookup.results[0].assumptions = [null];
+  assert.equal(validatePublicResult(lookup, "lookup", { at: AT }), false);
+});
+
+test("native assertion labels explain the conditional scenario in plain English", () => {
+  // Exercise rendering directly. The flag-based network client rejects these
+  // assertions because it cannot construct them in a request.
+  const result = cost().results[0];
+  const envelope = { ok: true, data: { api: "public", action: "calculate", request: { at: AT }, result } };
+  const style = { bold: value => value };
+  result.assumptions = ["search_content_tokens_included"];
+  assert.match(pricingText(envelope, "table", style), /Supplied input already contains billable search content \(caller-supplied; not independently verified\)/);
+  result.assumptions = ["search_content_tokens_excluded_fixed_block"];
+  const output = pricingText(envelope, "table", style);
+  assert.match(output, /Excluded mini search-content blocks are priced as 8,000 uncached input tokens per search/);
+  assert.match(output, /caller-supplied scenario; cache eligibility not independently verified/);
+});
+
+
+test("specific cache and response coverage gaps preserve valid partial subtotals", async () => {
+  const q = { at: AT, input_tokens: 1000, output_tokens: 200, contract_version: 2 };
+  for (const dimension of ["cache_read_tokens", "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
+    "cache_write_30m_tokens", "cache_write_12h_tokens",
+    "cache_read.batch_rate", "cache_write.batch_rate", "response.status", "token_context_tier"]) {
+    const d = cost("partial");
+    d.results[0].uncaptured_fees = true;
+    d.results[0].missing_dimensions = [dimension];
+    assert.equal(validatePublicResult(d, "calculate", q), true);
+    assert.equal(validatePublicResult(d, "calculate", { ...q, web_search_requests: 5 }), false);
+  }
+  const d = cost("partial");
+  Object.assign(d.results[0], { uncaptured_fees: true, missing_dimensions: ["cache_read.batch_rate"], cost: "0.00000000",
+    components: Object.fromEntries(Object.keys(d.results[0].components).map(key => [key, "0.00000000"])) });
+  await api({ "/v1/pricing/calculate": respond(d) }, async s => {
+    const got = await runCli([...args("calculate", s.origin), "--input-tokens", "1000", "--output-tokens", "0", "--cache-read-tokens", "1000", "--batch", "--json"]);
+    assert.equal(got.code, 0);
+    const actual = parseJsonLine(got.stdout).data.result;
+    assert.equal(actual.status, "partial");
+    assert.deepEqual(actual.missing_dimensions, ["cache_read.batch_rate"]);
   });
 });

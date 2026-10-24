@@ -1,5 +1,9 @@
 // All terminal text arrives through the bounded pricing validator. HTML escapes
 // every dynamic label; no scripts, remote fonts, analytics or external assets.
+const ASSUMPTION_LABELS = {
+  search_content_tokens_included: "Supplied input already contains billable search content (caller-supplied; not independently verified)",
+  search_content_tokens_excluded_fixed_block: "Excluded mini search-content blocks are priced as 8,000 uncached input tokens per search (caller-supplied scenario; cache eligibility not independently verified)",
+};
 const money = (v) => (v === null ? "unknown" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 8 }));
 const escape = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -28,6 +32,9 @@ function spark(points) {
     .join("");
 }
 function provenance(d) {
+  if (d.api === "public" && ["calculate", "cost"].includes(d.action) && d.result?.fees?.length)
+    return `Search fee catalog: ${[...new Set(d.result.fees.map(f => `${f.catalog_version} (${f.catalog_hash})`))].join(", ")}\nCatalog list rates, not your invoice.\n`;
+
   if (d.api === "public")
     return d.catalog
       ? `Catalog ${d.catalog.version} · verified ${d.catalog.pricing_verified_at} · discovery as of ${d.as_of}\n${d.action === "market" ? "Rates were obtained through separate lookups; public history is unavailable." : "Discovery lists supported dimensions, not numeric rates. Use pricing lookup."}\n`
@@ -116,6 +123,8 @@ export function pricingText(e, format, style) {
       lines.push(
         `Cost: ${r.cost ?? "unknown"} ${r.currency ?? ""}${r.status === "partial" ? " (known subtotal)" : ""}`,
         ...(r.components ? Object.entries(r.components).map(([k, v]) => `  ${k}: ${v}`) : []),
+        ...(r.fees ? r.fees.map(f => `  Fee ${f.operation}: ${f.quantity} ${f.unit} at ${f.rate_per_1k}/1000 = ${f.cost} ${f.currency}; ${f.source_url}`) : []),
+        ...(d.api === "public" && r.contract_version === 2 ? [`Assumptions: ${r.assumptions.length ? r.assumptions.map((assumption) => ASSUMPTION_LABELS[assumption]).join("; ") : "none"}`] : []),
         `Reasons: ${r.reasons?.join(", ") || (d.api === "public" ? "not reported" : "none")}`,
       );
   }
