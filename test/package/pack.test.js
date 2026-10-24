@@ -90,6 +90,7 @@ const EXPECTED_FILES = [
   "src/trace-contract.js",
   "src/trace-open.js",
   "src/transport.js",
+  "src/update-notice.js",
   "src/usage-aggregates.js",
   "src/verify-output.js",
   "src/verify.js",
