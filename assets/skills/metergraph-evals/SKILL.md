@@ -1,6 +1,6 @@
 ---
 name: metergraph-evals
-description: Define or refine the quality bar for a Metergraph workload before or after a model-swap analysis - draft deterministic checks and a graded rubric from good production traces and the person's codebase, test them with the evaluation preview, then save and bind them when the key allows it, or hand a ready-to-enter rubric to the app when it does not. Use for "what should count as a good answer", "write an eval", "tighten the checks", or stage 3 of the metergraph-model-swap loop.
+description: Define or refine the quality bar for a Metergraph workload before or after a model-swap analysis - draft deterministic checks and a graded rubric from good production traces and the person's codebase, test them with the evaluation preview, then save and bind them when the key allows it, or hand a ready-to-enter rubric to the app when it does not. Use for "what should count as a good answer", "write an eval", "tighten the checks", or stage 3 of the metergraph-model-swap workflow.
 ---
 
 # Define or refine the eval
@@ -64,15 +64,18 @@ as `metergraph tools call <tool> --args '<json object>' --json` and read
 only when this skill's approval rule for that exact call is met. Exit code 18
 with reason `confirmation_required` means `--yes` was missing; ask the person.
 
-Name missing access by the job it does. **Read access** is the Metadata role
-(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
-**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
-previews** (`agent:eval-preview`) and **Allow analysis starts**
-(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
-`metergraph status --json` say which this key has (`available`, and the
-scopes still `missing`); over MCP, the capabilities' `available` flags do.
-Only a workspace owner grants loop access; **Loop access** in
-`metergraph-model-swap` says how on each deployment.
+Name missing access by its role and permissions. The **Metadata** role
+(`agent:metadata`) reads usage, workloads, readiness and reports. Reading and
+testing evals, saving them and starting runs need the **Debug** role
+(`agent:read`) with **Allow evaluation writes** (`agent:eval-write`), **Allow
+evaluation previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.access` in `metergraph status --json`
+gives the `role` and one boolean per permission (`allow_evaluation_writes`,
+`allow_evaluation_previews`, `allow_analysis_starts`); an older CLI without
+`data.access` reports only `scopes`. Over MCP, the capabilities' `available`
+flags say what this key can do. Only a workspace owner grants the permissions;
+**Granting Debug and the permissions** in `metergraph-model-swap` says how on
+each deployment.
 
 ## 1. Find out what you can do
 
@@ -87,11 +90,12 @@ only where the deployment has managed evaluations.
 | Attach to the workload | `metergraph_preview_evaluation_assignment` then `metergraph_apply_evaluation_assignment` (pass the preview's `scope_hash` as `expected_scope_hash`); `metergraph_retire_evaluation_assignment` | `agent:eval-write` |
 | Reference answers | `metergraph_preview_reference_binding` then `metergraph_bind_reference_cases` | `agent:eval-write` |
 
-None of these calls a model provider or starts a run. Each needs part of loop
-access: the Debug role to read, plus the evaluation permissions to preview and
-write. If they are not listed, say once which part of loop access is missing
-(**Loop access** in `metergraph-model-swap` says how each deployment grants
-it), keep going with the draft, and finish with the app handoff in step 5.
+None of these calls a model provider or starts a run. Each needs the Debug
+role to read, plus Allow evaluation previews to preview and Allow evaluation
+writes to write. If they are not listed, say once which role or permission is
+missing (**Granting Debug and the permissions** in `metergraph-model-swap` says
+how each deployment grants them), keep going with the draft, and finish with
+the app handoff in step 5.
 
 ## 2. Start from what exists
 
@@ -138,7 +142,7 @@ good and bad cases. A check that fails good cases or passes bad ones is wrong;
 fix the check, not the model. Report the per-check pass counts in a short
 table. Then `metergraph_validate_evaluation_draft`, and, after the person
 agrees, `metergraph_save_evaluation_draft` and the assignment pair. Keep the
-returned revision and assignment IDs in the loop record. From the CLI, a tool
+returned revision and assignment IDs in the model-swap record. From the CLI, a tool
 that `tools list` marks as writing takes `--yes` only once that agreement is
 given, for example
 `metergraph tools call metergraph_save_evaluation_draft --args '<draft>' --yes --json`.

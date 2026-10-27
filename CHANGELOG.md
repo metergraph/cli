@@ -5,8 +5,9 @@
 
 ## 0.2.4 (prepared; not yet published)
 
-- Bundles the skills from metergraph/skills 93edccd, which use `tools call` for the
-  loop and start a classification when none is current.
+- Bundles the skills from metergraph/skills e376bbd, which use `tools call` for the
+  model-swap workflow, start a classification when none is current, and offer
+  `login --role debug` with the `--allow-*` flags when the workflow needs more access.
 - One key for an agent. The read commands and `experiments` accept a coding-agent key
   with the Debug role and the workflow permissions a workspace owner grants (Allow
   evaluation writes, Allow evaluation previews, Allow analysis starts) as well as a

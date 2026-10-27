@@ -7,7 +7,7 @@ description: Take one classified Metergraph workload to a model-swap recommendat
 
 This skill takes one classified workload to a recommendation: should this
 workload move to a different model, and what would that do to quality and cost.
-It is stage 4 of the `metergraph-model-swap` loop. Choosing the workload,
+It is stage 4 of the `metergraph-model-swap` workflow. Choosing the workload,
 candidates and eval first (`metergraph-workloads`, `metergraph-candidates`,
 `metergraph-evals`) makes the result easier to act on, but is not required.
 It adds no tools, scopes or authority, and works the same through the
@@ -69,15 +69,18 @@ as `metergraph tools call <tool> --args '<json object>' --json` and read
 only when this skill's approval rule for that exact call is met. Exit code 18
 with reason `confirmation_required` means `--yes` was missing; ask the person.
 
-Name missing access by the job it does. **Read access** is the Metadata role
-(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
-**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
-previews** (`agent:eval-preview`) and **Allow analysis starts**
-(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
-`metergraph status --json` say which this key has (`available`, and the
-scopes still `missing`); over MCP, the capabilities' `available` flags do.
-Only a workspace owner grants loop access; **Loop access** in
-`metergraph-model-swap` says how on each deployment.
+Name missing access by its role and permissions. The **Metadata** role
+(`agent:metadata`) reads usage, workloads, readiness and reports. Reading and
+testing evals, saving them and starting runs need the **Debug** role
+(`agent:read`) with **Allow evaluation writes** (`agent:eval-write`), **Allow
+evaluation previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.access` in `metergraph status --json`
+gives the `role` and one boolean per permission (`allow_evaluation_writes`,
+`allow_evaluation_previews`, `allow_analysis_starts`); an older CLI without
+`data.access` reports only `scopes`. Over MCP, the capabilities' `available`
+flags say what this key can do. Only a workspace owner grants the permissions;
+**Granting Debug and the permissions** in `metergraph-model-swap` says how on
+each deployment.
 
 ## 1. Check the tools and access
 
@@ -91,16 +94,16 @@ Only a workspace owner grants loop access; **Loop access** in
    `analysis_start` capability with `available: true`. Do not guess a tool name
    or substitute a dashboard API, replay, generic SQL or an ad hoc shell
    command.
-3. Reading needs read access. Starting needs the Debug role plus **Allow
-   analysis starts** (`agent:read` and `agent:analysis-run`), both part of loop
-   access. The start capability is classed `replay` because the run sends
-   captured content to providers, but it does not need `agent:replay`. Do not
-   request replay, read trace content or report evidence, or replay a trace to
-   reach a recommendation.
+3. Reading needs the Metadata role. Starting needs the Debug role plus
+   **Allow analysis starts** (`agent:read` and `agent:analysis-run`). The
+   start capability is classed `replay` because the run sends captured content
+   to providers, but it does not need `agent:replay`. Do not request replay,
+   read trace content or report evidence, or replay a trace to reach a
+   recommendation.
 
 ## 2. When start access is missing
 
-`metergraph setup` and the default sign-in grant read access only. Starting
+`metergraph setup` and the default sign-in grant the Metadata role only. Starting
 needs only the Debug role and **Allow analysis starts**; the evaluation
 permissions belong to the full model-swap workflow, not to this step. If
 `metergraph_start_analysis` is not listed or `analysis_start` is unavailable,
@@ -108,11 +111,15 @@ keep going with the read steps below, then tell the person once what to grant
 for their deployment (`deployment_profile`):
 
 - **Hosted** (`managed`). When the agent has a shell and `metergraph help
-  login` lists `--access`, run `metergraph login --access loop` with the
-  runtime and approval flags the `metergraph` skill uses for `login`; a
-  workspace owner approves the request on the consent page. Otherwise a
-  workspace owner creates a coding-agent key on the **Keys** page with the
-  **Model-swap loop** access choice. The person saves it in their own editor
+  login` lists `--role`, run `metergraph login --role debug
+  --allow-analysis-starts` (adding `--allow-evaluation-writes
+  --allow-evaluation-previews` only if they also want the agent to write and
+  test evaluations) with the runtime and approval flags the `metergraph` skill
+  uses for `login`; a workspace owner approves the request on the consent page.
+  Otherwise a workspace owner creates a coding-agent key with the Debug role
+  on the **Keys** page, then ticks **Allow analysis starts** for it under
+  Connection access and saves, which rotates the key; only the new token
+  works. The person saves it in their own editor
   as `export METERGRAPH_AGENT_TOKEN=…` in a private file outside the project
   (for example `~/.config/metergraph/agent.env`), runs
   `. ~/.config/metergraph/agent.env` in the shell that starts the agent, and
@@ -129,9 +136,9 @@ for their deployment (`deployment_profile`):
   command or client is a supported-release blocker; never use the local
   browser Keys page or host HTTP as fallback. A consent-unavailable start is
   not a missing scope and must not trigger key escalation.
-- **Customer-owned AWS** (`byoc-core`) **or the open-source server.** Loop
-  access is not offered there: there are no managed evaluations and no trace
-  content. Say so once and stop before the start step.
+- **Customer-owned AWS** (`byoc-core`) **or the open-source server.** The
+  workflow permissions are not offered there: there are no managed evaluations
+  and no trace content. Say so once and stop before the start step.
 
 The same `METERGRAPH_AGENT_TOKEN` serves the CLI and an MCP configuration that
 references it; a client without a shell takes the key in its private connector

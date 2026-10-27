@@ -1,6 +1,6 @@
 ---
 name: metergraph-iterate
-description: Refine and rerun a Metergraph model-swap analysis after the person has inspected the report in the app - turn their findings into a specific change (eval revision, cases, candidates, traffic or route settings), start a new approved run linked to the previous one, and compare the two honestly. Use when someone returns with "the grader is wrong on these cases", "drop that model", "rerun it", "what changed since last run", or stage 6 of the metergraph-model-swap loop.
+description: Refine and rerun a Metergraph model-swap analysis after the person has inspected the report in the app - turn their findings into a specific change (eval revision, cases, candidates, traffic or route settings), start a new approved run linked to the previous one, and compare the two honestly. Use when someone returns with "the grader is wrong on these cases", "drop that model", "rerun it", "what changed since last run", or stage 6 of the metergraph-model-swap workflow.
 ---
 
 # Refine and rerun
@@ -62,19 +62,22 @@ as `metergraph tools call <tool> --args '<json object>' --json` and read
 only when this skill's approval rule for that exact call is met. Exit code 18
 with reason `confirmation_required` means `--yes` was missing; ask the person.
 
-Name missing access by the job it does. **Read access** is the Metadata role
-(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
-**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
-previews** (`agent:eval-preview`) and **Allow analysis starts**
-(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
-`metergraph status --json` say which this key has (`available`, and the
-scopes still `missing`); over MCP, the capabilities' `available` flags do.
-Only a workspace owner grants loop access; **Loop access** in
-`metergraph-model-swap` says how on each deployment.
+Name missing access by its role and permissions. The **Metadata** role
+(`agent:metadata`) reads usage, workloads, readiness and reports. Reading and
+testing evals, saving them and starting runs need the **Debug** role
+(`agent:read`) with **Allow evaluation writes** (`agent:eval-write`), **Allow
+evaluation previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.access` in `metergraph status --json`
+gives the `role` and one boolean per permission (`allow_evaluation_writes`,
+`allow_evaluation_previews`, `allow_analysis_starts`); an older CLI without
+`data.access` reports only `scopes`. Over MCP, the capabilities' `available`
+flags say what this key can do. Only a workspace owner grants the permissions;
+**Granting Debug and the permissions** in `metergraph-model-swap` says how on
+each deployment.
 
-## 1. Recover where the loop is
+## 1. Recover where the model swap is
 
-1. Read the loop record (in the conversation or `.metergraph/model-swap.md`). If
+1. Read the model-swap record (in the conversation or `.metergraph/model-swap.md`). If
    there is none, `metergraph_list_analysis_runs` and `metergraph_get_report`
    on the latest run for this workload, and rebuild it.
 2. Confirm the workload's `selection_reference` still exists with
@@ -111,7 +114,8 @@ save the new revision first, as in `metergraph-evals`), then start. Then call `m
 - `rerun_of_run_id` set to the previous run ID;
 - `reference_binding_id` when reference cases were bound.
 
-Starting needs loop access. If it is missing, say what to grant, as
+Starting needs the Debug role and Allow analysis starts. If either is
+missing, say what to grant, as
 `metergraph-analyze` describes; until it is granted, the person can start the
 rerun from the analysis page in the app. From the CLI, `--yes` stands for the
 new confirmation and nothing earlier:
@@ -136,4 +140,4 @@ samples     <n>                     <n>
 If the eval revision, the sample or the candidate set changed, say that a
 different grade may come from the change, not from the model. Then give the
 decision line from `metergraph-report` with the new report link, and update the
-loop record.
+model-swap record.

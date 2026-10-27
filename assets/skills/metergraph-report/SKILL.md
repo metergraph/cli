@@ -1,6 +1,6 @@
 ---
 name: metergraph-report
-description: Summarize a finished Metergraph analysis in a few lines with the link to its report in the app, say whether the evidence supports a switch, no switch or more testing, and tell the person exactly what to inspect in the app. Use after an analysis completes, when someone asks "what did the analysis find", "should we switch", "give me the report link", or stage 5 of the metergraph-model-swap loop.
+description: Summarize a finished Metergraph analysis in a few lines with the link to its report in the app, say whether the evidence supports a switch, no switch or more testing, and tell the person exactly what to inspect in the app. Use after an analysis completes, when someone asks "what did the analysis find", "should we switch", "give me the report link", or stage 5 of the metergraph-model-swap workflow.
 ---
 
 # Summarize the report and hand off to the app
@@ -42,15 +42,18 @@ as `metergraph tools call <tool> --args '<json object>' --json` and read
 only when this skill's approval rule for that exact call is met. Exit code 18
 with reason `confirmation_required` means `--yes` was missing; ask the person.
 
-Name missing access by the job it does. **Read access** is the Metadata role
-(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
-**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
-previews** (`agent:eval-preview`) and **Allow analysis starts**
-(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
-`metergraph status --json` say which this key has (`available`, and the
-scopes still `missing`); over MCP, the capabilities' `available` flags do.
-Only a workspace owner grants loop access; **Loop access** in
-`metergraph-model-swap` says how on each deployment.
+Name missing access by its role and permissions. The **Metadata** role
+(`agent:metadata`) reads usage, workloads, readiness and reports. Reading and
+testing evals, saving them and starting runs need the **Debug** role
+(`agent:read`) with **Allow evaluation writes** (`agent:eval-write`), **Allow
+evaluation previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.access` in `metergraph status --json`
+gives the `role` and one boolean per permission (`allow_evaluation_writes`,
+`allow_evaluation_previews`, `allow_analysis_starts`); an older CLI without
+`data.access` reports only `scopes`. Over MCP, the capabilities' `available`
+flags say what this key can do. Only a workspace owner grants the permissions;
+**Granting Debug and the permissions** in `metergraph-model-swap` says how on
+each deployment.
 
 ## 1. Read it
 

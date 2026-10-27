@@ -1,9 +1,9 @@
 ---
 name: metergraph-model-swap
-description: Run the Metergraph model-swap loop from a coding agent - choose a workload, choose traces and candidate models, define or refine the eval, start the analysis, summarize the report with its app link, then refine and rerun. Use when someone asks whether a workload could use a cheaper or better model, asks to plan or run a model swap analysis, asks "what should my largest workload run on", or comes back after inspecting a Metergraph report. Works through the metergraph CLI or the Agent Access MCP server; use the metergraph skill first only when neither can read the workspace.
+description: Run a Metergraph model swap from a coding agent - choose a workload, choose traces and candidate models, define or refine the eval, start the analysis, summarize the report with its app link, then refine and rerun. Use when someone asks whether a workload could use a cheaper or better model, asks to plan or run a model swap analysis, asks "what should my largest workload run on", or comes back after inspecting a Metergraph report. Works through the metergraph CLI or the Agent Access MCP server; use the metergraph skill first only when neither can read the workspace.
 ---
 
-# Model-swap loop
+# Model swap
 
 This skill is the map. Each stage has its own skill; load it when you reach the
 stage. The person stays in the coding agent for choosing, defining and
@@ -79,50 +79,59 @@ as `metergraph tools call <tool> --args '<json object>' --json` and read
 only when this skill's approval rule for that exact call is met. Exit code 18
 with reason `confirmation_required` means `--yes` was missing; ask the person.
 
-Name missing access by the job it does. **Read access** is the Metadata role
-(`agent:metadata`). **Loop access** is the Debug role (`agent:read`) plus
-**Allow evaluation writes** (`agent:eval-write`), **Allow evaluation
-previews** (`agent:eval-preview`) and **Allow analysis starts**
-(`agent:analysis-run`). On the CLI, `data.jobs.read` and `data.jobs.loop` in
-`metergraph status --json` say which this key has (`available`, and the
-scopes still `missing`); over MCP, the capabilities' `available` flags do.
-Only a workspace owner grants loop access; **Loop access** in
-`metergraph-model-swap` says how on each deployment.
+Name missing access by its role and permissions. The **Metadata** role
+(`agent:metadata`) reads usage, workloads, readiness and reports. Reading and
+testing evals, saving them and starting runs need the **Debug** role
+(`agent:read`) with **Allow evaluation writes** (`agent:eval-write`), **Allow
+evaluation previews** (`agent:eval-preview`) and **Allow analysis starts**
+(`agent:analysis-run`). On the CLI, `data.access` in `metergraph status --json`
+gives the `role` and one boolean per permission (`allow_evaluation_writes`,
+`allow_evaluation_previews`, `allow_analysis_starts`); an older CLI without
+`data.access` reports only `scopes`. Over MCP, the capabilities' `available`
+flags say what this key can do. Only a workspace owner grants the permissions;
+**Granting Debug and the permissions** in `metergraph-model-swap` says how on
+each deployment.
 
 ## Start every session the same way
 
 1. Run step 0.
-2. Check loop access once, as **Loop access** below describes, and say what is
-   missing before stage 1 rather than when a stage needs it.
+2. Check the role and permissions once, as **Granting Debug and the
+   permissions** below describes, and say what is missing before stage 1
+   rather than when a stage needs it.
 3. Call `metergraph_list_analysis_runs` with a small limit (from the CLI,
    `metergraph tools call metergraph_list_analysis_runs --args '{"limit": 5}' --json`).
    If a run already exists for this workload, the person is probably on stage
    6: read its report first instead of starting over, and give the report link
    (`<origin>/#analysis?report=<analysis_id>`, as in `metergraph-report`).
 4. Plan only with the tools step 0 listed. When a stage needs a tool that is
-   not listed, say what it needs (loop access, or a deployment that offers
-   it), keep the selection you have, and hand that step to the app page named
-   in the stage skill. Never invent a tool, call a dashboard API with an agent
-   key, or drive the app in a browser unless the person asks for that
-   specific change.
+   not listed, say what it needs (the Debug role and a permission, or a
+   deployment that offers it), keep the selection you have, and hand that
+   step to the app page named in the stage skill. Never invent a tool, call a
+   dashboard API with an agent key, or drive the app in a browser unless the
+   person asks for that specific change.
 
-## Loop access
+## Granting Debug and the permissions
 
-Read access covers choosing the workload and candidates, checking readiness
-and reading reports. Reading and testing evals, saving them and starting runs
-need loop access. Check it from `data.jobs.loop` in `metergraph status --json`,
-or over MCP from the `available` flags of `analysis_start` and the evaluation
-capabilities. When it is missing, tell the person once what to grant for their
-deployment (`deployment_profile`), then carry on with the stages read access
-allows:
+The Metadata role covers choosing the workload and candidates, checking
+readiness and reading reports. Reading and testing evals, saving them and
+starting runs need the Debug role with Allow evaluation writes, Allow
+evaluation previews and Allow analysis starts. Check them from `data.access` in
+`metergraph status --json`, or over MCP from the `available` flags of
+`analysis_start` and the evaluation capabilities. When any is missing, tell the
+person once what to grant for their deployment (`deployment_profile`), then
+carry on with the stages the Metadata role allows:
 
 - **Hosted** (`managed`). When the agent has a shell and `metergraph help
-  login` lists `--access`, run `metergraph login --access loop` with the
-  runtime and approval flags the `metergraph` skill uses for `login`; a
-  workspace owner approves the request on the consent page. Otherwise a
-  workspace owner creates a coding-agent key on the **Keys** page with the
-  **Model-swap loop** access choice. The person saves it in their own editor
-  as `export METERGRAPH_AGENT_TOKEN=…` in a private file outside the project
+  login` lists `--role`, run `metergraph login --role debug
+  --allow-evaluation-writes --allow-evaluation-previews --allow-analysis-starts`
+  with the runtime and approval flags the `metergraph` skill uses for `login`;
+  a workspace owner approves the request on the consent page. Otherwise a
+  workspace owner creates a coding-agent key with the Debug role on the
+  **Keys** page, then ticks **Allow evaluation writes**, **Allow evaluation
+  previews** and **Allow analysis starts** for it under Connection access and
+  saves, which rotates the key; only the new token works. The person saves it
+  in their own editor as `export METERGRAPH_AGENT_TOKEN=…` in a private file
+  outside the project
   (for example `~/.config/metergraph/agent.env`), runs
   `. ~/.config/metergraph/agent.env` in the shell that starts the agent, and
   restarts the agent.
@@ -136,9 +145,9 @@ allows:
   command or client is a supported-release blocker; never use the local
   browser Keys page or host HTTP as fallback. A consent-unavailable start is
   not a missing scope and must not trigger key escalation.
-- **Customer-owned AWS** (`byoc-core`) **or the open-source server.** Loop
-  access is not offered there: there are no managed evaluations and no trace
-  content. Say so once and stop the loop.
+- **Customer-owned AWS** (`byoc-core`) **or the open-source server.** The
+  workflow permissions are not offered there: there are no managed evaluations
+  and no trace content. Say so once and stop the model-swap workflow.
 
 The same `METERGRAPH_AGENT_TOKEN` serves the CLI and an MCP configuration that
 references it; a client without a shell takes the key in its private connector
@@ -159,15 +168,16 @@ again.
   from the person, not a list of everything that could be configured.
 - **Spending and data egress need a yes.** Starting an analysis sends copies of
   captured prompts to other model providers and costs money. Stage 4 has the
-  exact confirmation to get. A connected key, loop access, a configured
-  provider key or an earlier yes for a different run is not approval.
+  exact confirmation to get. A connected key, the Debug role and its
+  permissions, a configured provider key or an earlier yes for a different run
+  is not approval.
 - **Settings are the person's.** Replay opt-out, data residency, candidate
   models, cost and latency limits and the size floor are changed in the app.
   Explain the change and give the page; do not make it for them.
 - **Keep answers short.** Lead with the answer or the blocker. Tables only for
   three or more rows. Give confidence once, where it matters.
 
-## Keep a loop record
+## Keep a model-swap record
 
 Treat loop records as sensitive metadata. Keep only the minimum needed in this
 conversation. Do not persist workspace or workload identifiers, origins, private

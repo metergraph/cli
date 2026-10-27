@@ -134,7 +134,7 @@ a command, and never put it in a project file. Ingest setup cannot run over SSH,
 in a cloud workspace or in CI; it runs on the person's machine. The Metadata key
 is separate from the application's ingest key and never replaces it. A CLI
 whose help does not list `tools` refuses Debug and Replay keys rather than
-reducing them; a loop-access key needs a newer metergraph CLI there.
+reducing them; a key with the Debug role needs a newer metergraph CLI there.
 
 ## MCP routes, for clients without a shell
 
@@ -232,13 +232,14 @@ Use https://www.metergraph.dev/docs/ for public product documentation and https:
 More Metergraph skills are at https://github.com/metergraph/skills. When the
 person wants to know whether a workload could use a cheaper or better model, or
 asks to run a model-swap analysis, use `metergraph-model-swap` if it is
-installed; it walks the whole loop and hands each stage to its own skill. The
-loop needs loop access (the Debug role plus Allow evaluation writes, Allow
-evaluation previews and Allow analysis starts), which only a workspace owner
-grants; that skill checks for it before the loop starts and says how to get it
-on each deployment. If it is not installed, offer to install the skills (a separate verified installation from the skills repository, or in
-Claude Code and Claude Desktop the plugin marketplace `metergraph/skills`)
-rather than improvising the analysis steps.
+installed; it walks the whole workflow and hands each stage to its own skill.
+It needs the Debug role plus Allow evaluation writes, Allow evaluation previews
+and Allow analysis starts, which only a workspace owner grants; that skill
+checks for them before it starts and says how to get them on each deployment.
+If it is not installed, offer to install the skills (a separate verified
+installation from the skills repository, or in Claude Code and Claude Desktop
+the plugin marketplace `metergraph/skills`) rather than improvising the
+analysis steps.
 
 ## When already connected: bounded investigation
 
