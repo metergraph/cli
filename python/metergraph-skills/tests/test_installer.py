@@ -18,8 +18,8 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = PACKAGE_ROOT.parent.parent
 NPM_BIN = REPO_ROOT / "bin" / "metergraph.js"
-SHA256 = "0946db53f82739da9ef2c44501b06b2734786be88fc3d30c84854b034462a8b4"
-REVISION = "sha256-0946db53f827"
+SHA256 = "f31c24c4074707df0e34502bd9efbfde4fff5703e6fd367e0f60692f9f5878ce"
+REVISION = "sha256-f31c24c40747"
 PATHS = {
     "codex": ".agents/skills/metergraph/SKILL.md",
     "claude": ".claude/skills/metergraph/SKILL.md",
