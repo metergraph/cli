@@ -379,6 +379,46 @@ export function experimentStarted(body, ctx, request, notices) {
   });
 }
 
+// A managed start prepares or resumes one operation. It is not a claim that
+// an experiment exists, and returned commands are never executed or copied.
+export function managedExperiment(body, ctx, request, notices) {
+  return run(() => {
+    const reason = "experiment_start_invalid";
+    const origin = provenance(body, ctx, reason);
+    contentExcluded(body);
+    const echoed = echoedRequest(body.request, request, notices, reason);
+    if (normalizeUuid(request.request_key) === null || body.request.request_key !== request.request_key) fail(reason);
+    const operation = rowObject(body.managed_operation, reason);
+    const id = normalizeUuid(operation.id);
+    const states = ["preparing", "awaiting_approval", "queued", "running", "completed", "uncertain", "failed"];
+    const terminal = ["completed", "uncertain", "failed"].includes(operation.status);
+    const money = value => {
+      if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,12})?$/.test(value)) return null;
+      const [whole, fraction = ""] = value.split(".");
+      return BigInt(whole) * 1000000000000n + BigInt(fraction.padEnd(12, "0"));
+    };
+    const ceiling = money(operation.operation_ceiling_usd), allocated = money(operation.allocated_usd);
+    if (id === null || operation.kind !== "experiment" || !states.includes(operation.status) ||
+        operation.terminal !== terminal || ceiling === null || allocated === null ||
+        ceiling <= 0n || allocated > ceiling) fail(reason);
+    let approval = null;
+    if (body.approval !== null) {
+      const entry = rowObject(body.approval, reason);
+      const consentId = normalizeUuid(entry.consent_id);
+      if (operation.status !== "awaiting_approval" || consentId === null ||
+          !Number.isSafeInteger(entry.stage) || entry.stage < 0 ||
+          typeof entry.plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(entry.plan_digest) ||
+          entry.consent_url !== `/v1/agent/provider-consent/${consentId}`) fail(reason);
+      // Only the fixed receipt path on the already verified origin survives.
+      approval = { consent_id: consentId, stage: entry.stage, plan_digest: entry.plan_digest,
+        consent_url: new URL(entry.consent_url, ctx.origin).href };
+    } else if (operation.status === "awaiting_approval") fail(reason);
+    return { provenance: origin, request: { ...echoed, request_key: request.request_key },
+      managed_operation: { id, kind: "experiment", status: operation.status, terminal,
+        operation_ceiling_usd: operation.operation_ceiling_usd, allocated_usd: operation.allocated_usd }, approval };
+  });
+}
+
 // GET /v1/agent/experiments/<id>: status while it runs, then the built-in
 // statistics per arm next to the production control over the same cases.
 // They show differences; nothing here judges a treatment.

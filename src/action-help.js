@@ -59,9 +59,9 @@ export function actionHelpData(topic, action, commands) {
     const entry = commands.find(c => c.name === topic);
     const names = { list: ["--workload", "--limit"], get: ["--id"],
       estimate: ["--workload", "--treatment", "--last-n", "--sample-model", "--track"],
-      start: ["--workload", "--treatment", "--last-n", "--sample-model", "--track"] }[action];
+      start: ["--workload", "--treatment", "--last-n", "--sample-model", "--track", "--request-key", "--consent-id"] }[action];
     if (!names) return null;
-    const specific = ["--workload", "--limit", "--id", "--treatment", "--last-n", "--sample-model", "--track"];
+    const specific = ["--workload", "--limit", "--id", "--treatment", "--last-n", "--sample-model", "--track", "--request-key", "--consent-id"];
     const options = entry.options.filter(o => !specific.includes(o.name) || names.includes(o.name)).map(o => {
       if (o.name === "--agent-token-file") return { ...o, summary: action === "start"
         ? "Private (0600) Debug key file with Allow analysis starts. Or set METERGRAPH_AGENT_TOKEN."
@@ -82,7 +82,7 @@ export function actionHelpData(topic, action, commands) {
       usage: `metergraph experiments ${action} ${invocation} [options]`, options,
       examples: [`metergraph experiments ${action} ${{ list: "--limit 10", get: "--id UUID", estimate: "--workload ROUTE --treatment PROVIDER/MODEL", start: "--workload ROUTE --treatment PROVIDER/MODEL --agent-token-file /path/to/private-key" }[action]}`],
       note: action === "start"
-        ? "Replays captured production prompts on the selected providers and incurs provider costs. Requires a Debug key with Allow analysis starts. Estimate first. Each start creates a new experiment; never retry a successful start."
+        ? "Provider execution sends captured prompts and incurs costs. Estimate first. With --request-key, preparation and later calls pause for owner approval of exact data, provider, model and spending limits. Reuse the same key and request to check or resume. Older services cannot accept this consent workflow. Without a request key, never retry a successful legacy start."
         : { list: "Uses Metadata access. Returns experiment summaries.",
           get: "Uses Metadata access. Returns results without prompts or responses.",
           estimate: "Uses Metadata access. Estimates provider cost without starting a replay." }[action] };

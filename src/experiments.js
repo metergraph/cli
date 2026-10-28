@@ -7,6 +7,7 @@ import {
   experimentEstimate,
   experimentRefusal,
   experimentStarted,
+  managedExperiment,
   experimentSummary,
   experimentsList,
 } from "./experiments-contract.js";
@@ -295,6 +296,11 @@ export async function runExperimentStart(options) {
     ctx.authenticated = true;
     ctx.scopes = session.session.scopes;
     const request = options.experiment.request;
+    ctx.requestKey = request.request_key ?? null;
+    if (request.request_key && session.documents.capabilities?.agent?.experiment_start?.provider_consent_contract !==
+        "metergraph.pipeline-managed/v1") {
+      return end("capability_unavailable", "managed_consent_unavailable");
+    }
     // The start has its own deadline: the service samples, prices and
     // launches within the request, and an answer cut short is ambiguous.
     const post = deadline(options.timeoutMs, trap.signal);
@@ -310,7 +316,12 @@ export async function runExperimentStart(options) {
       if (trap.signal.aborted) return end("cancelled", "cancelled");
       return end(started.outcome, started.reason, started.refusal ? { refusal: started.refusal } : null);
     }
-    // Accepted: whatever its answer says from here, an experiment exists.
+    if (request.request_key) {
+      const value = managedExperiment(started.body, ctx, request, notices);
+      if (!value.ok) return end("unconfirmed", "experiment_start_unconfirmed");
+      return end("ok", null, value.value);
+    }
+    // Legacy accepted start: an experiment exists.
     const value = experimentStarted(started.body, ctx, request, notices);
     if (!value.ok) return end("unconfirmed", "experiment_start_unconfirmed");
     if (value.value.experiment.status === "failed") return end("unhealthy", "experiment_launch_failed", value.value);
@@ -353,13 +364,24 @@ function startData(ctx, notices, outcome, report) {
     refusal: outcome === "refused" ? report?.refusal ?? null : null,
     notices: [...notices].sort(),
     next_action: startNextAction(outcome, ctx, report),
+    ...(ctx.requestKey ? { request_key: ctx.requestKey } : {}),
   };
 }
 
 function startNextAction(outcome, ctx, report) {
   const keys = handoffPages(ctx.origin ?? ctx.keysOrigin).keys_url;
+  if (outcome === "ok" && report.managed_operation) {
+    const operation = report.managed_operation;
+    if (report.approval) return { kind: "review_provider_plan", url: report.approval.consent_url,
+      message: "The workspace owner must review the exact data, provider, model and spending limits. After approval, repeat the same request key with this consent ID. Never approve on the owner's behalf." };
+    return { kind: operation.terminal ? "inspect_operation" : "poll_operation", url: null,
+      message: operation.terminal ? "This operation is terminal. Do not resend an uncertain provider call."
+        : "Preparation or execution is pending. Repeat the same request and request key to check progress; do not create another key." };
+  }
   if (outcome === "ok") return pollOrOpen({ ...report.experiment, app_url: report.app_url }, { started: true });
   if (outcome === "unconfirmed") {
+    if (ctx.requestKey) return { kind: "check_same_operation", url: null,
+      message: "The operation may exist. Repeat the identical request with the same request key to check its state. Do not create another key or resend an uncertain provider call." };
     return {
       kind: "check_before_retry",
       message:
