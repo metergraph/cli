@@ -1,9 +1,17 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.3`.
+`latest` stays on the last stable version, currently `0.2.4`.
 
-## 0.2.4 (prepared; not yet published)
+## 0.2.5 (prepared; not yet published)
+
+- Bundles the skills from metergraph/skills 65e2030, which add `metergraph-price-check`.
+  `skills install` now also writes it: a check that needs no Metergraph account, finds the
+  models a repository calls, prices them with the public Pricing API and flags calls that
+  look overpriced for their task. The setup skill is unchanged, so `metergraph-skills` on
+  PyPI needs no release.
+
+## 0.2.4 (published 2026-10-27)
 
 - Bundles the skills from metergraph/skills e376bbd, which use `tools call` for the
   model-swap workflow, start a classification when none is current, and offer
