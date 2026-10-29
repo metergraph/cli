@@ -202,6 +202,15 @@ headlines describe the result without internal outcome names or numeric codes.
 `--json` retains the stable envelope, including `outcome` and `exit_code`.
 Color follows terminal detection and `NO_COLOR`; piped output stays plain.
 
+Terminal help and version output can show a cached update notice. At most once per
+24 hours, a background worker checks npm's public `latest` tag; the command never
+waits for the network. A newly discovered version appears on the next run. Failed
+checks are silent and cached for the same interval. JSON, piped output and CI skip
+both the notice and check. Set `METERGRAPH_NO_UPDATE_CHECK=1` to disable them.
+The cache is `$XDG_CACHE_HOME/metergraph/update.json` (default
+`~/.cache/metergraph/update.json`), or `%LOCALAPPDATA%\Metergraph\Cache\update.json`
+on Windows. The check sends no project data or credentials.
+
 The
 [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) covers every option, what each command reads and
 writes, and full JSON examples.
@@ -265,7 +274,8 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
 ## Security and privacy
 
 - **No usage telemetry.** The CLI collects no analytics about how you use it. It talks
-  only to the Metergraph origin you point it at.
+  to the Metergraph origin you point it at. The optional update check contacts
+  npm's public registry for this package's release tags.
 - **Least access.** Sign in grants only the Metadata scope, `agent:metadata`. The CLI
   never requests Debug or Replay access, never falls back to broader access, and the read
   commands never read retained prompts, responses or other content, whichever credential
@@ -288,7 +298,8 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
   Public pricing lookup/calculation use unauthenticated `POST` with metadata-only
   inputs. Fixed paths, no redirects followed,
   bounded response sizes and fixed timeouts. Mistyped arguments are never echoed, since
-  they may hold a secret. `--help`, `--version` and `skill` make no network requests.
+  they may hold a secret. `skill` makes no network requests. Help and version work offline; interactive
+  output may start the optional background update check described above.
 
 The [CLI reference](https://github.com/metergraph/cli/blob/main/docs/reference.md) states what each command does and does not do.
 Report vulnerabilities privately through

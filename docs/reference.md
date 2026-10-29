@@ -55,8 +55,17 @@ metergraph experiments start --workload ID --treatment SPEC [--treatment SPEC]..
 metergraph experiments get --id UUID [read options] [--json]
 ```
 
-`--help`, `--version` and the `skill` commands work offline and make no network
-requests. `login`, `logout`, `setup`, `verify` and the read commands are not in the published `0.1.0`
+`--help` and `--version` work offline. For terminal output only, they may show a
+cached update notice on stderr and launch a background check of npm's public
+`latest` tag. Checks, including failed attempts, are cached for 24 hours and have
+a 1.5-second network deadline; the foreground command does not wait. First-run
+results appear on the next invocation. No project data or credentials are sent.
+JSON, piped output and CI skip this behavior. Set `METERGRAPH_NO_UPDATE_CHECK=1`
+to disable it entirely. Cache location: `$XDG_CACHE_HOME/metergraph/update.json`
+(default `~/.cache/metergraph/update.json`), or
+`%LOCALAPPDATA%\Metergraph\Cache\update.json` on Windows.
+
+The `skill` commands work offline and make no network requests. `login`, `logout`, `setup`, `verify` and the read commands are not in the published `0.1.0`
 package.
 
 ### Exact trace verification

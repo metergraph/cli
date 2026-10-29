@@ -1,3 +1,4 @@
+import { maybeUpdateNotice } from "./update-notice.js";
 import { runPricing } from "./pricing.js";
 import { pricingText, pricingHtml } from "./pricing-output.js";
 import { READ_COMMANDS, parseArgs } from "./args.js";
@@ -58,6 +59,7 @@ export async function main(argv, { stdout, stderr, stdin = null }) {
     if (json) stdout.write(toJsonLine(result));
     else stderr.write(`Error: ${result.error.message}\n`);
   }
+  if (result.ok) maybeUpdateNotice({ command: result.command, json, stdout, stderr });
   return result.exit_code;
 }
 
