@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "repository": "metergraph/skills",
-  "commit": "65e203035df09544fe29dedba99cd64181b41c2a",
+  "commit": "c8c8f8537852662fada688476ca7434cc343c49a",
   "skills": [
     {
       "name": "metergraph-analyze",
@@ -53,9 +53,9 @@
     },
     {
       "name": "metergraph-price-check",
-      "sha256": "2a10b2c892a125dbfd77c29cede3567ab24831919723bddabd50f6cc9e6d8fde",
-      "size": 11538,
-      "revision": "sha256-2a10b2c892a1"
+      "sha256": "b5995a1a1487204e1a0cd2b85eaf1c282defeaa0d415c3e15ffc04e4ebf999fd",
+      "size": 12212,
+      "revision": "sha256-b5995a1a1487"
     },
     {
       "name": "metergraph-report",

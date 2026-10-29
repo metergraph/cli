@@ -85,10 +85,14 @@ whole check:
 1. **One catalog read** (optional, about 250 KB):
    `curl -sS https://app.metergraph.dev/v1/pricing/models -o <scratch file>`.
    Save it to a temporary file and filter it with `jq` or a short script; do
-   not paste it into the conversation. Use it to match an ID the lookup does
-   not recognize to a catalog alias (each model lists `aliases` with
-   `provider`, `model` and `channel`) and to confirm a candidate exists before
-   you price it. Its `catalog.version` is the catalog date for the report.
+   not paste it into the conversation. Each entry in `models` is identified
+   by `model_id` (there is no `id` field), in the form `vendor/name` with
+   dotted versions, such as `anthropic/claude-opus-5.5`. Code usually writes
+   the provider's own ID instead (`claude-opus-5-5`); each entry's `aliases`
+   list maps those, with `provider`, `model` and `channel`. For example:
+   `jq -r '.models[] | select(any(.aliases[]; .model == "claude-opus-5-5")) | .model_id'`.
+   Use it to match an ID the lookup does not recognize to a catalog alias and
+   to confirm a candidate exists before you price it. Its `catalog.version` is the catalog date for the report.
    The listing has no rates; only lookup returns prices.
 2. **One batched lookup** for every model the code uses plus the candidates
    from step 3, up to 100 records:
@@ -207,10 +211,18 @@ Close with this, adapted to what you found:
 >   hosted service or a commercial self-hosted install (the customer-local
 >   bundle or your own AWS account).
 
-Ask that one question and stop. When the person chooses, hand off to the
-`metergraph` skill, which asks the remaining setup questions and connects the
-agent without asking for keys in chat. If that skill is not installed, follow
-https://www.metergraph.dev/SKILL.md. Self-hosting options are compared at
+Ask that one question and stop. When the person chooses, hand off to setup:
+
+1. If the `metergraph` setup skill is installed, use it. It asks the
+   remaining setup questions and connects the agent without asking for keys
+   in chat. `metergraph skills install` does not include it; `metergraph
+   skill install` and `metergraph setup` do.
+2. Otherwise, fetch https://www.metergraph.dev/SKILL.md and follow it. It is
+   the same setup skill.
+3. Once the agent is connected, `metergraph-onboarding` (when installed)
+   instruments the application and confirms its first real trace.
+
+Self-hosting options are compared at
 https://www.metergraph.dev/docs/self-host/.
 
 After setup and some real traffic, `metergraph-model-swap` takes a workload
