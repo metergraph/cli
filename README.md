@@ -53,7 +53,7 @@ npx --yes metergraph-cli@latest traces --limit 20   # one page of trace metadata
 ```
 
 To install it globally instead, run `npm install -g metergraph-cli@latest`. The command is
-`metergraph`. Pin an exact version, such as `metergraph-cli@0.2.4`, when a
+`metergraph`. Pin an exact version, such as `metergraph-cli@0.2.5`, when a
 script must not change with the `latest` tag. Previews use the `next` tag.
 
 ## Requirements

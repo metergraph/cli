@@ -30,6 +30,7 @@ const EXPECTED_FILES = [
   "assets/skills/metergraph-local-bundle/SKILL.md",
   "assets/skills/metergraph-model-swap/SKILL.md",
   "assets/skills/metergraph-onboarding/SKILL.md",
+  "assets/skills/metergraph-price-check/SKILL.md",
   "assets/skills/metergraph-report/SKILL.md",
   "assets/skills/metergraph-workloads/SKILL.md",
   "bin/metergraph.js",
