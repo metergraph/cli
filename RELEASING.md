@@ -2,8 +2,8 @@
 
 The source of truth is the public repository
 [github.com/metergraph/cli](https://github.com/metergraph/cli), licensed Apache-2.0.
-`0.2.4` is published on the `latest` npm tag; `next` also points to `0.2.4`.
-The next prepared stable version is `0.2.5`; preparation does not publish it.
+`0.2.5` is published on the `latest` npm tag; `next` still points to `0.2.4`.
+The next prepared stable version is `0.2.6`; preparation does not publish it.
 The hosted service supports sign in, Metadata reads and ingest bootstrap.
 Subsequent releases must pass the checks below before publication.
 
