@@ -679,6 +679,8 @@ Public catalog prices. No account, project or token is required.
 models  [--model ID] [--provider ID | --channel ID] [--region ID] [--limit 1..100]
 lookup  --model ID [--provider ID | --channel ID] [--region ID] [--at YYYY-MM-DD]
 calculate (or cost) Same selectors; --input-tokens N --output-tokens N [--batch]
+        --contract-version 1|2 (default 2; use 1 with older servers)
+        --web-search-requests N (Anthropic billable searches, including explicit 0)
         --cache-read-tokens N; --trace-format anthropic.messages|openai.responses|
         openai.chat_completions|otel.gen_ai. Native format inferred for direct
         Anthropic/OpenAI; otherwise otel.gen_ai. Only supplied counts are sent.

@@ -48,6 +48,46 @@ function price(p) {
     RATE_KEYS.every((k) => p[k] === null || decimal(p[k]))
   );
 }
+function feeCoverage(r, q) {
+  const searchMissing = r.missing_dimensions.some((dimension) => dimension.startsWith("search."));
+  const feeMissing = searchMissing || r.missing_dimensions.includes("fees.coverage");
+  const coverageMissing = feeMissing || r.missing_dimensions.some((dimension) => [
+    "cache_read_tokens", "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
+    "cache_write_30m_tokens", "cache_write_12h_tokens",
+    "cache_read.batch_rate", "cache_write.batch_rate", "response.status", "token_context_tier",
+  ].includes(dimension));
+  if (r.fees.length > 1) return false; // This contract has one search operation per record.
+  if (r.uncaptured_fees && (!coverageMissing || !["partial", "unpriced"].includes(r.status))) return false;
+  if (feeMissing && !r.uncaptured_fees) return false;
+  const count = q.web_search_requests;
+  if (count !== undefined && (!Number.isSafeInteger(count) || count < 0 || count > 999999999999)) return false;
+  if (r.fees.length === 0)
+    return count === undefined || count === 0 || (r.uncaptured_fees && searchMissing && ["partial", "unpriced"].includes(r.status));
+  const fee = r.fees[0];
+  return object(fee) && fee.quantity === (count ?? 0);
+}
+function validateFees(r, q) {
+  let total = 0n;
+  for (const fee of r.fees) {
+    if (
+      !object(fee) ||
+      !["channel", "price_id", "region", "catalog_version", "catalog_hash"].every((k) => text(fee[k])) ||
+      fee.operation !== "web_search" || fee.tool !== "web_search" ||
+      !["completed_search", "tool_call"].includes(fee.unit) ||
+      !Number.isSafeInteger(fee.quantity) || fee.quantity < 0 || !decimal(fee.rate_per_1k) || !decimal(fee.cost) ||
+      fee.currency !== r.currency || !source(fee.source_url) || !date(fee.effective_from) ||
+      Date.parse(fee.effective_from) > Date.parse(r.effective_at) ||
+      (fee.effective_to !== null && (!date(fee.effective_to) || Date.parse(fee.effective_to) <= Date.parse(r.effective_at))) ||
+      (q.channel && fee.channel !== q.channel) || fee.channel !== r.price.channel ||
+      (q.region && ![q.region, "global", "*"].includes(fee.region))
+    ) return false;
+    // Match core's half-up rounding to eight decimal places, using integers.
+    const amount = (units(fee.rate_per_1k) * BigInt(fee.quantity) + 50000000000n) / 100000000000n;
+    if (amount * 100000000n !== units(fee.cost)) return false;
+    total += units(fee.cost);
+  }
+  return total === units(r.components.search);
+}
 export function validateModels(d) {
   return (
     object(d) &&
@@ -109,16 +149,29 @@ export function validatePublicResult(d, action, q, now = Date.now()) {
     (r.price.effective_to !== null && Date.parse(r.price.effective_to) <= Date.parse(r.effective_at))
   )
     return false;
+  if (action !== "cost" && action !== "calculate" && ["fees", "assumptions"].some((key) => Object.hasOwn(r, key))) return false;
   if (action === "cost" || action === "calculate") {
-    if (r.status === "unpriced") return r.cost === null && r.components === null;
+    if (q.contract_version === 2 && r.contract_version !== 2) return false;
+    if (q.contract_version === 1 && r.contract_version !== undefined && r.contract_version !== 1) return false;
+    const v2 = r.contract_version === 2;
+    if (r.contract_version !== undefined && ![1, 2].includes(r.contract_version)) return false;
+    if (v2 && (!Array.isArray(r.fees) || r.fees.length > 10000 || typeof r.uncaptured_fees !== "boolean")) return false;
+
+    // This flag-based client sends no search-content accounting assertions.
+    if (v2 && (!Array.isArray(r.assumptions) || r.assumptions.length !== 0)) return false;
+    if (v2 && !feeCoverage(r, q)) return false;
+    if (!v2 && (r.fees !== undefined || r.assumptions !== undefined)) return false;
+    if (!v2 && q.web_search_requests > 0 && (r.status === "priced" || !r.missing_dimensions.includes("search.contract_version"))) return false;
+    if (r.status === "unpriced") return r.cost === null && r.components === null && (!v2 || r.fees.length === 0);
     if (
       !decimal(r.cost) ||
       !object(r.components) ||
-      Object.keys(r.components).sort().join() !== "cache_read,cache_write,input,output,request" ||
+      Object.keys(r.components).sort().join() !== (v2 ? "cache_read,cache_write,input,output,request,search" : "cache_read,cache_write,input,output,request") ||
       !Object.values(r.components).every(decimal) ||
       Object.values(r.components).reduce((n, v) => n + units(v), 0n) !== units(r.cost)
     )
       return false;
+    if (v2 && !validateFees(r, q)) return false;
     if (["input_tokens", "output_tokens"].some((k) => !Object.hasOwn(q, k) && !r.missing_dimensions.includes(k)))
       return false;
   }
@@ -147,6 +200,7 @@ export function pricingPayload(o) {
         ...(q.cache_write_5m_tokens === undefined ? {} : { ephemeral_5m_input_tokens: q.cache_write_5m_tokens }),
         ...(q.cache_write_1h_tokens === undefined ? {} : { ephemeral_1h_input_tokens: q.cache_write_1h_tokens }),
       };
+    if (q.web_search_requests !== undefined) usage.server_tool_use = { web_search_requests: q.web_search_requests };
     trace = { model: q.model, usage };
   } else if (o.traceFormat.startsWith("openai.")) {
     const chat = o.traceFormat === "openai.chat_completions";
@@ -162,7 +216,7 @@ export function pricingPayload(o) {
     put("gen_ai.usage.cache_read.input_tokens", q.cache_read_tokens);
     trace = { attributes: usage };
   }
-  return { format: o.traceFormat, trace, context };
+  return { contract_version: o.contractVersion ?? 2, format: o.traceFormat, trace, context };
 }
 export async function runPricing(o) {
   if (o.api === "reference") return runReferencePricing(o);
@@ -221,7 +275,7 @@ export async function runPricing(o) {
       },
     };
   }
-  if (!validatePublicResult(d, o.action, o.query)) return fail("verification_failed", "pricing_contract_mismatch");
+  if (!validatePublicResult(d, o.action, { ...o.query, ...(o.action === "lookup" ? {} : { contract_version: o.contractVersion }) })) return fail("verification_failed", "pricing_contract_mismatch");
   const r = d.results[0];
   return {
     outcome: "ok",
