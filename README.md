@@ -274,6 +274,14 @@ Exit codes are stable. Changing one is a breaking change. Codes 10 to 18 are not
   the read commands still send only their Metadata requests with it. `experiments start`
   needs Debug access and Allow analysis starts; the service then replays the sampled calls
   on the chosen providers within its own budget. A key with Replay access is refused.
+  For services offering staged provider consent, add `--request-key UUID` to prepare an
+  operation. Keep that UUID and the complete request unchanged when checking progress.
+  The workspace owner reviews the exact input, provider, model and spending limits on
+  the service's receipt page. After approval, repeat the request with `--consent-id UUID`.
+  Later requests derived from provider output can require another approval. The CLI
+  never approves a receipt. It refuses this workflow before posting to an older service
+  that does not advertise it. Preparation is reported as an operation, not a started
+  experiment; an uncertain call must not be resent under a new request key.
 - **Credentials.** The sign in grant is stored per user in `~/.config/metergraph`
   (`AppData\Roaming\Metergraph` on Windows), as owner-only files on Linux and macOS and
   encrypted with DPAPI on Windows. The ingest key goes only into the project's private

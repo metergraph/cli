@@ -36,6 +36,86 @@ const SENT = {
   tracked_fields: ["$.priority"],
 };
 
+const REQUEST_KEY = "10000000-0000-4000-8000-000000000001";
+const CONSENT_ID = "10000000-0000-4000-8000-000000000002";
+const MANAGED_START = ["experiments", "start", ...ESTIMATE.slice(2), "--request-key", REQUEST_KEY];
+const managedCapability = doc => {
+  doc.agent.experiment_start.provider_consent_contract = "metergraph.pipeline-managed/v1";
+  return doc;
+};
+function managedDocument(doc) {
+  delete doc.experiment;
+  delete doc.app_url;
+  doc.request.request_key = REQUEST_KEY;
+  doc.managed_operation = { id: EXPERIMENT_ID, kind: "experiment", status: "awaiting_approval", terminal: false,
+    operation_ceiling_usd: "5.00", allocated_usd: "0.00" };
+  doc.approval = { consent_id: CONSENT_ID, consent_url: `/v1/agent/provider-consent/${CONSENT_ID}`,
+    stage: 0, plan_digest: "a".repeat(64) };
+  doc.follow = { command: "SYNTHETIC_BODY_MARKER", url: "https://evil.example.com" };
+  return doc;
+}
+
+test("managed preparation requires advertised consent before any start POST", () =>
+  withServer({}, async server => {
+    const { result } = await run(server, MANAGED_START, { key: START_KEY });
+    assert.equal(result.error.reason, "managed_consent_unavailable");
+    assert.equal(server.requestsTo("/v1/agent/experiments").length, 0);
+  }));
+
+test("managed start shows a validated owner receipt without claiming an experiment started", () =>
+  withServer({ capabilities: managedCapability, experiments: (doc, kind) => kind === "start" ? managedDocument(doc) : doc }, async server => {
+    const { result } = await run(server, MANAGED_START, { key: START_KEY });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.result.managed_operation.status, "awaiting_approval");
+    assert.equal(result.data.result.experiment, undefined);
+    assert.equal(result.data.result.request.request_key, REQUEST_KEY);
+    assert.equal(result.data.next_action.kind, "review_provider_plan");
+    assert.equal(result.data.next_action.url, `${server.origin}/v1/agent/provider-consent/${CONSENT_ID}`);
+    const { run: output } = await run(server, MANAGED_START, { key: START_KEY, json: false });
+    assert.match(output.stdout, /Experiment operation/);
+    assert.doesNotMatch(output.stdout, /Experiment started/);
+  }));
+
+test("managed response rejects substituted requests, foreign links, caps and terminal mismatches", async () => {
+  for (const mutate of [
+    doc => { doc.request.request_key = CONSENT_ID; },
+    doc => { doc.approval.consent_url = "https://evil.example.com"; },
+    doc => { doc.approval.consent_url += "?token=secret"; },
+    doc => { doc.managed_operation.allocated_usd = "6.00"; },
+    doc => { doc.managed_operation.operation_ceiling_usd = "999999999999.000000000001"; doc.managed_operation.allocated_usd = "999999999999.000000000002"; },
+    doc => { doc.managed_operation.terminal = true; },
+    doc => { doc.content_included = true; },
+    doc => { doc.approval.plan_digest = "\u001b[31m"; },
+  ]) {
+    await withServer({ capabilities: managedCapability, experiments: (doc, kind) => {
+      if (kind === "start") { managedDocument(doc); mutate(doc); }
+      return doc;
+    } }, async server => {
+      const { result } = await run(server, MANAGED_START, { key: START_KEY });
+      assert.equal(result.outcome, "unconfirmed");
+      assert.equal(result.data.result, null);
+    });
+  }
+});
+
+test("managed resume sends the same request key and approved receipt and preserves preparation state", () =>
+  withServer({ capabilities: managedCapability, experiments: (doc, kind) => {
+    if (kind === "start") {
+      managedDocument(doc);
+      doc.managed_operation.status = "queued";
+      doc.approval = null;
+    }
+    return doc;
+  } }, async server => {
+    const { result } = await run(server, [...MANAGED_START, "--consent-id", CONSENT_ID], { key: START_KEY });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.result.managed_operation.status, "queued");
+    assert.equal(result.data.next_action.kind, "poll_operation");
+    const posted = server.requestsTo("/v1/agent/experiments").find(entry => entry.method === "POST");
+    assert.equal(JSON.parse(posted.body).request_key, REQUEST_KEY);
+    assert.equal(JSON.parse(posted.body).consent_id, CONSENT_ID);
+  }));
+
 async function withServer(behavior, work) {
   const server = await startOAuthServer({ agentTokens: [METADATA_KEY], startTokens: [START_KEY], ...behavior });
   try {

@@ -7,6 +7,7 @@ import { PLAIN, fields, headline, paragraph, render, steps, toneFor, workspaceSh
 // message is never printed.
 
 const MESSAGES = {
+  managed_consent_unavailable: "This service does not advertise the required provider-consent contract. Nothing was sent to start an experiment.",
   experiments_unavailable:
     "This deployment does not offer experiments to this credential, for example because the feature is off. " +
     "Nothing was read or started.",
@@ -132,6 +133,14 @@ function resultLines(action, report) {
     return [rows, body];
   }
   if (action === "start") {
+    if (report.managed_operation) {
+      const operation = report.managed_operation;
+      return [[
+        ["Operation", operation.id], ["Status", operation.status], ["Request key", report.request.request_key],
+        ["Spending limit", `$${operation.operation_ceiling_usd}`], ["Reserved", `$${operation.allocated_usd}`],
+        ["Consent ID", report.approval?.consent_id ?? null], ["Owner review", report.approval?.consent_url ?? null],
+      ], ["Preparation and later provider calls can each pause for a new exact-plan approval."]];
+    }
     const { experiment } = report;
     const rows = [
       ["Experiment", experiment.id],
@@ -160,10 +169,10 @@ function resultLines(action, report) {
 
 export function experimentsText(result, message, style = PLAIN, action) {
   const data = result.data;
-  const title = `${TITLES[action]}${result.ok ? "" : action === "start" ? " was not started" : " could not be read"}`;
+  const title = `${data.result?.managed_operation ? "Experiment operation" : TITLES[action]}${result.ok ? "" : action === "start" ? " was not started" : " could not be read"}`;
   const lines = [
     `${headline(style, result.ok ? "info" : toneFor(result.outcome), title, result.outcome)}  ${
-      style.dim(action === "start" ? "Replays captured prompts within the server's budget" : "Metadata only")}`,
+      style.dim(data.result?.managed_operation ? "Exact provider-plan approval" : action === "start" ? "Replays captured prompts within the server's budget" : "Metadata only")}`,
     "",
   ];
   const rows = [["Origin", data.origin], ["Workspace", workspaceShown(data.workspace)]];
