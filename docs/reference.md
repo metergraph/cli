@@ -1239,8 +1239,8 @@ A successful `skill install`:
     "status": "installed",
     "source": {
       "name": "metergraph",
-      "revision": "sha256-f31c24c40747",
-      "sha256": "f31c24c4074707df0e34502bd9efbfde4fff5703e6fd367e0f60692f9f5878ce"
+      "revision": "sha256-96759d4c870d",
+      "sha256": "96759d4c870dd21e32ac057e112f675e7b5fcdee82033ddc3b1fe1ae07e60406"
     },
     "discovery": "pending",
     "authenticated": false,
