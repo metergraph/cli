@@ -61,7 +61,8 @@ dashboard and browser sign-in/consent are unavailable. Do not use a printed lega
 loopback setup URL, administrator password, HTTP MCP endpoint or SDK ingest key
 against a host listener. Startup/demo readiness does not prove client transport
 support. If no released client supports the authenticated Docker channel, stop
-onboarding at that boundary and name it. First-boot demo traces remain synthetic.
+onboarding at that boundary and name it. Startup sends no traces; demo traces,
+when the person loads them, are synthetic.
 
 ## Connect the coding client
 

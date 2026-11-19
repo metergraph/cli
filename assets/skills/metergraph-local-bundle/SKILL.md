@@ -25,13 +25,10 @@ response, a Docker label or an application repository file.
 
 ## Runtime and release compatibility
 
-Check whether SSH, cloud or CI runtime markers are present, printing names only:
-
-```sh
-for name in SSH_CONNECTION SSH_CLIENT SSH_TTY CODESPACES GITPOD_WORKSPACE_ID CLOUD_SHELL CI; do
-  if printenv "$name" >/dev/null 2>&1; then printf '%s is set\n' "$name"; fi
-done
-```
+Ask the person to confirm that this session runs on their own machine,
+not over SSH, in a cloud workspace or in CI. Do not inspect the process
+environment or read environment variables to infer this. If they cannot
+confirm a local session, stop and hand them the instructions.
 
 In a remote/cloud runtime, download, extract and start nothing. Hand the person
 these instructions for their own machine. Do not tunnel or publish localhost,
@@ -101,7 +98,7 @@ cosign verify-blob \
   --certificate metergraph-byoc-release.json.pem \
   --signature metergraph-byoc-release.json.sig \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/PioneerSquareLabs/metergraph-internal/\.github/workflows/byoc-release\.yml@refs/(heads/main|tags/v.+)$' \
+  --certificate-identity-regexp '^https://github\.com/(PioneerSquareLabs|metergraph)/metergraph-internal/\.github/workflows/byoc-release\.yml@refs/(heads/main|tags/v.+)$' \
   metergraph-byoc-release.json
 ```
 
@@ -218,8 +215,9 @@ Docker's supported private credential input and the selected local context.
 Wait for confirmation only; never read Docker's credential file.
 
 Explain that startup verifies the manifest and pinned images, starts the selected
-containers, and on a new database sends synthetic `local-demo` traffic. It does
-not configure a provider. Run only the verified directory's commands, with the
+containers, and sends no traces. Synthetic `local-demo` traffic is opt-in: the
+workspace owner can choose Load demo data on the empty dashboard, or run
+`./bin/demo-ingest`. It does not configure a provider. Run only the verified directory's commands, with the
 operator's selected context, for example:
 
 ```sh
