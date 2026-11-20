@@ -1,9 +1,34 @@
 # Changelog
 
 `metergraph-cli` is published on npm. Preview versions use the `next` dist-tag;
-`latest` stays on the last stable version, currently `0.2.5`.
+`latest` stays on the last stable version, currently `0.2.6`.
 
-## 0.2.6 (prepared; not yet published)
+## 0.2.7 (prepared; not yet published)
+
+- Bundles the skills from metergraph/skills c513ce2, and the same setup skill in the
+  Python `metergraph-skills` package (0.1.6).
+  - `metergraph-local-bundle` accepts a customer-local release signed by the release
+    workflow under either the `PioneerSquareLabs` or the `metergraph` GitHub owner. The
+    issuer, repository, workflow and ref stay pinned; only the owner may differ, matching
+    the identity the release pages publish.
+  - The setup skill no longer reads, parses or loads project env files to find an ingest
+    credential. If setup already configured the application, the agent asks the person
+    to run it in their configured environment; otherwise it hands them the deployment's
+    ingestion setup instructions and asks for confirmation, never the secret.
+  - `metergraph-local-bundle` asks the person to confirm the session runs on their own
+    machine instead of inspecting environment variables.
+  - `metergraph-onboarding` never opens real `.env` files, credential stores or private
+    client settings. It inspects source and sanitized example configuration only, and
+    reports a model supplied privately at runtime as "set at runtime".
+  - `metergraph-price-check` makes its pricing requests with any available HTTP tool
+    instead of prescribing `curl` and `jq`, installs nothing, and stops after the
+    repository inventory if it cannot make HTTP requests. To set up Metergraph without
+    the setup skill installed, it hands the person the public setup guide instead of
+    fetching remote instructions.
+  - `metergraph-onboarding` says startup sends no traces; demo traces are synthetic and
+    loaded only when the person asks.
+
+## 0.2.6 (published 2026-10-29)
 
 - Bundles the skills from metergraph/skills c8c8f85. `metergraph-price-check` now hands off
   to setup when only the workflow skills are installed: it uses the `metergraph` setup skill
